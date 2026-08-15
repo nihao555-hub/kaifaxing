@@ -120,7 +120,7 @@ export const seedCustomers = [
     name: 'Ryan Cooper',
     company: 'Northstar Wholesale',
     title: 'Purchasing Manager',
-    email: '15571870062@163.com',
+    email: 'ryan.cooper@northstarwholesale.example.com',
     country: '美国',
     timezone: 'America/New_York',
     industry: '五金工具批发',

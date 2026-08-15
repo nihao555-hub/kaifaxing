@@ -116,6 +116,10 @@ function isPlaceholderEmail(email) {
   return /@([a-z0-9-]+\.)?example\.com$/i.test(email || '');
 }
 
+function isOwnInbox(email) {
+  return String(email || '').toLowerCase() === String(config.smtp.user || '').toLowerCase();
+}
+
 function scheduleTask(job, task, delayMs) {
   const timer = setTimeout(async () => {
     timers.delete(task.id);
@@ -125,7 +129,10 @@ function scheduleTask(job, task, delayMs) {
     }
     task.status = 'sending';
     try {
-      // 占位邮箱不走真实 SMTP，避免把 163 账号打进垃圾信誉；真实邮箱才真正投递
+      if (isOwnInbox(task.email)) {
+        throw new Error('收件人不能是自己的发件箱，请填写真实客户邮箱');
+      }
+      // 占位邮箱不走真实 SMTP；只有真实客户邮箱才真正投递
       if (!isPlaceholderEmail(task.email)) {
         await sendMail({ to: task.email, subject: task.subject, text: task.body });
       }
@@ -144,8 +151,9 @@ function scheduleTask(job, task, delayMs) {
         subject: task.subject,
         body: task.body,
       });
-      if (customer && customer.status === 'uncontacted') {
-        customer.status = 'following';
+      if (customer) {
+        if (customer.status === 'uncontacted') customer.status = 'following';
+        customer.agentPhase = 'waiting';
         customer.lastActivity = new Date().toISOString().slice(0, 10);
         save();
       }

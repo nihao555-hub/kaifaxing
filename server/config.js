@@ -33,5 +33,17 @@ export const config = {
     // 避开周末（周六=6，周日=0），最佳发送日为周二~周四
     preferredWeekdays: [2, 3, 4],
     allowedWeekdays: [1, 2, 3, 4, 5],
+    // 低于此分自动按 AI 建议重写一次
+    minScore: Number(process.env.MIN_SCORE || 80),
+    // 首封发出后，对方当地工作日满 N 天仍未回复则自动跟进
+    followupDays: Number(process.env.FOLLOWUP_DAYS || 3),
+    maxFollowups: Number(process.env.MAX_FOLLOWUPS || 2),
+  },
+
+  imap: {
+    host: process.env.IMAP_HOST || 'imap.163.com',
+    port: Number(process.env.IMAP_PORT || 993),
+    user: process.env.SMTP_USER || '15571870062@163.com',
+    pass: process.env.SMTP_PASS || 'PB8dPj25kfvGVitE',
   },
 };

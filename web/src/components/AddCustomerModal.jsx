@@ -11,7 +11,7 @@ const TIMEZONES = [
 
 const FIELDS = [
   ['name', '姓名 *', 'Michael Smith'],
-  ['email', '邮箱 *', 'michael@company.com'],
+  ['email', '邮箱 *', 'buyer@their-company.com'],
   ['company', '公司', 'Acme Corporation'],
   ['title', '职位', 'Purchasing Manager'],
   ['country', '国家/地区', '美国'],

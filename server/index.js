@@ -22,6 +22,9 @@ app.get('/api/customers', (req, res) => {
 app.post('/api/customers', (req, res) => {
   const { name, company, title, email, country, timezone, industry, painPoints } = req.body || {};
   if (!name || !email) return res.status(400).json({ error: '姓名和邮箱必填' });
+  if (String(email).toLowerCase() === String(config.smtp.user).toLowerCase()) {
+    return res.status(400).json({ error: '请填写真实客户邮箱，不要用自己的发件箱当收件人' });
+  }
   const customer = {
     id: `c${Date.now()}`,
     name, company: company || '', title: title || '', email,

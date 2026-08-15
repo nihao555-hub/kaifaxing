@@ -1,11 +1,19 @@
 import { config } from './config.js';
-import { generateEmail, evaluateEmail } from './agent.js';
+import { generateEmail, evaluateEmail, generateFollowUp, generateReply } from './agent.js';
 import { createBatchJob, cancelPendingSends, resumeSending } from './scheduler.js';
 import { db, save, logActivity } from './store.js';
+import { safePollInbox } from './inbox.js';
 
 // ============================================================
-// 全自动 Agent：客户进入「未联系」后，自动研究 → 写信 → 评分 → 按时区/频率发送
-// 人工只监控现有界面，必要时 stop()
+// 客户入库后的完整自动流程（人工只监控 / 停止）
+//  1. 客户入库（真实买家邮箱）
+//  2. 研究行业与痛点
+//  3. 起草开发信并五维评分
+//  4. 低于 minScore 则按建议重写一次
+//  5. 按对方时区黄金窗口 + 全球发信频率排期
+//  6. SMTP 发送到真实客户邮箱（占位 example.com 不投递）
+//  7. 等待回复；IMAP 扫到回复 → 标记已回复并自动回信
+//  8. 满 followupDays 仍未回复 → 自动跟进（最多 maxFollowups 封）
 // ============================================================
 
 const state = {
@@ -20,77 +28,179 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function isPending(c) {
+function isOwnInbox(email) {
+  return String(email || '').toLowerCase() === String(config.smtp.user || '').toLowerCase();
+}
+
+function isPendingFirstTouch(c) {
   return (
     c.status === 'uncontacted' &&
-    !['working', 'scheduled', 'paused', 'error'].includes(c.agentPhase)
+    !['working', 'scheduled', 'paused', 'error', 'waiting'].includes(c.agentPhase)
   );
 }
 
-function nextUncontacted() {
-  // 自己的真实邮箱优先，方便尽快验证 SMTP 能否投递
-  return db.customers.find((c) => isPending(c) && c.email === config.smtp.user)
-    || db.customers.find(isPending);
+function lastOutbound(customerId) {
+  return [...(db.threads[customerId] || [])].reverse().find((t) => t.type === 'outbound');
 }
 
-async function processOne(customer) {
-  customer.agentPhase = 'working';
-  save();
-  state.currentId = customer.id;
-  logActivity({
-    customerId: customer.id,
-    action: '开始研究',
-    detail: `正在研究 ${customer.name} / ${customer.company}（${customer.country} · ${customer.timezone}）的痛点并起草开发信`,
+function outboundCount(customerId) {
+  return (db.threads[customerId] || []).filter((t) => t.type === 'outbound').length;
+}
+
+function daysSince(isoLike) {
+  if (!isoLike) return 999;
+  const t = new Date(String(isoLike).replace(' ', 'T'));
+  return (Date.now() - t.getTime()) / 86400000;
+}
+
+function nextFollowup() {
+  return db.customers.find((c) => {
+    if (c.status !== 'following') return false;
+    if (c.agentPhase === 'working' || c.agentPhase === 'scheduled') return false;
+    if (isOwnInbox(c.email)) return false;
+    const n = outboundCount(c.id);
+    if (n < 1 || n > config.sending.maxFollowups) return false;
+    const last = lastOutbound(c.id);
+    return daysSince(last?.time || last?.sentAt) >= config.sending.followupDays;
   });
+}
 
-  const result = await generateEmail(customer);
-  let evaluation = result.evaluation;
-  if (!evaluation) {
-    evaluation = await evaluateEmail({ ...result, customer });
-  }
+function nextReplyJob() {
+  return db.customers.find((c) => c.status === 'replied' && c.pendingReply && c.agentPhase !== 'working');
+}
 
+function saveDraft(customer, draft, evaluation) {
   db.aiPanel[customer.id] = {
     draft: {
-      subject: result.subject,
-      body: result.body,
-      painPointAnalysis: result.painPointAnalysis,
+      subject: draft.subject,
+      body: draft.body,
+      painPointAnalysis: draft.painPointAnalysis,
     },
-    evaluation,
+    evaluation: evaluation || db.aiPanel[customer.id]?.evaluation || null,
   };
   save();
+}
 
+function enqueue(customer, draft, actionLabel) {
+  const job = createBatchJob(
+    [{ customerId: customer.id, subject: draft.subject, body: draft.body }],
+    'smart'
+  );
+  customer.agentPhase = 'scheduled';
+  save();
+  const task = job.items[0];
+  logActivity({
+    customerId: customer.id,
+    action: actionLabel,
+    detail: task
+      ? `${task.scheduleNote}；相邻邮件间隔 ${config.sending.minIntervalSec}-${config.sending.maxIntervalSec} 秒`
+      : '已加入发送队列',
+  });
+}
+
+async function draftFirstEmail(customer) {
+  let result = await generateEmail(customer);
+  let evaluation = result.evaluation || (await evaluateEmail({ ...result, customer }));
+  saveDraft(customer, result, evaluation);
   logActivity({
     customerId: customer.id,
     action: '草稿就绪',
     detail: `主题「${result.subject}」· AI ${evaluation.total} 分（${evaluation.grade}）。${result.painPointAnalysis || ''}`,
   });
 
+  if (evaluation.total < config.sending.minScore) {
+    logActivity({
+      customerId: customer.id,
+      action: '质量不达标，重写',
+      detail: `${evaluation.total} 分低于 ${config.sending.minScore}。按建议重写：${evaluation.suggestion || ''}`,
+    });
+    result = await generateEmail(customer, `上一稿 ${evaluation.total} 分，请按此建议重写：${evaluation.suggestion || ''}`);
+    evaluation = result.evaluation || (await evaluateEmail({ ...result, customer }));
+    saveDraft(customer, result, evaluation);
+    logActivity({
+      customerId: customer.id,
+      action: '重写完成',
+      detail: `新主题「${result.subject}」· AI ${evaluation.total} 分（${evaluation.grade}）`,
+    });
+  }
+  return { result, evaluation };
+}
+
+async function processFirstTouch(customer) {
+  if (isOwnInbox(customer.email)) {
+    customer.agentPhase = 'error';
+    save();
+    logActivity({
+      customerId: customer.id,
+      action: '已跳过',
+      detail: '收件人是自己的发件箱，没有投递意义。请改为真实客户邮箱。',
+    });
+    return;
+  }
+
+  customer.agentPhase = 'working';
+  save();
+  state.currentId = customer.id;
+  logActivity({
+    customerId: customer.id,
+    action: '开始研究',
+    detail: `正在研究 ${customer.name} / ${customer.company}（${customer.country} · ${customer.timezone}）`,
+  });
+
+  const { result } = await draftFirstEmail(customer);
   if (!state.enabled) {
     customer.agentPhase = 'paused';
     save();
     return;
   }
-
-  const isSelfTest = customer.email === config.smtp.user;
-  const job = createBatchJob(
-    [{ customerId: customer.id, subject: result.subject, body: result.body }],
-    isSelfTest ? 'now' : 'smart'
-  );
-  customer.agentPhase = 'scheduled';
-  save();
+  enqueue(customer, result, '已排期');
   state.processed += 1;
+}
 
-  const task = job.items[0];
+async function processFollowup(customer) {
+  customer.agentPhase = 'working';
+  save();
+  state.currentId = customer.id;
+  const prev = lastOutbound(customer.id);
   logActivity({
     customerId: customer.id,
-    action: isSelfTest ? '立即发送' : '已排期',
-    detail: task
-      ? `${task.scheduleNote}；相邻邮件将间隔 ${config.sending.minIntervalSec}-${config.sending.maxIntervalSec} 秒`
-      : '已加入发送队列',
+    action: '准备跟进',
+    detail: `首封已发出 ${Math.floor(daysSince(prev?.time))} 天仍未回复，自动写跟进信`,
   });
+  const draft = await generateFollowUp(customer, prev);
+  saveDraft(customer, draft, db.aiPanel[customer.id]?.evaluation);
+  if (!state.enabled) {
+    customer.agentPhase = 'paused';
+    save();
+    return;
+  }
+  enqueue(customer, draft, '跟进已排期');
+}
+
+async function processInboundReply(customer) {
+  customer.agentPhase = 'working';
+  save();
+  state.currentId = customer.id;
+  const inbound = customer.pendingReply;
+  const draft = await generateReply(customer, inbound, db.threads[customer.id] || []);
+  saveDraft(customer, draft, db.aiPanel[customer.id]?.evaluation);
+  delete customer.pendingReply;
+  save();
+  logActivity({
+    customerId: customer.id,
+    action: '回信草稿就绪',
+    detail: `针对「${inbound.subject}」已起草回复，按对方时区发出`,
+  });
+  if (!state.enabled) {
+    customer.agentPhase = 'paused';
+    save();
+    return;
+  }
+  enqueue(customer, draft, '回信已排期');
 }
 
 async function loop() {
+  let inboxTick = 0;
   while (true) {
     if (!state.enabled) {
       state.busy = false;
@@ -98,16 +208,29 @@ async function loop() {
       await sleep(800);
       continue;
     }
-    const customer = nextUncontacted();
-    if (!customer) {
+
+    inboxTick += 1;
+    if (inboxTick % 20 === 1) {
+      await safePollInbox();
+    }
+
+    const replyJob = nextReplyJob();
+    const follow = !replyJob && nextFollowup();
+    const first = !replyJob && !follow && db.customers.find(isPendingFirstTouch);
+
+    if (!replyJob && !follow && !first) {
       state.busy = false;
       state.currentId = null;
       await sleep(1500);
       continue;
     }
+
     state.busy = true;
+    const customer = replyJob || follow || first;
     try {
-      await processOne(customer);
+      if (replyJob) await processInboundReply(customer);
+      else if (follow) await processFollowup(customer);
+      else await processFirstTouch(customer);
     } catch (err) {
       state.lastError = String(err.message || err);
       customer.agentPhase = 'error';
@@ -121,16 +244,11 @@ async function loop() {
   }
 }
 
-function enqueueDraft(customer, mode = 'smart') {
+function enqueueDraft(customer) {
   const draft = db.aiPanel[customer.id]?.draft;
   if (!draft?.subject || !draft?.body) return false;
-  const isSelfTest = customer.email === config.smtp.user;
-  createBatchJob(
-    [{ customerId: customer.id, subject: draft.subject, body: draft.body }],
-    isSelfTest ? 'now' : mode
-  );
-  customer.agentPhase = 'scheduled';
-  save();
+  if (isOwnInbox(customer.email)) return false;
+  enqueue(customer, draft, '已排期');
   return true;
 }
 
@@ -140,7 +258,11 @@ export function startAgent() {
   for (const c of db.customers) {
     if (c.agentPhase === 'paused') enqueueDraft(c);
   }
-  logActivity({ customerId: null, action: 'Agent 已启动', detail: '将自动处理所有「未联系」客户：研究痛点 → 写信评分 → 按时区与频率发送' });
+  logActivity({
+    customerId: null,
+    action: 'Agent 已启动',
+    detail: '客户入库后自动：研究 → 写信/质检 → 按时区发送 → 等回复/跟进/回信。请填写真实客户邮箱。',
+  });
 }
 
 export function stopAgent() {
@@ -150,29 +272,38 @@ export function stopAgent() {
     if (c.agentPhase === 'scheduled') c.agentPhase = 'paused';
   }
   save();
-  logActivity({ customerId: null, action: 'Agent 已停止', detail: '已停止处理新客户，并取消尚未发出的计划邮件。已发出的不受影响。' });
+  logActivity({
+    customerId: null,
+    action: 'Agent 已停止',
+    detail: '已停止处理新客户，并取消尚未发出的计划邮件。已发出的不受影响。',
+  });
 }
 
 export function getAgentState() {
-  const queue = db.customers.filter(isPending).length;
   const current = db.customers.find((c) => c.id === state.currentId) || null;
   return {
     enabled: state.enabled,
     busy: state.busy,
     processed: state.processed,
-    queue,
+    queue: db.customers.filter(isPendingFirstTouch).length,
     lastError: state.lastError,
     current: current ? { id: current.id, name: current.name, company: current.company } : null,
   };
 }
 
-// 进程重启后：已写好但未发出的草稿重新入队，避免只研究不发送
 function recoverScheduled() {
   for (const c of db.customers) {
     if (c.agentPhase === 'working') c.agentPhase = null;
     const draft = db.aiPanel[c.id]?.draft;
     const sent = (db.threads[c.id] || []).some((t) => t.type === 'outbound');
-    if (c.status === 'uncontacted' && draft?.subject && !sent && c.agentPhase !== 'error' && c.agentPhase !== 'paused') {
+    if (
+      c.status === 'uncontacted' &&
+      draft?.subject &&
+      !sent &&
+      !isOwnInbox(c.email) &&
+      c.agentPhase !== 'error' &&
+      c.agentPhase !== 'paused'
+    ) {
       try {
         enqueueDraft(c);
       } catch (err) {

@@ -194,3 +194,60 @@ export function formatLocal(date, timezone) {
   const p = partsInTimezone(date, timezone);
   return `当地 ${p.dateStr} ${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}`;
 }
+
+const FOLLOWUP_SYSTEM = `你是外贸跟进信专家。上一封开发信没有回复，请写一封更短的跟进信（60-90 词）。
+原则：不道歉、不施压、不重复整封旧信；补一个新的具体利益或样品/规格页；CTA 仍然低门槛。署名 Alice。
+严格 JSON：{"subject":"...","body":"...","painPointAnalysis":"中文说明这次跟进抓什么"}`;
+
+export async function generateFollowUp(customer, previous) {
+  const text = await chat(
+    [
+      { role: 'system', content: FOLLOWUP_SYSTEM },
+      {
+        role: 'user',
+        content: `客户：${customer.name}，${customer.company}，${customer.title}，${customer.industry}
+痛点：${customer.painPoints || '未知'}
+上一封主题：${previous?.subject || ''}
+上一封正文：
+${previous?.body || ''}
+输出 JSON。`,
+      },
+    ],
+    { temperature: 0.7 }
+  );
+  const json = parseJson(text);
+  return {
+    subject: String(json.subject || `Re: ${previous?.subject || ''}`.trim()),
+    body: String(json.body || '').trim(),
+    painPointAnalysis: String(json.painPointAnalysis || '').trim(),
+  };
+}
+
+const REPLY_SYSTEM = `你是外贸销售助理。客户已经回复开发信，请起草一封简短专业的英文回信（80 词内）。
+原则：先回应对方具体问题；不承诺无法兑现的价格/交期；若对方要目录/报价/样品，答应先发一页规格+价格区间；若对方要通话，给出两个时间选项（用对方时区工作日上午）。署名 Alice。
+严格 JSON：{"subject":"...","body":"...","painPointAnalysis":"中文说明回信策略"}`;
+
+export async function generateReply(customer, inbound, history) {
+  const text = await chat(
+    [
+      { role: 'system', content: REPLY_SYSTEM },
+      {
+        role: 'user',
+        content: `客户：${customer.name}，${customer.company}，时区 ${customer.timezone}
+对方来信主题：${inbound.subject}
+对方来信：
+${inbound.body}
+我们最近发出的信：
+${(history || []).filter((t) => t.type === 'outbound').slice(-1).map((t) => t.body).join('\n')}
+输出 JSON。`,
+      },
+    ],
+    { temperature: 0.5 }
+  );
+  const json = parseJson(text);
+  return {
+    subject: String(json.subject || `Re: ${inbound.subject || ''}`).trim(),
+    body: String(json.body || '').trim(),
+    painPointAnalysis: String(json.painPointAnalysis || '').trim(),
+  };
+}
