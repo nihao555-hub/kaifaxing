@@ -40,6 +40,8 @@ export const config = {
     maxFollowups: Number(process.env.MAX_FOLLOWUPS || 2),
   },
 
+  samApiKey: process.env.SAM_API_KEY || '',
+
   imap: {
     host: process.env.IMAP_HOST || 'imap.163.com',
     port: Number(process.env.IMAP_PORT || 993),

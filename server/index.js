@@ -9,7 +9,7 @@ import { createBatchJob, getJob, listJobs } from './scheduler.js';
 import { sentToday, logActivity } from './store.js';
 import { startAgent, stopAgent, getAgentState } from './autopilot.js';
 import { ingestInbound } from './inbox.js';
-import { RFQ_CATALOG, searchRfq, importRfqItems } from './rfq.js';
+import { listSources, searchRfq, importRfqItems } from './rfq.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -63,15 +63,15 @@ app.patch('/api/customers/:id', (req, res) => {
   res.json({ customer });
 });
 
-app.get('/api/rfq/sources', (req, res) => res.json({ sources: RFQ_CATALOG }));
+app.get('/api/rfq/sources', (req, res) => res.json({ sources: listSources() }));
 app.get('/api/rfq/search', async (req, res) => {
   try {
-    const items = await searchRfq({
-      source: req.query.source || 'usaspending',
+    const { items, reports } = await searchRfq({
+      source: req.query.source || 'all',
       keyword: req.query.q || 'power tools',
-      limit: Number(req.query.limit || 15),
+      limit: Number(req.query.limit || 10),
     });
-    res.json({ items });
+    res.json({ items, reports });
   } catch (err) {
     res.status(502).json({ error: `RFQ 数据源请求失败：${err.message}` });
   }
