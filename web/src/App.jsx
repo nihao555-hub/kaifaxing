@@ -11,9 +11,11 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [thread, setThread] = useState([]);
   const [aiPanel, setAiPanel] = useState(null);
+  const [activities, setActivities] = useState([]);
   const [generating, setGenerating] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [agent, setAgent] = useState(null);
 
   const refreshCustomers = useCallback(async () => {
     const { customers: list } = await api.getCustomers();
@@ -29,14 +31,30 @@ export default function App() {
 
   const loadThread = useCallback(async (id) => {
     if (!id) return;
-    const { thread: t, aiPanel: p } = await api.getThread(id);
+    const { thread: t, aiPanel: p, activities: acts } = await api.getThread(id);
     setThread(t);
     setAiPanel(p);
+    setActivities(acts || []);
   }, []);
 
   useEffect(() => {
     loadThread(selectedId);
   }, [selectedId, loadThread]);
+
+  // 人工监控：Agent 工作时自动刷新名单、沟通历史与活动记录
+  useEffect(() => {
+    const tick = async () => {
+      try {
+        const [list, st] = await Promise.all([refreshCustomers(), api.getAgent()]);
+        setAgent(st);
+        if (selectedId) await loadThread(selectedId);
+        if (!selectedId && list?.[0]) setSelectedId(list[0].id);
+      } catch { /* 忽略轮询错误 */ }
+    };
+    tick();
+    const timer = setInterval(tick, 3000);
+    return () => clearInterval(timer);
+  }, [refreshCustomers, loadThread, selectedId]);
 
   const regenerate = async () => {
     if (!selectedId || generating) return;
@@ -66,9 +84,13 @@ export default function App() {
         customer={selected}
         thread={thread}
         aiPanel={aiPanel}
-        generating={generating}
+        activities={activities}
+        agent={agent}
+        generating={generating || (agent?.busy && agent?.current?.id === selectedId)}
         onRegenerate={regenerate}
         onNewOutreach={() => setBatchOpen(true)}
+        onStopAgent={async () => setAgent(await api.stopAgent())}
+        onStartAgent={async () => setAgent(await api.startAgent())}
       />
 
       {batchOpen && (

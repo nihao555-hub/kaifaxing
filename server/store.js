@@ -15,6 +15,7 @@ function load() {
       threads: seedThreads,
       aiPanel: seedAiPanel,
       sentLog: [], // { customerId, sentAt } 用于每日发送上限统计
+      activities: [], // 写入现有「活动记录」Tab，供人工监控
     };
   }
 }
@@ -42,4 +43,17 @@ export function appendThread(customerId, entry) {
 export function sentToday() {
   const today = new Date().toISOString().slice(0, 10);
   return db.sentLog.filter((s) => s.sentAt.startsWith(today)).length;
+}
+
+export function logActivity({ customerId, action, detail }) {
+  if (!db.activities) db.activities = [];
+  db.activities.unshift({
+    id: `a${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    customerId: customerId || null,
+    action,
+    detail,
+    time: new Date().toISOString().slice(0, 16).replace('T', ' '),
+  });
+  db.activities = db.activities.slice(0, 400);
+  save();
 }

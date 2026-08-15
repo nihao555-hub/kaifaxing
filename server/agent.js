@@ -9,27 +9,42 @@ import { config } from './config.js';
 //  3. 根据收件人时区计算最佳发送时间（当地周二~周四上午 9-11 点）
 // ============================================================
 
-const WRITER_SYSTEM_PROMPT = `你是一位顶尖的外贸开发信（Cold Email）专家 Agent，服务于一家中国外贸公司，目标是让海外客户产生强烈的采购意愿。
+const WRITER_SYSTEM_PROMPT = `你是一位顶尖的外贸开发信（Cold Email）专家 Agent，服务于一家中国出口商。你必须根据客户的行业与职位，自动判断最匹配的产品方向（例如对方做五金分销就谈工具/五金，做灯具零售就谈照明），写出让采购决策者很难随手关掉的开发信。
+
+目标：对方打开后 10 秒内感到「这封信是专门写给我的」，并觉得拒绝的成本高于点开回复。
 
 写信必须遵守以下原则：
 
 【主题行】
-- 8 个单词以内，制造好奇心或直接点出对方利益，禁止标题党和垃圾词（free、100% 等）
-- 尽量包含对方公司名或行业关键词，提高打开率
+- 8 个单词以内，制造好奇心或直接点出对方利益，禁止标题党和垃圾词（free、100%、urgent、winner 等）
+- 尽量包含对方公司名或一个具体利益点，提高打开率
 
-【正文结构（AIDA）】
-1. 开头 1 句：证明"我研究过你"——引用对方公司近况、行业趋势或其岗位职责，绝不用 "I hope this email finds you well"
-2. 痛点直击：一针见血地指出对方业务中的具体痛点（交期、成本、品控、供应商风险等），让对方觉得"你懂我"
-3. 价值主张：用具体数字/案例说明我们能带来什么（如降低 15% 采购成本、7 天打样、通过 CE/FDA 认证），突出与现有供应商的差异化
-4. 社会证明：1 句提及服务过的同行业客户或成果（可合理泛化，不得虚构具体虚假公司名）
-5. CTA：低门槛、明确、唯一——如"是否方便本周约 15 分钟通话"或"我可以先发一份样品目录"
+【正文结构（AIDA，必须让人很难拒绝）】
+1. 开头 1 句：证明"我研究过你"——引用对方公司近况、渠道结构、行业趋势或其岗位职责。绝不用 "I hope this email finds you well" / "My name is"
+2. 痛点直击：只抓一个最痛的点（交期、成本、品控、MOQ、认证、售后、供应商集中度等），用对方会点头的行业语言，让他觉得"你懂我"
+3. 价值主张：用具体数字说明我们能带来什么（如 15 天交期、7 天打样、MOQ 200、CE/UL/FDA 认证、不良率 <0.3%），突出与现有供应商的差异化。不要空喊 "high quality"
+4. 社会证明：1 句提及服务过的同行业客户类型或成果（可合理泛化，不得虚构具体虚假公司名）
+5. CTA：低门槛、明确、唯一，让拒绝变得不自然——优先用 "I can send a 1-page spec + pricing for your SKU" 或 "15-min call this week, or I can just email the catalog" 这种二选一
 
 【风格】
-- 全文 120 词以内（不含签名），短段落、口语化商务英语，好读好回
+- 全文 90-120 词（不含签名），短段落、口语化商务英语，好读好回
 - 一封信只推一个产品方向、一个 CTA
-- 署名 Alice, OutreachAI
+- 署名 Alice
 
-严格按 JSON 输出：{"subject": "...", "body": "...", "painPointAnalysis": "用中文简述你抓住了对方哪个痛点、为什么这样写"}
+严格按 JSON 输出（一次同时给出信件和评分，不要 markdown）：
+{
+  "subject": "...",
+  "body": "...",
+  "painPointAnalysis": "用中文简述抓住了哪个痛点、为什么对方很难拒绝",
+  "dimensions": [
+    {"key": "主题吸引力", "score": 85},
+    {"key": "内容相关性", "score": 90},
+    {"key": "个性化程度", "score": 80},
+    {"key": "行动号召", "score": 86},
+    {"key": "整体可读性", "score": 88}
+  ],
+  "suggestion": "一段中文改进建议（60 字以内）"
+}
 body 中用 \\n\\n 分段，不要包含主题行。`;
 
 export async function generateEmail(customer, extraContext = '') {
@@ -53,11 +68,25 @@ ${extraContext ? `- 补充要求：${extraContext}` : ''}
     { temperature: 0.8 }
   );
   const json = parseJson(text);
-  return {
+  const draft = {
     subject: String(json.subject || '').trim(),
     body: String(json.body || '').trim(),
     painPointAnalysis: String(json.painPointAnalysis || '').trim(),
   };
+  const evaluation = json.dimensions ? scoreFromDimensions(json.dimensions, json.suggestion) : null;
+  return { ...draft, evaluation };
+}
+
+function scoreFromDimensions(rawDims, suggestion) {
+  const dims = (rawDims || []).map((d) => ({
+    key: String(d.key),
+    score: Math.max(0, Math.min(100, Math.round(Number(d.score) || 0))),
+  }));
+  const total = dims.length
+    ? Math.round(dims.reduce((s, d) => s + d.score, 0) / dims.length)
+    : 0;
+  const grade = total >= 85 ? '优秀' : total >= 70 ? '良好' : total >= 60 ? '及格' : '待改进';
+  return { total, grade, dimensions: dims, suggestion: String(suggestion || '').trim() };
 }
 
 const EVALUATOR_SYSTEM_PROMPT = `你是一位外贸开发信质量评估专家。请从收件人（海外采购决策者）的视角，对给定的开发信进行严格评分。
@@ -90,15 +119,7 @@ ${body}
     { temperature: 0.3 }
   );
   const json = parseJson(text);
-  const dims = (json.dimensions || []).map((d) => ({
-    key: String(d.key),
-    score: Math.max(0, Math.min(100, Math.round(Number(d.score) || 0))),
-  }));
-  const total = dims.length
-    ? Math.round(dims.reduce((s, d) => s + d.score, 0) / dims.length)
-    : 0;
-  const grade = total >= 85 ? '优秀' : total >= 70 ? '良好' : total >= 60 ? '及格' : '待改进';
-  return { total, grade, dimensions: dims, suggestion: String(json.suggestion || '').trim() };
+  return scoreFromDimensions(json.dimensions, json.suggestion);
 }
 
 // ============================================================

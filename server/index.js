@@ -6,7 +6,8 @@ import { config } from './config.js';
 import { db, save } from './store.js';
 import { generateEmail, evaluateEmail, suggestSendTime } from './agent.js';
 import { createBatchJob, getJob, listJobs } from './scheduler.js';
-import { sentToday } from './store.js';
+import { sentToday, logActivity } from './store.js';
+import { startAgent, stopAgent, getAgentState } from './autopilot.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -31,15 +32,38 @@ app.post('/api/customers', (req, res) => {
   };
   db.customers.unshift(customer);
   save();
+  logActivity({
+    customerId: customer.id,
+    action: '客户入库',
+    detail: `${customer.name} 已进入名单，Agent 将自动研究并发送开发信`,
+  });
   res.json({ customer });
 });
 
 // ---------- 沟通历史与 AI 面板 ----------
 app.get('/api/customers/:id/thread', (req, res) => {
+  const activities = (db.activities || []).filter(
+    (a) => !a.customerId || a.customerId === req.params.id
+  );
   res.json({
     thread: db.threads[req.params.id] || [],
     aiPanel: db.aiPanel[req.params.id] || null,
+    activities,
   });
+});
+
+app.get('/api/activities', (req, res) => {
+  res.json({ activities: db.activities || [] });
+});
+
+app.get('/api/agent', (req, res) => res.json(getAgentState()));
+app.post('/api/agent/start', (req, res) => {
+  startAgent();
+  res.json(getAgentState());
+});
+app.post('/api/agent/stop', (req, res) => {
+  stopAgent();
+  res.json(getAgentState());
 });
 
 // ---------- AI Agent ----------
@@ -50,8 +74,13 @@ app.post('/api/ai/generate', async (req, res) => {
     const customer = db.customers.find((c) => c.id === customerId);
     if (!customer) return res.status(404).json({ error: '客户不存在' });
 
-    const draft = await generateEmail(customer, extraContext);
-    const evaluation = await evaluateEmail({ ...draft, customer });
+    const generated = await generateEmail(customer, extraContext);
+    const draft = {
+      subject: generated.subject,
+      body: generated.body,
+      painPointAnalysis: generated.painPointAnalysis,
+    };
+    const evaluation = generated.evaluation || (await evaluateEmail({ ...draft, customer }));
     const sendTime = suggestSendTime(customer.timezone);
 
     db.aiPanel[customerId] = { draft, evaluation };

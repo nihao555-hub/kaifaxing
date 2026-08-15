@@ -1,7 +1,7 @@
 import { config } from './config.js';
 import { suggestSendTime } from './agent.js';
 import { sendMail } from './mailer.js';
-import { db, save, getCustomer, appendThread, sentToday } from './store.js';
+import { db, save, getCustomer, appendThread, sentToday, logActivity } from './store.js';
 
 // ============================================================
 // 批量发送调度器
@@ -11,8 +11,10 @@ import { db, save, getCustomer, appendThread, sentToday } from './store.js';
 
 // jobs: Map<jobId, { id, mode, items: [...], createdAt }>
 const jobs = new Map();
+const timers = new Map();
 let jobSeq = 1;
 let taskSeq = 1;
+let cancelled = false;
 
 function randomIntervalMs() {
   const { minIntervalSec, maxIntervalSec } = config.sending;
@@ -41,7 +43,11 @@ export function createBatchJob(items, mode = 'smart') {
 
   // 计算每封信的计划发送时间：
   // 智能模式下取"收件人时区最佳窗口"，同时保证相邻发送间隔 >= 随机频率间隔
-  let earliest = Date.now();
+  // nextSlot 跨任务共享，避免 Agent 逐个建任务时把几十封信挤到同一分钟
+  if (!createBatchJob.nextSlot || createBatchJob.nextSlot < Date.now()) {
+    createBatchJob.nextSlot = Date.now();
+  }
+  let earliest = createBatchJob.nextSlot;
   for (const it of items) {
     const customer = getCustomer(it.customerId);
     if (!customer) continue;
@@ -56,6 +62,7 @@ export function createBatchJob(items, mode = 'smart') {
       scheduleNote = '立即发送（按防封频率依次排队）';
     }
     earliest = sendAt + randomIntervalMs();
+    createBatchJob.nextSlot = earliest;
 
     const task = {
       id: `task${taskSeq++}`,
@@ -77,16 +84,27 @@ export function createBatchJob(items, mode = 'smart') {
   return job;
 }
 
+function isPlaceholderEmail(email) {
+  return /@([a-z0-9-]+\.)?example\.com$/i.test(email || '');
+}
+
 function scheduleTask(job, task, delayMs) {
-  setTimeout(async () => {
+  const timer = setTimeout(async () => {
+    timers.delete(task.id);
+    if (cancelled || task.status === 'cancelled') {
+      task.status = 'cancelled';
+      return;
+    }
     task.status = 'sending';
     try {
-      await sendMail({ to: task.email, subject: task.subject, text: task.body });
+      // 占位邮箱不走真实 SMTP，避免把 163 账号打进垃圾信誉；真实邮箱才真正投递
+      if (!isPlaceholderEmail(task.email)) {
+        await sendMail({ to: task.email, subject: task.subject, text: task.body });
+      }
       task.status = 'sent';
       task.sentAt = new Date().toISOString();
       db.sentLog.push({ customerId: task.customerId, sentAt: task.sentAt });
 
-      // 写入沟通历史，并把"未联系"客户状态推进为"跟进中"
       const customer = getCustomer(task.customerId);
       const count = (db.threads[task.customerId] || []).filter((t) => t.type === 'outbound').length;
       appendThread(task.customerId, {
@@ -103,11 +121,41 @@ function scheduleTask(job, task, delayMs) {
         customer.lastActivity = new Date().toISOString().slice(0, 10);
         save();
       }
+      logActivity({
+        customerId: task.customerId,
+        action: '已发送',
+        detail: isPlaceholderEmail(task.email)
+          ? `已按计划投递「${task.subject}」（占位邮箱，未走 SMTP）`
+          : `已通过 SMTP 投递「${task.subject}」→ ${task.email}`,
+      });
     } catch (err) {
       task.status = 'failed';
       task.error = String(err.message || err).slice(0, 300);
+      logActivity({
+        customerId: task.customerId,
+        action: '发送失败',
+        detail: task.error,
+      });
     }
   }, Math.max(0, delayMs));
+  timers.set(task.id, timer);
+}
+
+export function cancelPendingSends() {
+  cancelled = true;
+  for (const [id, timer] of timers) {
+    clearTimeout(timer);
+    timers.delete(id);
+  }
+  for (const job of jobs.values()) {
+    for (const task of job.items) {
+      if (task.status === 'scheduled') task.status = 'cancelled';
+    }
+  }
+}
+
+export function resumeSending() {
+  cancelled = false;
 }
 
 export function getJob(id) {

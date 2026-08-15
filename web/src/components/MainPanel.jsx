@@ -51,7 +51,33 @@ function LocalTime({ timezone }) {
 }
 
 // 右侧主区域：客户头部 + Tabs + 沟通历史/AI 面板
-export default function MainPanel({ customer, thread, aiPanel, generating, onRegenerate, onNewOutreach }) {
+function ActivityLog({ activities }) {
+  if (!activities || activities.length === 0) {
+    return (
+      <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-slate-200 text-xs text-slate-400">
+        暂无活动记录
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      {activities.map((a) => (
+        <div key={a.id} className="rounded-xl border border-slate-100 bg-white px-4 py-3 shadow-sm">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <span className="text-[13px] font-semibold text-slate-800">{a.action}</span>
+            <span className="text-[11px] text-slate-400">{a.time}</span>
+          </div>
+          <p className="text-xs leading-relaxed text-slate-500">{a.detail}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export default function MainPanel({
+  customer, thread, aiPanel, activities, agent, generating,
+  onRegenerate, onNewOutreach, onStopAgent, onStartAgent,
+}) {
   const [tab, setTab] = useState('沟通历史');
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -101,6 +127,15 @@ export default function MainPanel({ customer, thread, aiPanel, generating, onReg
                     className="absolute right-0 z-20 mt-1 w-36 rounded-lg border border-slate-100 bg-white py-1 shadow-lg"
                     onMouseLeave={() => setMenuOpen(false)}
                   >
+                    <button
+                      onClick={() => {
+                        setMenuOpen(false);
+                        agent?.enabled ? onStopAgent?.() : onStartAgent?.();
+                      }}
+                      className="block w-full px-3 py-1.5 text-left text-xs text-slate-600 hover:bg-slate-50"
+                    >
+                      {agent?.enabled ? '停止 Agent' : '启动 Agent'}
+                    </button>
                     {['标记为已回复', '导出沟通记录', '归档客户'].map((x) => (
                       <button
                         key={x}
@@ -148,11 +183,12 @@ export default function MainPanel({ customer, thread, aiPanel, generating, onReg
         <div className="min-w-0 flex-1">
           {tab === '沟通历史' && <ThreadTimeline thread={thread} />}
           {tab === '客户详情' && <CustomerDetail customer={customer} />}
-          {(tab === '相关笔记' || tab === '活动记录') && (
+          {tab === '相关笔记' && (
             <div className="flex h-40 items-center justify-center rounded-xl border border-dashed border-slate-200 text-xs text-slate-400">
-              暂无{tab === '相关笔记' ? '笔记' : '活动记录'}
+              暂无笔记
             </div>
           )}
+          {tab === '活动记录' && <ActivityLog activities={activities} />}
         </div>
         <div className="w-[340px] shrink-0">
           <AiPanel aiPanel={aiPanel} generating={generating} onRegenerate={onRegenerate} />

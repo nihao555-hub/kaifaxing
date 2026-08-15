@@ -21,4 +21,7 @@ export const api = {
   getJobs: () => req('/api/batch/jobs'),
   getJob: (id) => req(`/api/batch/jobs/${id}`),
   getQuota: () => req('/api/quota'),
+  getAgent: () => req('/api/agent'),
+  startAgent: () => req('/api/agent/start', { method: 'POST', body: '{}' }),
+  stopAgent: () => req('/api/agent/stop', { method: 'POST', body: '{}' }),
 };
