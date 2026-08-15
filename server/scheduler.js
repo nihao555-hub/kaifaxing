@@ -1,5 +1,5 @@
 import { config } from './config.js';
-import { suggestSendTime } from './agent.js';
+import { suggestSendTime, isGoldenWindow, formatLocal } from './agent.js';
 import { sendMail } from './mailer.js';
 import { db, save, getCustomer, appendThread, sentToday, logActivity } from './store.js';
 
@@ -12,6 +12,7 @@ import { db, save, getCustomer, appendThread, sentToday, logActivity } from './s
 // jobs: Map<jobId, { id, mode, items: [...], createdAt }>
 const jobs = new Map();
 const timers = new Map();
+const booked = []; // 已占用的发送时间戳，用于全球频率避让
 let jobSeq = 1;
 let taskSeq = 1;
 let cancelled = false;
@@ -19,6 +20,48 @@ let cancelled = false;
 function randomIntervalMs() {
   const { minIntervalSec, maxIntervalSec } = config.sending;
   return (minIntervalSec + Math.random() * (maxIntervalSec - minIntervalSec)) * 1000;
+}
+
+function conflicts(t) {
+  const minGap = config.sending.minIntervalSec * 1000;
+  return booked.some((b) => Math.abs(t - b) < minGap);
+}
+
+/**
+ * 为一位客户分配发送时间：
+ *  1. 先落到其当地黄金窗口
+ *  2. 若与已排期邮件间隔不足，只在窗口内后移；挤出窗口则改到下一个黄金窗口
+ *  这样几十个跨时区客户不会被一条全球队列挤到凌晨
+ */
+function allocateSlot(timezone, mode) {
+  if (mode === 'now') {
+    let t = Date.now();
+    while (conflicts(t)) t += randomIntervalMs();
+    booked.push(t);
+    booked.sort((a, b) => a - b);
+    return { sendAt: t, note: '立即发送（按防封频率依次排队）' };
+  }
+
+  let from = new Date();
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const sug = suggestSendTime(timezone, from);
+    let t = sug.sendAt.getTime();
+    for (let i = 0; i < 30 && isGoldenWindow(new Date(t), timezone); i++) {
+      if (!conflicts(t)) {
+        booked.push(t);
+        booked.sort((a, b) => a - b);
+        return {
+          sendAt: t,
+          note: `${sug.reason}（${formatLocal(new Date(t), timezone)}）`,
+        };
+      }
+      t += randomIntervalMs();
+    }
+    from = new Date(t + 60 * 60 * 1000);
+  }
+  const fallback = Date.now() + randomIntervalMs();
+  booked.push(fallback);
+  return { sendAt: fallback, note: '未找到无冲突黄金窗口，已按频率顺延' };
 }
 
 /**
@@ -41,28 +84,13 @@ export function createBatchJob(items, mode = 'smart') {
     items: [],
   };
 
-  // 计算每封信的计划发送时间：
-  // 智能模式下取"收件人时区最佳窗口"，同时保证相邻发送间隔 >= 随机频率间隔
-  // nextSlot 跨任务共享，避免 Agent 逐个建任务时把几十封信挤到同一分钟
-  if (!createBatchJob.nextSlot || createBatchJob.nextSlot < Date.now()) {
-    createBatchJob.nextSlot = Date.now();
-  }
-  let earliest = createBatchJob.nextSlot;
   for (const it of items) {
     const customer = getCustomer(it.customerId);
     if (!customer) continue;
 
-    let sendAt, scheduleNote;
-    if (mode === 'smart') {
-      const sug = suggestSendTime(customer.timezone);
-      sendAt = Math.max(sug.sendAt.getTime(), earliest);
-      scheduleNote = `${sug.reason}（${sug.localTime}）`;
-    } else {
-      sendAt = earliest;
-      scheduleNote = '立即发送（按防封频率依次排队）';
-    }
-    earliest = sendAt + randomIntervalMs();
-    createBatchJob.nextSlot = earliest;
+    const slot = allocateSlot(customer.timezone, mode);
+    const sendAt = slot.sendAt;
+    const scheduleNote = slot.note;
 
     const task = {
       id: `task${taskSeq++}`,

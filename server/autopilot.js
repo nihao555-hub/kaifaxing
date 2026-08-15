@@ -21,7 +21,10 @@ function sleep(ms) {
 }
 
 function isPending(c) {
-  return c.status === 'uncontacted' && c.agentPhase !== 'working' && c.agentPhase !== 'scheduled' && c.agentPhase !== 'error';
+  return (
+    c.status === 'uncontacted' &&
+    !['working', 'scheduled', 'paused', 'error'].includes(c.agentPhase)
+  );
 }
 
 function nextUncontacted() {
@@ -63,12 +66,11 @@ async function processOne(customer) {
   });
 
   if (!state.enabled) {
-    customer.agentPhase = null;
+    customer.agentPhase = 'paused';
     save();
     return;
   }
 
-  // 自己的真实邮箱立即发送以验证 SMTP；其余按收件人时区智能排队
   const isSelfTest = customer.email === config.smtp.user;
   const job = createBatchJob(
     [{ customerId: customer.id, subject: result.subject, body: result.body }],
@@ -119,9 +121,25 @@ async function loop() {
   }
 }
 
+function enqueueDraft(customer, mode = 'smart') {
+  const draft = db.aiPanel[customer.id]?.draft;
+  if (!draft?.subject || !draft?.body) return false;
+  const isSelfTest = customer.email === config.smtp.user;
+  createBatchJob(
+    [{ customerId: customer.id, subject: draft.subject, body: draft.body }],
+    isSelfTest ? 'now' : mode
+  );
+  customer.agentPhase = 'scheduled';
+  save();
+  return true;
+}
+
 export function startAgent() {
   state.enabled = true;
   resumeSending();
+  for (const c of db.customers) {
+    if (c.agentPhase === 'paused') enqueueDraft(c);
+  }
   logActivity({ customerId: null, action: 'Agent 已启动', detail: '将自动处理所有「未联系」客户：研究痛点 → 写信评分 → 按时区与频率发送' });
 }
 
@@ -129,16 +147,14 @@ export function stopAgent() {
   state.enabled = false;
   cancelPendingSends();
   for (const c of db.customers) {
-    if (c.agentPhase === 'scheduled') c.agentPhase = null;
+    if (c.agentPhase === 'scheduled') c.agentPhase = 'paused';
   }
   save();
   logActivity({ customerId: null, action: 'Agent 已停止', detail: '已停止处理新客户，并取消尚未发出的计划邮件。已发出的不受影响。' });
 }
 
 export function getAgentState() {
-  const queue = db.customers.filter(
-    (c) => c.status === 'uncontacted' && c.agentPhase !== 'working' && c.agentPhase !== 'scheduled' && c.agentPhase !== 'error'
-  ).length;
+  const queue = db.customers.filter(isPending).length;
   const current = db.customers.find((c) => c.id === state.currentId) || null;
   return {
     enabled: state.enabled,
@@ -150,4 +166,21 @@ export function getAgentState() {
   };
 }
 
+// 进程重启后：已写好但未发出的草稿重新入队，避免只研究不发送
+function recoverScheduled() {
+  for (const c of db.customers) {
+    if (c.agentPhase === 'working') c.agentPhase = null;
+    const draft = db.aiPanel[c.id]?.draft;
+    const sent = (db.threads[c.id] || []).some((t) => t.type === 'outbound');
+    if (c.status === 'uncontacted' && draft?.subject && !sent && c.agentPhase !== 'error' && c.agentPhase !== 'paused') {
+      try {
+        enqueueDraft(c);
+      } catch (err) {
+        logActivity({ customerId: c.id, action: '恢复失败', detail: String(err.message || err) });
+      }
+    }
+  }
+}
+
+recoverScheduled();
 loop();

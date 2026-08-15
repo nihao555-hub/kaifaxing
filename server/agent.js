@@ -126,7 +126,7 @@ ${body}
 // 时区智能调度：计算收件人当地"周二~周四 上午 9-11 点"的下一个发送窗口
 // ============================================================
 
-function partsInTimezone(date, timezone) {
+export function partsInTimezone(date, timezone) {
   const fmt = new Intl.DateTimeFormat('en-US', {
     timeZone: timezone,
     hour12: false,
@@ -182,4 +182,15 @@ export function suggestSendTime(timezone, from = new Date()) {
     t = new Date(t.getTime() + step);
   }
   return { sendAt: from, localTime: '', reason: '未找到最佳窗口，按当前时间发送' };
+}
+
+export function isGoldenWindow(date, timezone) {
+  const s = config.sending;
+  const p = partsInTimezone(date, timezone);
+  return s.allowedWeekdays.includes(p.weekday) && p.hour >= s.bestHourStart && p.hour < s.bestHourEnd;
+}
+
+export function formatLocal(date, timezone) {
+  const p = partsInTimezone(date, timezone);
+  return `当地 ${p.dateStr} ${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}`;
 }
