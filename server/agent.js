@@ -195,59 +195,86 @@ export function formatLocal(date, timezone) {
   return `当地 ${p.dateStr} ${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}`;
 }
 
-const FOLLOWUP_SYSTEM = `你是外贸跟进信专家。上一封开发信没有回复，请写一封更短的跟进信（60-90 词）。
-原则：不道歉、不施压、不重复整封旧信；补一个新的具体利益或样品/规格页；CTA 仍然低门槛。署名 Alice。
-严格 JSON：{"subject":"...","body":"...","painPointAnalysis":"中文说明这次跟进抓什么"}`;
+const FOLLOWUP_SYSTEM = `你是外贸跟进信专家。请基于完整沟通上下文写跟进信，不要只重复上一封。
+原则：不道歉、不施压；引用对方尚未回应的那个具体痛点；补一个新信息（样品/规格/交期），不要发明与往期承诺冲突的数字。60-90 词。署名 Alice。
+严格 JSON：{"subject":"...","body":"...","painPointAnalysis":"中文：跟进抓什么、用了哪些历史上下文"}`;
 
-export async function generateFollowUp(customer, previous) {
+export async function generateFollowUp(customer, brief) {
   const text = await chat(
     [
       { role: 'system', content: FOLLOWUP_SYSTEM },
-      {
-        role: 'user',
-        content: `客户：${customer.name}，${customer.company}，${customer.title}，${customer.industry}
-痛点：${customer.painPoints || '未知'}
-上一封主题：${previous?.subject || ''}
-上一封正文：
-${previous?.body || ''}
-输出 JSON。`,
-      },
+      { role: 'user', content: `${brief}\n\n请写跟进信 JSON。` },
     ],
     { temperature: 0.7 }
   );
   const json = parseJson(text);
   return {
-    subject: String(json.subject || `Re: ${previous?.subject || ''}`.trim()),
+    subject: String(json.subject || '').trim(),
     body: String(json.body || '').trim(),
     painPointAnalysis: String(json.painPointAnalysis || '').trim(),
   };
 }
 
-const REPLY_SYSTEM = `你是外贸销售助理。客户已经回复开发信，请起草一封简短专业的英文回信（80 词内）。
-原则：先回应对方具体问题；不承诺无法兑现的价格/交期；若对方要目录/报价/样品，答应先发一页规格+价格区间；若对方要通话，给出两个时间选项（用对方时区工作日上午）。署名 Alice。
-严格 JSON：{"subject":"...","body":"...","painPointAnalysis":"中文说明回信策略"}`;
+const REPLY_SYSTEM = `你是外贸销售的回信 Agent。必须先读完整沟通上下文，再回「这一封」。
 
-export async function generateReply(customer, inbound, history) {
+回信前先判断意图 intent，只能取以下之一：
+- ask_catalog  要目录/规格
+- ask_price    问价格
+- ask_sample   要样品/打样
+- book_call    要约通话或见面
+- question     具体业务问题（认证、MOQ、交期、包装等）
+- positive     感兴趣但还没提具体要求
+- objection    有顾虑（贵、交期、品质、已有供应商）
+- not_interested 明确拒绝
+- ooo          自动回复/休假
+- complaint    投诉或不满
+
+【上下文用法】
+- 必须点名回应来信里的具体句子，禁止套话 "Thanks for your email"
+- 必须接上我们往期已经说过的数字/产品，不能前后矛盾（例如已经说 MOQ 200 就不能改口 1000）
+- 不要把引用原文里我们自己的话再复述一遍
+- 只回答对方这一轮真正问的事，不要重新推销整封开发信
+
+【按意图决策】
+- ask_catalog / ask_sample：答应先发 1-page spec，不虚构附件已发出
+- ask_price：只给合理区间或「按 SKU 报价」，不报无法兑现的死价
+- book_call：用对方时区给出两个工作日上午时段
+- question / objection：先承认顾虑，再用已承诺能力回答
+- positive：给一个低门槛下一步
+- not_interested：简短致谢并停止推销，shouldSend=true 但 stopSequence=true
+- ooo：shouldSend=false，等对方回来
+- complaint：shouldSend=false，交给人工
+
+正文 80-110 词，署名 Alice。
+严格 JSON：
+{
+  "intent": "ask_price",
+  "shouldSend": true,
+  "stopSequence": false,
+  "contextUsed": "中文：用了时间线里的哪几条、对方原话哪一句",
+  "strategy": "中文：这一封怎么回、为什么这样回",
+  "subject": "...",
+  "body": "..."
+}`;
+
+export async function generateReply(customer, inbound, brief) {
   const text = await chat(
     [
       { role: 'system', content: REPLY_SYSTEM },
-      {
-        role: 'user',
-        content: `客户：${customer.name}，${customer.company}，时区 ${customer.timezone}
-对方来信主题：${inbound.subject}
-对方来信：
-${inbound.body}
-我们最近发出的信：
-${(history || []).filter((t) => t.type === 'outbound').slice(-1).map((t) => t.body).join('\n')}
-输出 JSON。`,
-      },
+      { role: 'user', content: `${brief}\n\n请只针对「对方最新来信」回信，输出 JSON。` },
     ],
-    { temperature: 0.5 }
+    { temperature: 0.4 }
   );
   const json = parseJson(text);
+  const subject = String(json.subject || '').trim();
   return {
-    subject: String(json.subject || `Re: ${inbound.subject || ''}`).trim(),
+    intent: String(json.intent || 'question'),
+    shouldSend: json.shouldSend !== false,
+    stopSequence: Boolean(json.stopSequence),
+    contextUsed: String(json.contextUsed || '').trim(),
+    strategy: String(json.strategy || '').trim(),
+    subject: subject.startsWith('Re:') ? subject : `Re: ${inbound?.subject || subject}`,
     body: String(json.body || '').trim(),
-    painPointAnalysis: String(json.painPointAnalysis || '').trim(),
+    painPointAnalysis: [json.strategy, json.contextUsed].filter(Boolean).join(' '),
   };
 }

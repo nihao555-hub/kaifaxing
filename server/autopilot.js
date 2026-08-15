@@ -3,6 +3,7 @@ import { generateEmail, evaluateEmail, generateFollowUp, generateReply } from '.
 import { createBatchJob, cancelPendingSends, resumeSending } from './scheduler.js';
 import { db, save, logActivity } from './store.js';
 import { safePollInbox } from './inbox.js';
+import { buildConversationBrief } from './context.js';
 
 // ============================================================
 // 客户入库后的完整自动流程（人工只监控 / 停止）
@@ -162,12 +163,13 @@ async function processFollowup(customer) {
   save();
   state.currentId = customer.id;
   const prev = lastOutbound(customer.id);
+  const { brief } = buildConversationBrief(customer, db.threads[customer.id] || [], prev);
   logActivity({
     customerId: customer.id,
     action: '准备跟进',
-    detail: `首封已发出 ${Math.floor(daysSince(prev?.time))} 天仍未回复，自动写跟进信`,
+    detail: `已发出 ${outboundCount(customer.id)} 封、${Math.floor(daysSince(prev?.time))} 天未回复。跟进将引用完整来往，而不是重发上一封。`,
   });
-  const draft = await generateFollowUp(customer, prev);
+  const draft = await generateFollowUp(customer, brief);
   saveDraft(customer, draft, db.aiPanel[customer.id]?.evaluation);
   if (!state.enabled) {
     customer.agentPhase = 'paused';
@@ -182,17 +184,44 @@ async function processInboundReply(customer) {
   save();
   state.currentId = customer.id;
   const inbound = customer.pendingReply;
-  const draft = await generateReply(customer, inbound, db.threads[customer.id] || []);
-  saveDraft(customer, draft, db.aiPanel[customer.id]?.evaluation);
+  const thread = db.threads[customer.id] || [];
+  const { brief } = buildConversationBrief(customer, thread, inbound);
+  const draft = await generateReply(customer, inbound, brief);
+
+  db.aiPanel[customer.id] = {
+    ...(db.aiPanel[customer.id] || {}),
+    draft: {
+      subject: draft.subject,
+      body: draft.body,
+      painPointAnalysis: draft.painPointAnalysis,
+      intent: draft.intent,
+      contextUsed: draft.contextUsed,
+      strategy: draft.strategy,
+    },
+    evaluation: db.aiPanel[customer.id]?.evaluation || null,
+  };
   delete customer.pendingReply;
+  if (draft.stopSequence) customer.agentPhase = 'stopped';
   save();
+
   logActivity({
     customerId: customer.id,
-    action: '回信草稿就绪',
-    detail: `针对「${inbound.subject}」已起草回复，按对方时区发出`,
+    action: '回信已理解上下文',
+    detail: `意图=${draft.intent}。${draft.contextUsed || ''} ${draft.strategy || ''}`,
   });
+
   if (!state.enabled) {
     customer.agentPhase = 'paused';
+    save();
+    return;
+  }
+  if (!draft.shouldSend) {
+    logActivity({
+      customerId: customer.id,
+      action: '回信未自动发出',
+      detail: `意图 ${draft.intent} 不适合自动发送（休假/投诉等），草稿已放在 AI 面板，等人工看过。`,
+    });
+    customer.agentPhase = 'waiting_human';
     save();
     return;
   }

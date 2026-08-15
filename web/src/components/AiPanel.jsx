@@ -83,9 +83,16 @@ export default function AiPanel({ aiPanel, generating, onRegenerate }) {
               <span className="font-medium">{draft.subject}</span>
             </p>
             <p className="text-xs leading-relaxed whitespace-pre-wrap text-slate-600">{draft.body}</p>
+            {draft.intent && (
+              <div className="mt-3 rounded-lg bg-amber-50 p-2.5 text-[11px] leading-relaxed text-amber-700">
+                <span className="font-semibold">回信意图：</span>
+                {draft.intent}
+                {draft.contextUsed ? ` · 上下文：${draft.contextUsed}` : ''}
+              </div>
+            )}
             {draft.painPointAnalysis && (
               <div className="mt-3 rounded-lg bg-violet-50 p-2.5 text-[11px] leading-relaxed text-violet-600">
-                <span className="font-semibold">痛点分析：</span>
+                <span className="font-semibold">{draft.strategy ? '回信策略：' : '痛点分析：'}</span>
                 {draft.painPointAnalysis}
               </div>
             )}

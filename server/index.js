@@ -8,6 +8,7 @@ import { generateEmail, evaluateEmail, suggestSendTime } from './agent.js';
 import { createBatchJob, getJob, listJobs } from './scheduler.js';
 import { sentToday, logActivity } from './store.js';
 import { startAgent, stopAgent, getAgentState } from './autopilot.js';
+import { ingestInbound } from './inbox.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -67,6 +68,15 @@ app.post('/api/agent/start', (req, res) => {
 app.post('/api/agent/stop', (req, res) => {
   stopAgent();
   res.json(getAgentState());
+});
+
+// 把一封客户来信挂进沟通历史（IMAP 正常时会自动做；也可用于补录）
+app.post('/api/inbox/inbound', (req, res) => {
+  const { customerId, subject, body } = req.body || {};
+  const customer = db.customers.find((c) => c.id === customerId);
+  if (!customer) return res.status(404).json({ error: '客户不存在' });
+  const ok = ingestInbound(customer, { subject, body, from: customer.email });
+  res.json({ ingested: ok, customerId: customer.id });
 });
 
 // ---------- AI Agent ----------
