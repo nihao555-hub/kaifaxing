@@ -4,6 +4,7 @@ import CustomerList from './components/CustomerList.jsx';
 import MainPanel from './components/MainPanel.jsx';
 import BatchModal from './components/BatchModal.jsx';
 import AddCustomerModal from './components/AddCustomerModal.jsx';
+import ImportRfqModal from './components/ImportRfqModal.jsx';
 import { api } from './api.js';
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
   const [generating, setGenerating] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [rfqOpen, setRfqOpen] = useState(false);
   const [agent, setAgent] = useState(null);
 
   const refreshCustomers = useCallback(async () => {
@@ -79,6 +81,7 @@ export default function App() {
         selectedId={selectedId}
         onSelect={setSelectedId}
         onAdd={() => setAddOpen(true)}
+        onImportRfq={() => setRfqOpen(true)}
       />
       <MainPanel
         customer={selected}
@@ -115,6 +118,18 @@ export default function App() {
           onAdded={(customer) => {
             setAddOpen(false);
             refreshCustomers().then(() => setSelectedId(customer.id));
+          }}
+        />
+      )}
+
+      {rfqOpen && (
+        <ImportRfqModal
+          onClose={() => setRfqOpen(false)}
+          onImported={(created) => {
+            setRfqOpen(false);
+            refreshCustomers().then(() => {
+              if (created?.[0]) setSelectedId(created[0].id);
+            });
           }}
         />
       )}

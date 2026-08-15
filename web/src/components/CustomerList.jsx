@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Search, SlidersHorizontal, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, SlidersHorizontal, Plus, ChevronLeft, ChevronRight, Database } from 'lucide-react';
 import { Avatar, StatusBadge } from './common.jsx';
 
 const TABS = [
@@ -16,7 +16,7 @@ function formatDate(d) {
 }
 
 // 中间客户名单栏
-export default function CustomerList({ customers, selectedId, onSelect, onAdd }) {
+export default function CustomerList({ customers, selectedId, onSelect, onAdd, onImportRfq }) {
   const [tab, setTab] = useState('all');
   const [keyword, setKeyword] = useState('');
 
@@ -58,6 +58,13 @@ export default function CustomerList({ customers, selectedId, onSelect, onAdd })
         </div>
         <button className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">
           <SlidersHorizontal size={14} />
+        </button>
+        <button
+          onClick={onImportRfq}
+          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
+          title="从公开 RFQ 导入"
+        >
+          <Database size={14} />
         </button>
         <button
           onClick={onAdd}

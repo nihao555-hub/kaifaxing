@@ -16,6 +16,8 @@ function CustomerDetail({ customer }) {
     ['时区', customer.timezone],
     ['行业', customer.industry],
     ['已知痛点', customer.painPoints],
+    ['数据来源', customer.source || '手动添加'],
+    ['来源链接', customer.sourceUrl || ''],
   ];
   return (
     <div className="rounded-xl border border-slate-100 bg-white p-5 shadow-sm">
@@ -23,7 +25,13 @@ function CustomerDetail({ customer }) {
         {rows.map(([k, v]) => (
           <div key={k} className="flex gap-4 text-[13px]">
             <span className="w-20 shrink-0 text-slate-400">{k}</span>
-            <span className="text-slate-700">{v || '—'}</span>
+            {String(v).startsWith('http') ? (
+              <a href={v} target="_blank" rel="noreferrer" className="break-all text-primary hover:underline">
+                {v}
+              </a>
+            ) : (
+              <span className="text-slate-700">{v || '—'}</span>
+            )}
           </div>
         ))}
       </div>

@@ -34,9 +34,11 @@ function isOwnInbox(email) {
 }
 
 function isPendingFirstTouch(c) {
+  if (!c.email || !c.email.includes('@')) return false;
+  if (c.agentPhase === 'need_email') return false;
   return (
     c.status === 'uncontacted' &&
-    !['working', 'scheduled', 'paused', 'error', 'waiting'].includes(c.agentPhase)
+    !['working', 'scheduled', 'paused', 'error', 'waiting', 'need_email'].includes(c.agentPhase)
   );
 }
 

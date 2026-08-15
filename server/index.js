@@ -9,6 +9,7 @@ import { createBatchJob, getJob, listJobs } from './scheduler.js';
 import { sentToday, logActivity } from './store.js';
 import { startAgent, stopAgent, getAgentState } from './autopilot.js';
 import { ingestInbound } from './inbox.js';
+import { RFQ_CATALOG, searchRfq, importRfqItems } from './rfq.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -22,7 +23,7 @@ app.get('/api/customers', (req, res) => {
 
 app.post('/api/customers', (req, res) => {
   const { name, company, title, email, country, timezone, industry, painPoints } = req.body || {};
-  if (!name || !email) return res.status(400).json({ error: '姓名和邮箱必填' });
+  if (!name) return res.status(400).json({ error: '姓名必填' });
   if (String(email).toLowerCase() === String(config.smtp.user).toLowerCase()) {
     return res.status(400).json({ error: '请填写真实客户邮箱，不要用自己的发件箱当收件人' });
   }
@@ -42,6 +43,43 @@ app.post('/api/customers', (req, res) => {
     detail: `${customer.name} 已进入名单，Agent 将自动研究并发送开发信`,
   });
   res.json({ customer });
+});
+
+app.patch('/api/customers/:id', (req, res) => {
+  const customer = db.customers.find((c) => c.id === req.params.id);
+  if (!customer) return res.status(404).json({ error: '客户不存在' });
+  const { email, painPoints, title, company } = req.body || {};
+  if (email) {
+    if (String(email).toLowerCase() === String(config.smtp.user).toLowerCase()) {
+      return res.status(400).json({ error: '请填写真实客户邮箱，不要用自己的发件箱' });
+    }
+    customer.email = email;
+    if (customer.agentPhase === 'need_email') customer.agentPhase = null;
+  }
+  if (painPoints != null) customer.painPoints = painPoints;
+  if (title != null) customer.title = title;
+  if (company != null) customer.company = company;
+  save();
+  res.json({ customer });
+});
+
+app.get('/api/rfq/sources', (req, res) => res.json({ sources: RFQ_CATALOG }));
+app.get('/api/rfq/search', async (req, res) => {
+  try {
+    const items = await searchRfq({
+      source: req.query.source || 'usaspending',
+      keyword: req.query.q || 'power tools',
+      limit: Number(req.query.limit || 15),
+    });
+    res.json({ items });
+  } catch (err) {
+    res.status(502).json({ error: `RFQ 数据源请求失败：${err.message}` });
+  }
+});
+app.post('/api/rfq/import', (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  const created = importRfqItems(items);
+  res.json({ created });
 });
 
 // ---------- 沟通历史与 AI 面板 ----------

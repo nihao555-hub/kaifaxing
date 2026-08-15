@@ -24,4 +24,8 @@ export const api = {
   getAgent: () => req('/api/agent'),
   startAgent: () => req('/api/agent/start', { method: 'POST', body: '{}' }),
   stopAgent: () => req('/api/agent/stop', { method: 'POST', body: '{}' }),
+  rfqSources: () => req('/api/rfq/sources'),
+  rfqSearch: (source, q) => req(`/api/rfq/search?source=${encodeURIComponent(source)}&q=${encodeURIComponent(q || '')}`),
+  rfqImport: (items) => req('/api/rfq/import', { method: 'POST', body: JSON.stringify({ items }) }),
+  updateCustomer: (id, payload) => req(`/api/customers/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
 };
