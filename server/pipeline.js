@@ -1,7 +1,7 @@
 import { config } from './config.js';
 import { db, save, getCustomer, isRfqLead, isDemoCustomer, logActivity } from './store.js';
 import { crawlAllAndImport } from './rfq.js';
-import { researchLead, isPersonLikeLead, isPlausibleEmail, applyLeadIdentity } from './research.js';
+import { researchLead, isPersonLikeLead, isPlausibleEmail, applyLeadIdentity, compactSkippedReport } from './research.js';
 import { extractCompanyHintFromText } from './rfqHints.js';
 import { extractRfqClues, rfqCorpus, classifyResearchPath } from './researchPath.js';
 import { VERIFIED_SOURCES } from './openSources.js';
@@ -133,9 +133,119 @@ export function applyTextCompanyHints() {
 }
 
 export function stampPersonLikeLeads() {
-  // Nickname cards stay unstamped. Writing ~140k full C reports and then
-  // JSON.stringify(db) overflows V8; enqueue already skips person-like leads.
-  return 0;
+  let stamped = 0;
+  const now = new Date().toISOString();
+  for (const c of db.customers) {
+    if (!isRfqLead(c)) continue;
+    if (c.research?.status === 'running' || c.research?.status === 'done') continue;
+    if (/World Bank/i.test(c.source || '')) {
+      c.research = compactSkippedReport(c, 'project');
+      c.research.updatedAt = now;
+      c.researchPath = 'import';
+      stamped += 1;
+      continue;
+    }
+    if (!isPersonLikeLead(c)) continue;
+    if (c.researchPath === 'clues' || c.researchPath === 'crosspost') continue;
+    c.research = compactSkippedReport(c);
+    c.research.updatedAt = now;
+    c.researchPath = c.researchPath || 'import';
+    stamped += 1;
+  }
+  if (stamped) save();
+  return stamped;
+}
+
+let kybPass = { status: 'idle' };
+
+export function getKybPassState() {
+  return kybPass;
+}
+
+/** Promote text hints, compact-stamp nicknames/projects, queue the rest for live KYB. */
+export function prepareFullKybPass() {
+  let promoted = 0;
+  let stamped = 0;
+  let live = 0;
+  const now = new Date().toISOString();
+  for (const c of db.customers) {
+    if (!isRfqLead(c)) continue;
+    if (c.research?.status === 'done' || c.research?.status === 'running') continue;
+
+    if (/World Bank/i.test(c.source || '')) {
+      c.research = compactSkippedReport(c, 'project');
+      c.research.updatedAt = now;
+      c.researchPath = 'import';
+      stamped += 1;
+      continue;
+    }
+
+    const clues = extractRfqClues(rfqCorpus(c));
+    if (!c.website && clues.websites[0]) c.website = clues.websites[0];
+
+    if (isPersonLikeLead(c) && !c.forceCompany) {
+      const hint = clues.companyHint || extractCompanyHintFromText(`${c.painPoints || ''} ${c.title || ''}`);
+      if (hint) {
+        try {
+          applyLeadIdentity(c, { company: hint, website: clues.websites[0] });
+          c.identitySource = c.identitySource || 'rfq_text';
+          c.research = null;
+          stampLeadPath(c);
+          promoted += 1;
+          live += 1;
+          continue;
+        } catch {
+          /* still a nickname */
+        }
+      }
+      if (clues.websites[0] || clues.emails[0]) {
+        c.researchPath = 'clues';
+        live += 1;
+        continue;
+      }
+      if (clues.fingerprints.length) {
+        c.researchPath = 'crosspost';
+        live += 1;
+        continue;
+      }
+      c.research = compactSkippedReport(c);
+      c.research.updatedAt = now;
+      c.researchPath = 'import';
+      stamped += 1;
+      continue;
+    }
+
+    stampLeadPath(c);
+    live += 1;
+  }
+  if (promoted || stamped) save();
+  return { promoted, stamped, live };
+}
+
+export function startFullKybPass() {
+  if (kybPass.status === 'running') return kybPass;
+  kybPass = { status: 'running', startedAt: new Date().toISOString() };
+  setImmediate(() => {
+    try {
+      const prep = prepareFullKybPass();
+      const added = enqueuePendingResearch({ limit: 50000 });
+      kickResearch();
+      kybPass = {
+        status: 'done',
+        startedAt: kybPass.startedAt,
+        finishedAt: new Date().toISOString(),
+        ...prep,
+        added,
+      };
+    } catch (err) {
+      kybPass = {
+        status: 'error',
+        startedAt: kybPass.startedAt,
+        error: String(err.message || err),
+      };
+    }
+  });
+  return kybPass;
 }
 
 export function pruneResearchQueue() {
@@ -164,7 +274,8 @@ export function enqueuePendingResearch({ limit = 800 } = {}) {
     pending.push(c);
   }
   pending.sort((a, b) => researchPriority(a) - researchPriority(b));
-  return enqueueResearch(pending.slice(0, Math.min(Math.max(Number(limit) || 800, 1), 4000)));
+  const cap = Math.min(Math.max(Number(limit) || 800, 1), 50000);
+  return enqueueResearch(pending.slice(0, cap));
 }
 
 export function kickResearch() {
@@ -420,6 +531,7 @@ export function getPipelineState() {
     researchedToday: p.researchDate === today ? p.researchedToday || 0 : 0,
     appliedToday: p.appliedDate === today ? p.appliedToday || 0 : 0,
     nextDaily: p.lastDailyDate === today ? `明天 ${String(config.pipeline.dailyHour).padStart(2, '0')}:00` : `今天 ${String(config.pipeline.dailyHour).padStart(2, '0')}:00 后`,
+    kybPass,
   };
 }
 

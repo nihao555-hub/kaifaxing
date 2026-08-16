@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { beijingDate, beijingHour, pickAutoEmail, isForwarderName, researchPriority, stampPersonLikeLeads } from './pipeline.js';
+import { beijingDate, beijingHour, pickAutoEmail, isForwarderName, researchPriority } from './pipeline.js';
+import { compactSkippedReport } from './research.js';
 
 describe('pipeline schedule', () => {
   it('formats Beijing calendar date', () => {
@@ -65,7 +66,11 @@ describe('auto apply rules', () => {
       < researchPriority({ source: 'World Bank', company: 'Assam: School Education' }));
   });
 
-  it('does not stamp nickname leads with full C reports', () => {
-    assert.equal(stampPersonLikeLeads(), 0);
+  it('uses a compact C report for nickname mass KYB', () => {
+    const report = compactSkippedReport({ company: 'Linda N', country: 'Netherlands' });
+    assert.equal(report.grade, 'C');
+    assert.equal(report.steps, undefined);
+    assert.ok(!('searchLinks' in report));
+    assert.ok(JSON.stringify(report).length < 600);
   });
 });

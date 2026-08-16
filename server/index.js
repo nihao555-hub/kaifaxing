@@ -27,6 +27,7 @@ import {
   enqueuePendingResearch,
   kickResearch,
   applyTextCompanyHints,
+  startFullKybPass,
   identifyLead,
   applyPublicContact,
   promoteLeads,
@@ -322,9 +323,13 @@ app.get('/api/rfq/leads/:id', (req, res) => {
 
 app.post('/api/rfq/leads/research-queue', (req, res) => {
   const all = Boolean(req.body?.all);
-  const limit = Number(req.body?.limit || (all ? 4000 : 800));
+  if (all) {
+    if (googleSearchReady()) config.pipeline.researchDelayMs = Math.min(config.pipeline.researchDelayMs, 2500);
+    const pass = startFullKybPass();
+    return res.json({ ...getPipelineState(), ...pass });
+  }
+  const limit = Number(req.body?.limit || 800);
   const added = enqueuePendingResearch({ limit });
-  if (all && googleSearchReady()) config.pipeline.researchDelayMs = Math.min(config.pipeline.researchDelayMs, 2500);
   const state = kickResearch();
   res.json({ promoted: 0, stamped: 0, added, ...state });
 });

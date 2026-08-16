@@ -7,6 +7,7 @@ import {
   isPersonLikeDisplayName,
   isPersonLikeLead,
   skippedLeadReport,
+  compactSkippedReport,
   applyLeadIdentity,
   isPlausibleEmail,
   scoreEmail,
@@ -98,6 +99,13 @@ describe('company name helpers', () => {
     const skipped = skippedLeadReport({ company: 'Linda N', country: 'Netherlands' });
     assert.equal(skipped.grade, 'C');
     assert.equal(skipped.status, 'done');
+    const compact = compactSkippedReport({ company: 'Linda N' });
+    assert.equal(compact.grade, 'C');
+    assert.equal(compact.status, 'done');
+    assert.equal(compact.steps, undefined);
+    assert.ok(JSON.stringify(compact).length < 600);
+    const project = compactSkippedReport({ company: 'Assam: School Education' }, 'project');
+    assert.match(project.brief, /项目/);
     const row = { company: 'Linda N', name: 'Linda N' };
     assert.equal(isPersonLikeLead(row), true);
     applyLeadIdentity(row, { company: 'NMG TECHNICAL SERVICE L.L.C', regNo: '123456' });

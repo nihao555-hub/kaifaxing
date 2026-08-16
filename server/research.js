@@ -168,6 +168,42 @@ export function isPersonLikeDisplayName(name) {
   return words.length >= 2 && words.every((w) => /^[\p{L}][\p{L}.'-]{0,20}$/u.test(w));
 }
 
+const COMPACT_SKIP_KYB = {
+  nickname: {
+    grade: 'C',
+    label: '停',
+    nextAction: '只有个人昵称。向对方要法定全称和登记号后再查，不要猜私人邮箱。',
+    needRegNo: true,
+  },
+  project: {
+    grade: 'C',
+    label: '停',
+    nextAction: '世界银行条目是项目名，不是采购主体。补买方公司全称和登记号后再查。',
+    needRegNo: true,
+  },
+};
+
+/** Tiny C report for mass KYB. Full skippedLeadReport overflows JSON.stringify at 160k rows. */
+export function compactSkippedReport(customer, reason = 'nickname') {
+  const name = String(customer.company || customer.name || '').trim();
+  const kyb = COMPACT_SKIP_KYB[reason] || COMPACT_SKIP_KYB.nickname;
+  return {
+    status: 'done',
+    updatedAt: new Date().toISOString(),
+    confidence: 'low',
+    legalName: name,
+    grade: 'C',
+    needRegNo: true,
+    canApplyEmail: false,
+    brief: reason === 'project'
+      ? `${name || '该条目'} 是项目/贷款标题，不是可核验买方公司。`
+      : `${name || '该询盘'} 只有个人显示名，公开库核不到公司。`,
+    nextAction: kyb.nextAction,
+    kyb,
+    path: { key: 'import', label: '需补主体', next: kyb.nextAction },
+  };
+}
+
 export function skippedLeadReport(customer) {
   const company = String(customer.company || customer.name || '').trim();
   const kyb = gradeKyb({ personLike: true, legalName: company });

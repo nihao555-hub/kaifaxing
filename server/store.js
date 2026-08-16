@@ -111,18 +111,34 @@ export function purgeDemoCustomers() {
 }
 
 let saveTimer = null;
+let saving = false;
+let saveAgain = false;
+
+function flushSave() {
+  if (saving) {
+    saveAgain = true;
+    return;
+  }
+  saving = true;
+  try {
+    const tmp = `${DB_PATH}.tmp`;
+    // Compact JSON: pretty-printing 160k+ leads overflows V8 string length.
+    fs.writeFileSync(tmp, JSON.stringify(db));
+    fs.renameSync(tmp, DB_PATH);
+  } catch (err) {
+    console.error('[store] save failed:', err);
+  } finally {
+    saving = false;
+    if (saveAgain) {
+      saveAgain = false;
+      saveTimer = setTimeout(flushSave, 50);
+    }
+  }
+}
+
 export function save() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    try {
-      const tmp = `${DB_PATH}.tmp`;
-      // Compact JSON: pretty-printing 160k+ leads overflows V8 string length.
-      fs.writeFileSync(tmp, JSON.stringify(db));
-      fs.renameSync(tmp, DB_PATH);
-    } catch (err) {
-      console.error('[store] save failed:', err);
-    }
-  }, 200);
+  saveTimer = setTimeout(flushSave, 200);
 }
 
 purgeDemoCustomers();
