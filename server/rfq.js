@@ -480,14 +480,20 @@ function ownInbox(email) {
   return email && String(email).toLowerCase() === String(config.smtp.user).toLowerCase();
 }
 
+const importedAwardIds = new Set();
+const importedUrls = new Set();
+function rememberImported(c) {
+  if (c?.awardId) importedAwardIds.add(String(c.awardId));
+  if (c?.sourceUrl) importedUrls.add(String(c.sourceUrl));
+}
+for (const c of db.customers) rememberImported(c);
+
 function alreadyImported(it) {
+  if (it.awardId && importedAwardIds.has(String(it.awardId))) return true;
+  if (it.url && importedUrls.has(String(it.url))) return true;
   const email = String(it.email || '').toLowerCase();
-  return db.customers.some((c) => {
-    if (it.awardId && c.awardId === it.awardId) return true;
-    if (it.url && c.sourceUrl === it.url) return true;
-    if (email && String(c.email || '').toLowerCase() === email && (c.company || '') === (it.company || '')) return true;
-    return false;
-  });
+  if (!email) return false;
+  return db.customers.some((c) => String(c.email || '').toLowerCase() === email && (c.company || '') === (it.company || ''));
 }
 
 export function importRfqItems(items = [], { quiet = false, silent = false, persist = true } = {}) {
@@ -523,6 +529,7 @@ export function importRfqItems(items = [], { quiet = false, silent = false, pers
       publicCard: it.publicCard || null,
     };
     db.customers.unshift(customer);
+    rememberImported(customer);
     created.push(customer);
     if (!quiet && !silent) {
       logActivity({
@@ -568,8 +575,8 @@ export async function crawlAllAndImport({
         if (!doImport) return;
         const added = importRfqItems(batch, { quiet: true, silent: true, persist: false });
         alibabaCrawlProgress.created = (alibabaCrawlProgress.created || 0) + added.length;
-        if ((alibabaCrawlProgress.created || 0) % 200 < added.length) save();
-        if ((alibabaCrawlProgress.created || 0) % 800 < added.length) {
+        if ((alibabaCrawlProgress.created || 0) % 800 < added.length) save();
+        if ((alibabaCrawlProgress.created || 0) % 2000 < added.length) {
           logActivity({
             action: '阿里公开列表',
             detail: `已入库 ${alibabaCrawlProgress.created} 条（${alibabaCrawlProgress.slice || ''} 第 ${alibabaCrawlProgress.page} 页）`,

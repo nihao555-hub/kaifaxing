@@ -218,36 +218,34 @@ async function fetchListPage({
   if (openTime) qs.set('openTime', openTime);
   if (silver) qs.set('silverRfq', 'Y');
   if (copper) qs.set('copperRfq', 'Y');
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    let lastErr;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt) await sleep(400 * attempt);
-      try {
-        const res = await fetch(`${LIST_URL}?${qs}`, {
-          headers: {
-            Accept: 'text/html',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'User-Agent': 'Mozilla/5.0 (compatible; OutreachAI/1.0; public RFQ list)',
-          },
-          signal: ctrl.signal,
-        });
-        if (res.status === 429 || res.status === 503) {
-          lastErr = new Error(`阿里公开列表 ${res.status}`);
-          continue;
-        }
-        if (!res.ok) throw new Error(`阿里公开列表 ${res.status}`);
-        return parseAlibabaPublicHtml(await res.text());
-      } catch (err) {
-        lastErr = err;
-        if (String(err.message || err).includes('阿里公开列表 4') && !/429/.test(err.message)) throw err;
+  let lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt) await sleep(400 * attempt);
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${LIST_URL}?${qs}`, {
+        headers: {
+          Accept: 'text/html',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'User-Agent': 'Mozilla/5.0 (compatible; OutreachAI/1.0; public RFQ list)',
+        },
+        signal: ctrl.signal,
+      });
+      if (res.status === 429 || res.status === 503) {
+        lastErr = new Error(`阿里公开列表 ${res.status}`);
+        continue;
       }
+      if (!res.ok) throw new Error(`阿里公开列表 ${res.status}`);
+      return parseAlibabaPublicHtml(await res.text());
+    } catch (err) {
+      lastErr = err;
+      if (String(err.message || err).includes('阿里公开列表 4') && !/429/.test(err.message)) throw err;
+    } finally {
+      clearTimeout(t);
     }
-    throw lastErr || new Error('阿里公开列表失败');
-  } finally {
-    clearTimeout(t);
   }
+  throw lastErr || new Error('阿里公开列表失败');
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -294,7 +292,11 @@ async function runPool(tasks, n = CRAWL_CONCURRENCY) {
     while (q.length && !crawlAbort) {
       const job = q.shift();
       if (!job) break;
-      await job();
+      try {
+        await job();
+      } catch {
+        /* skip a dead page/slice and keep the pool moving */
+      }
     }
   }));
 }
@@ -342,7 +344,12 @@ export async function crawlAlibabaPublic({
     if (crawlAbort || pagesFetched >= pageBudget) {
       return { items: [], old: 0, totalPages: 1, totalItems: 0, exhausted: true, aborted: crawlAbort };
     }
-    const data = await fetchListPage(opts);
+    let data;
+    try {
+      data = await fetchListPage(opts);
+    } catch {
+      return { items: [], old: 0, totalPages: 1, totalItems: 0, exhausted: false };
+    }
     pagesFetched += 1;
     totalItems = Math.max(totalItems, data.totalItems || 0);
     for (const cat of data.categories || []) categoryById.set(cat.id, cat.name);
