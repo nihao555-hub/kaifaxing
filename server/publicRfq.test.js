@@ -64,4 +64,13 @@ describe('alibaba public parser', () => {
     assert.ok(d);
     assert.equal(d.toISOString().slice(0, 10), '2026-08-03');
   });
+
+  it('parses a calendar open date and keeps the public card', () => {
+    const d = parseOpenTime('2026-07-03');
+    assert.equal(d.toISOString().slice(0, 10), '2026-07-03');
+    const lead = toLead(parseAlibabaPublicHtml(SAMPLE).items[0]);
+    assert.equal(lead.publicCard.rfqId, '1684056292');
+    assert.equal(lead.publicCard.buyerName, 'Wilfried Kiendrebeogo');
+    assert.equal(lead.publicCard.haveAnnexes, true);
+  });
 });

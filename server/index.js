@@ -135,10 +135,13 @@ app.post('/api/rfq/crawl-all', (req, res) => {
   const since = req.body?.since || PUBLIC_SINCE_DEFAULT;
   const alibabaPages = Number(req.body?.alibabaPages || 100);
   const sources = Array.isArray(req.body?.sources) ? req.body.sources : undefined;
+  alibabaCrawlProgress.created = 0;
   crawlAllJob = { status: 'running', since, startedAt: new Date().toISOString(), createdCount: 0, reports: [] };
   crawlAllAndImport({ since, alibabaPages, govLimit: 80, doImport: true, sources })
     .then((r) => {
-      if (r.created?.length) enqueueResearch(r.created);
+      applyTextCompanyHints();
+      enqueuePendingResearch({ limit: 80 });
+      kickResearch();
       crawlAllJob = {
         status: 'done',
         since: r.since,

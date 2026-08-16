@@ -4,9 +4,12 @@ import { extractCompanyHintFromText } from './rfqHints.js';
 export const PUBLIC_SINCE_DEFAULT = '2026-07-01';
 
 export const ALIBABA_PUBLIC_FIELDS = [
-  'rfqId', 'subject', 'description', 'buyerName', 'country', 'countrySimple',
-  'quantity', 'quantityUnit', 'openTimeStr', 'postedAt', 'url', 'imageUrl',
-  'haveAnnexes', 'rfqStarLevel',
+  'rfqId', 'enrRfqId', 'subject', 'description', 'buyerName', 'country', 'countrySimple',
+  'quantity', 'quantityUnit', 'quantityValue', 'quantityValueUnit',
+  'openTimeStr', 'postedAt', 'expirationTime', 'url', 'imageUrl',
+  'haveAnnexes', 'hasQuoEquity', 'rfqStarLevel', 'rfqLevel', 'buyerLevel',
+  'orderValue', 'orderValueUnit', 'formPurposeCountry', 'formPurposeCountryName',
+  'quoteLeftCount', 'quoteExtraCount', 'qualityScore',
 ];
 
 const LIST_URL = 'https://sourcing.alibaba.com/rfq/rfq_search_list.htm';
@@ -49,6 +52,11 @@ export function parseOpenTime(str, now = new Date()) {
   const s = String(str || '').toLowerCase();
   if (!s) return null;
   if (/just now|刚刚/.test(s)) return now;
+  const iso = s.match(/(\d{4}-\d{2}-\d{2})(?:[ t](\d{2}:\d{2}(?::\d{2})?))?/);
+  if (iso) {
+    const d = new Date(iso[2] ? `${iso[1]}T${iso[2]}Z` : `${iso[1]}T00:00:00Z`);
+    if (!Number.isNaN(d.getTime())) return d;
+  }
   const m = s.match(/(\d+)\s*(minute|hour|day|week|min|hr)/);
   if (!m) return null;
   const n = Number(m[1]);
@@ -79,6 +87,7 @@ export function parseAlibabaPublicHtml(html) {
     const url = strField(block, 'url');
     items.push({
       rfqId,
+      enrRfqId: strField(block, 'enrRfqId'),
       subject,
       description: strField(block, 'description'),
       buyerName: strField(block, 'buyerName'),
@@ -86,12 +95,25 @@ export function parseAlibabaPublicHtml(html) {
       countrySimple: strField(block, 'countrySimple'),
       quantity: strField(block, 'quantity') || String(numField(block, 'quantity') || ''),
       quantityUnit: strField(block, 'quantityUnit'),
+      quantityValue: strField(block, 'quantityValue'),
+      quantityValueUnit: strField(block, 'quantityValueUnit'),
       openTimeStr,
       postedAt: postedAt ? postedAt.toISOString() : '',
+      expirationTime: strField(block, 'expirationTime'),
       url: url.startsWith('//') ? `https:${url}` : url,
       imageUrl: strField(block, 'imageUrl'),
       haveAnnexes: boolField(block, 'haveAnnexes'),
+      hasQuoEquity: boolField(block, 'hasQuoEquity'),
       rfqStarLevel: numField(block, 'rfqStarLevel'),
+      rfqLevel: strField(block, 'rfqLevel') || String(numField(block, 'rfqLevel') || ''),
+      buyerLevel: strField(block, 'buyerLevel') || String(numField(block, 'buyerLevel') || ''),
+      orderValue: strField(block, 'orderValue'),
+      orderValueUnit: strField(block, 'orderValueUnit'),
+      formPurposeCountry: strField(block, 'formPurposeCountry'),
+      formPurposeCountryName: strField(block, 'formPurposeCountryName'),
+      quoteLeftCount: numField(block, 'quoteLeftCount'),
+      quoteExtraCount: numField(block, 'quoteExtraCount'),
+      qualityScore: strField(block, 'qualityScore') || String(numField(block, 'qualityScore') || ''),
     });
   }
   const totalItems = Number((html.match(/pageView\.totalItems = '(\d+)'/) || [])[1] || items.length);
@@ -133,7 +155,9 @@ export function toLead(row) {
     imageUrl: row.imageUrl || '',
     haveAnnexes: Boolean(row.haveAnnexes),
     identitySource: hint ? 'rfq_text' : '',
-    painPoints: `公开询盘：${row.subject || ''}${qty ? `，数量 ${qty}` : ''}${row.country ? `，${row.country}` : ''}${when ? `，发布 ${when}` : ''}。${(row.description || '').slice(0, 180)} 列表页无邮箱。${extras}`,
+    postedAt: row.postedAt || '',
+    publicCard: { ...row },
+    painPoints: `公开询盘：${row.subject || ''}${qty ? `，数量 ${qty}` : ''}${row.country ? `，${row.country}` : ''}${when ? `，发布 ${when}` : ''}。${(row.description || '').slice(0, 400)} 列表页无邮箱。${extras}`,
   };
 }
 
@@ -204,7 +228,9 @@ export async function searchAlibabaPublic({
   return { items, reportsMeta: { pages, totalItems, totalPages } };
 }
 
-export const alibabaCrawlProgress = { pagesFetched: 0, kept: 0, country: '', page: 0 };
+export const alibabaCrawlProgress = {
+  pagesFetched: 0, kept: 0, created: 0, country: '', category: '', page: 0, slice: '',
+};
 
 export async function crawlAlibabaPublic({
   keyword = '',
@@ -212,19 +238,24 @@ export async function crawlAlibabaPublic({
   maxPages = 100,
   fanout = true,
   onProgress,
+  onBatch,
 } = {}) {
   const cap = Math.max(1, Math.min(Number(maxPages) || 100, 100));
+  alibabaCrawlProgress.created = alibabaCrawlProgress.created || 0;
   const seen = new Set();
   const items = [];
   let totalItems = 0;
   let pagesFetched = 0;
+  const pageBudget = fanout ? 9000 : cap + 2;
 
   async function ingestPage(opts) {
+    if (pagesFetched >= pageBudget) return { items: [], old: 0, totalPages: 1, totalItems: 0, exhausted: true };
     if (pagesFetched) await sleep(GAP_MS);
     const data = await fetchListPage(opts);
     pagesFetched += 1;
     totalItems = Math.max(totalItems, data.totalItems || 0);
     let old = 0;
+    const fresh = [];
     for (const row of data.items) {
       if (!keepSince(row, since)) {
         old += 1;
@@ -233,29 +264,50 @@ export async function crawlAlibabaPublic({
       const key = row.rfqId || row.url || row.subject;
       if (!key || seen.has(key)) continue;
       seen.add(key);
-      items.push(toLead(row));
+      const lead = toLead(row);
+      items.push(lead);
+      fresh.push(lead);
     }
-    const snap = { pagesFetched, kept: items.length, country: opts.country || '', page: opts.page };
+    const snap = {
+      pagesFetched,
+      kept: items.length,
+      country: opts.country || '',
+      category: opts.categoryIds || '',
+      page: opts.page,
+      slice: [opts.country, opts.categoryIds].filter(Boolean).join('/') || 'all',
+    };
     Object.assign(alibabaCrawlProgress, snap);
     onProgress?.(snap);
+    if (fresh.length && onBatch) await onBatch(fresh, snap);
     return { ...data, old };
   }
 
-  const first = await ingestPage({ keyword, page: 1 });
-  const mainPages = Math.min(cap, first.totalPages || cap);
-  for (let page = 2; page <= mainPages; page++) {
-    await ingestPage({ keyword, page });
+  async function crawlSlice(base, labelPages = cap) {
+    const first = await ingestPage({ ...base, page: 1 });
+    if (first.exhausted) return first;
+    const pages = Math.min(labelPages, first.totalPages || labelPages);
+    for (let page = 2; page <= pages; page++) {
+      const data = await ingestPage({ ...base, page });
+      if (data.exhausted) break;
+      if (data.items.length && data.old === data.items.length) break;
+      if (page >= (data.totalPages || 1)) break;
+    }
+    return first;
   }
+
+  const first = await crawlSlice({ keyword });
 
   if (fanout && !keyword) {
     const countries = (first.countries || [])
-      .filter((c) => c.count >= 200)
-      .slice(0, 24);
-    for (const { code } of countries) {
-      for (let page = 1; page <= cap; page++) {
-        const data = await ingestPage({ page, country: code });
-        if (data.items.length && data.old === data.items.length) break;
-        if (page >= (data.totalPages || 1)) break;
+      .filter((c) => c.count >= 40)
+      .slice(0, 80);
+    for (const { code, count } of countries) {
+      const slice = await crawlSlice({ page: 1, country: code });
+      const needCats = count > cap * PAGE_SIZE && (slice.old || 0) === 0;
+      if (!needCats) continue;
+      const cats = (slice.categoryIds || []).slice(0, 16);
+      for (const cat of cats) {
+        await crawlSlice({ country: code, categoryIds: cat });
       }
     }
   }

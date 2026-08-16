@@ -1,7 +1,7 @@
 import { db, save, logActivity } from './store.js';
 import { config } from './config.js';
 import { alibabaReady, searchAlibaba } from './alibaba.js';
-import { searchAlibabaPublic, crawlAlibabaPublic, ALIBABA_PUBLIC_FIELDS, PUBLIC_SINCE_DEFAULT } from './publicRfq.js';
+import { searchAlibabaPublic, crawlAlibabaPublic, alibabaCrawlProgress, ALIBABA_PUBLIC_FIELDS, PUBLIC_SINCE_DEFAULT } from './publicRfq.js';
 import { searchGoldSupplier, searchTradeIndia } from './b2bPublic.js';
 import { parseAlibabaExportRow } from './researchPath.js';
 import { normalizePaidExportRow } from './paidSources.js';
@@ -483,7 +483,7 @@ function alreadyImported(it) {
   });
 }
 
-export function importRfqItems(items = [], { quiet = false } = {}) {
+export function importRfqItems(items = [], { quiet = false, silent = false, persist = true } = {}) {
   const created = [];
   for (const it of items) {
     if (ownInbox(it.email)) continue;
@@ -508,10 +508,12 @@ export function importRfqItems(items = [], { quiet = false } = {}) {
       imageUrl: it.imageUrl || '',
       haveAnnexes: Boolean(it.haveAnnexes),
       identitySource: it.identitySource || '',
+      postedAt: it.postedAt || it.publicCard?.postedAt || '',
+      publicCard: it.publicCard || null,
     };
     db.customers.unshift(customer);
     created.push(customer);
-    if (!quiet) {
+    if (!quiet && !silent) {
       logActivity({
         customerId: customer.id,
         action: 'RFQ 入库',
@@ -521,7 +523,7 @@ export function importRfqItems(items = [], { quiet = false } = {}) {
       });
     }
   }
-  if (quiet && created.length) {
+  if (quiet && !silent && created.length) {
     const bySource = {};
     for (const c of created) bySource[c.source || '未知'] = (bySource[c.source || '未知'] || 0) + 1;
     logActivity({
@@ -529,7 +531,7 @@ export function importRfqItems(items = [], { quiet = false } = {}) {
       detail: `新入库 ${created.length} 条：${Object.entries(bySource).map(([k, v]) => `${k} ${v}`).join('，')}`,
     });
   }
-  save();
+  if (persist) save();
   return created;
 }
 
@@ -545,8 +547,29 @@ export async function crawlAllAndImport({
   const add = (key, run) => (!want || want.has(key) ? run : null);
   const reports = [];
   const buckets = await Promise.allSettled([
-    add('alibaba_public', crawlAlibabaPublic({ keyword: '', since, maxPages: alibabaPages, fanout })
-      .then((r) => ({ key: 'alibaba_public', name: '阿里国际站公开 RFQ', items: r.items, extra: { pages: r.pages, totalItems: r.totalItems } }))),
+    add('alibaba_public', crawlAlibabaPublic({
+      keyword: '',
+      since,
+      maxPages: alibabaPages,
+      fanout,
+      onBatch: async (batch) => {
+        if (!doImport) return;
+        const added = importRfqItems(batch, { quiet: true, silent: true, persist: false });
+        alibabaCrawlProgress.created = (alibabaCrawlProgress.created || 0) + added.length;
+        if ((alibabaCrawlProgress.created || 0) % 80 < added.length) save();
+        if ((alibabaCrawlProgress.created || 0) % 400 < added.length) {
+          logActivity({
+            action: '阿里公开列表',
+            detail: `已入库 ${alibabaCrawlProgress.created} 条（${alibabaCrawlProgress.slice || ''} 第 ${alibabaCrawlProgress.page} 页）`,
+          });
+        }
+      },
+    }).then((r) => ({
+      key: 'alibaba_public',
+      name: '阿里国际站公开 RFQ',
+      items: doImport ? [] : r.items,
+      extra: { pages: r.pages, totalItems: r.totalItems, kept: r.items.length, created: alibabaCrawlProgress.created || 0 },
+    }))),
     add('usaspending', searchUsaspending({ limit: govLimit, since, broad: true })
       .then((items) => ({ key: 'usaspending', name: 'USASpending.gov', items }))),
     add('uk', searchUk({ keyword: '', limit: govLimit, since })
@@ -569,7 +592,7 @@ export async function crawlAllAndImport({
         key: r.value.key,
         name: r.value.name,
         ok: true,
-        count: r.value.items.length,
+        count: r.value.extra?.kept ?? r.value.items.length,
         ...(r.value.extra || {}),
       });
     } else {
@@ -586,7 +609,14 @@ export async function crawlAllAndImport({
     unique.push(it);
   }
   const created = doImport ? importRfqItems(unique, { quiet: true }) : [];
-  return { since, items: unique, reports, createdCount: created.length, created };
+  const aliCreated = Number(alibabaCrawlProgress.created || 0);
+  return {
+    since,
+    items: unique,
+    reports,
+    createdCount: created.length + aliCreated,
+    created,
+  };
 }
 
 function firstText(row, keys) {

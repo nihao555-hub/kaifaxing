@@ -492,6 +492,7 @@ export async function promoteLeads(ids = [], { researchLimit = 6 } = {}) {
 export function startLeadPipeline() {
   const p = ensurePipeline();
   applyTextCompanyHints();
+  pruneResearchQueue();
   enqueueDailyBacklog();
   pumpResearch();
   if (tickTimer) clearInterval(tickTimer);
