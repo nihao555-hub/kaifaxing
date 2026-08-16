@@ -47,3 +47,12 @@ body {
 .fade-in-up {
   animation: fadeInUp 0.25s ease both;
 }
+
+@keyframes pulseRing {
+  0% { box-shadow: 0 0 0 0 rgb(47 108 255 / 0.35); }
+  70% { box-shadow: 0 0 0 8px rgb(47 108 255 / 0); }
+  100% { box-shadow: 0 0 0 0 rgb(47 108 255 / 0); }
+}
+.pulse-ring {
+  animation: pulseRing 1.6s ease-out infinite;
+}
