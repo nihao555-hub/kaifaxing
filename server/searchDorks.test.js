@@ -11,6 +11,9 @@ import {
   resultRelevant,
   emailsFromSnippets,
   countryTld,
+  countrySearchTerms,
+  rfqProductTerms,
+  hostFitsCountry,
 } from './searchDorks.js';
 
 const BING_FIXTURE = `
@@ -72,8 +75,17 @@ describe('research dorks', () => {
 
   it('adds a country TLD formula for Alibaba-style leads', () => {
     assert.equal(countryTld('United Arab Emirates'), 'ae');
-    const q = researchDorks('NMG TECHNICAL SERVICE L.L.C', { country: 'United Arab Emirates' });
+    assert.ok(countrySearchTerms('United Arab Emirates').includes('UAE'));
+    const q = researchDorks('NMG TECHNICAL SERVICE L.L.C', {
+      country: 'United Arab Emirates',
+      product: 'Chiller Compressor Refrigeration Spare Parts',
+    });
+    assert.ok(q[0].includes('UAE') || q[0].includes('Dubai'));
     assert.ok(q.some((s) => /site:\.ae/i.test(s)));
+    assert.ok(q.some((s) => /Chiller|Compressor/i.test(s)));
+    assert.deepEqual(rfqProductTerms('公开询盘：Chiller Compressor Refrigeration Spare Parts，数量 100 Piece'), ['Chiller', 'Compressor', 'Refrigeration']);
+    assert.equal(hostFitsCountry('https://nmguae.com/', 'United Arab Emirates'), true);
+    assert.equal(hostFitsCountry('https://www.nmggeo.com/', 'United Arab Emirates'), false);
   });
 
   it('adds site: and @domain formulas when the official website is known', () => {
@@ -176,6 +188,19 @@ describe('bing / google html parse', () => {
       ]
     );
     assert.equal(guess, 'https://www.stc.ac.uk/');
+  });
+
+  it('prefers a country-matching host over a same-brand foreign site', () => {
+    const guess = pickOfficialSite(
+      ['https://www.nmggeo.com/', 'https://nmguae.com/'],
+      'NMG TECHNICAL SERVICE L.L.C',
+      [
+        { url: 'https://www.nmggeo.com/', title: 'NMG Geo' },
+        { url: 'https://nmguae.com/', title: 'NMG Technical Services Dubai UAE' },
+      ],
+      { country: 'United Arab Emirates' }
+    );
+    assert.equal(guess, 'https://nmguae.com/');
   });
 });
 

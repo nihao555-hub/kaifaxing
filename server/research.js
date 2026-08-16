@@ -23,6 +23,9 @@ import {
   searchCompanyPages,
   scoreResearchUrl,
   hostFromWebsite,
+  hostFitsCountry,
+  countrySearchTerms,
+  rfqProductTerms,
 } from './searchDorks.js';
 import { gradeKyb, hasVerifiedEntity, hasProcurementTrace, isForwarderName } from './kyb.js';
 import { screenSanctions } from './sanctions.js';
@@ -272,17 +275,27 @@ function emailSourceLabel(emails) {
   return `官网公开页找到 ${list}`;
 }
 
-function pageMentionsCompany(html, company) {
+const GENERIC_VERIFY = new Set([
+  'technical', 'service', 'services', 'group', 'trading', 'company', 'international',
+  'industrial', 'industries', 'global', 'general', 'limited', 'private',
+]);
+
+function pageMentionsCompany(html, company, { country = '', pageUrl = '' } = {}) {
   const tokens = significantTokens(company).filter((t) => t.length >= 4);
   const title = pageTitle(html).toLowerCase();
   const text = `${title} ${pageText(html).slice(0, 4000)}`.toLowerCase();
+  const distinctive = tokens.filter((t) => !GENERIC_VERIFY.has(t));
+  const place = countrySearchTerms(country).map((s) => s.replace(/"/g, '').toLowerCase());
+  const countryHit = place.some((w) => w.length >= 3 && text.includes(w)) || hostFitsCountry(pageUrl, country);
+  if (country && distinctive.length <= 1 && !countryHit) return false;
   if (!tokens.length) {
-    return significantTokens(company).some((t) => text.includes(t));
+    return significantTokens(company).some((t) => text.includes(t)) && (!country || countryHit);
   }
-  const hits = tokens.filter((t) => text.includes(t));
-  if (hits.length >= Math.min(2, tokens.length)) return true;
+  const hits = (distinctive.length ? distinctive : tokens).filter((t) => text.includes(t));
+  if (!hits.length) return false;
+  if (hits.length >= Math.min(2, (distinctive.length || tokens.length))) return true;
   if (hits.length >= 1 && title.includes(hits[0])) return true;
-  return hits.length >= 1 && tokens[0].length >= 5;
+  return hits.length >= 1 && hits[0].length >= 5;
 }
 
 async function fetchText(url, { timeout = 12000, accept = '*/*' } = {}) {
@@ -453,6 +466,11 @@ const COUNTRY_TLD = {
   西班牙: 'es', ES: 'es',
   意大利: 'it', IT: 'it',
   印度: 'in', IN: 'in',
+  阿联酋: 'ae', UAE: 'ae', AE: 'ae', 'United Arab Emirates': 'ae',
+  智利: 'cl', Chile: 'cl',
+  菲律宾: 'ph', Philippines: 'ph',
+  土耳其: 'tr', Turkey: 'tr',
+  巴基斯坦: 'pk', Pakistan: 'pk',
 };
 
 function guessWebsiteUrls(company, country) {
@@ -600,7 +618,7 @@ async function resolveEntity(company, country = '') {
   return { website, legalName, extract, facts: facts.filter((f) => f.value), sources, relatedNote };
 }
 
-async function harvestContacts(website, company, { extraUrls = [] } = {}) {
+async function harvestContacts(website, company, { extraUrls = [], country = '' } = {}) {
   if (!website) return { emails: [], phones: [], pages: [], verified: false };
   let homeRes = { ok: false, status: 0, url: website, text: '', error: '未请求' };
   for (const home of websiteCandidates(website)) {
@@ -609,7 +627,8 @@ async function harvestContacts(website, company, { extraUrls = [] } = {}) {
   }
   if (!homeRes.ok) return { emails: [], phones: [], pages: [], verified: false, error: homeRes.error || `HTTP ${homeRes.status}` };
 
-  const verified = pageMentionsCompany(homeRes.text, company) || pageMentionsCompany(homeRes.text, pageTitle(homeRes.text));
+  const verified = pageMentionsCompany(homeRes.text, company, { country, pageUrl: homeRes.url })
+    || pageMentionsCompany(homeRes.text, pageTitle(homeRes.text), { country, pageUrl: homeRes.url });
   const pages = [{ url: homeRes.url, title: pageTitle(homeRes.text) || '官网首页' }];
   const htmls = [homeRes.text];
   const [wayback, crtHosts] = await Promise.all([
@@ -700,7 +719,7 @@ async function harvestSearchContacts({ urls = [], snippetEmails = [], company, w
     if (!r.ok || !r.text) continue;
     if (isAssetUrl(r.url) || !/<html|mailto:|contact|@/i.test(r.text.slice(0, 4000))) continue;
     const sameHost = host ? sameRegistrableHost(r.url, host) : false;
-    if (!sameHost && !pageMentionsCompany(r.text, company)) continue;
+    if (!sameHost && !pageMentionsCompany(r.text, company, { country: '', pageUrl: r.url })) continue;
     pages.push({ url: r.url, title: pageTitle(r.text) || url });
     let pageHost = host;
     try { pageHost = host || new URL(r.url).hostname; } catch { /* ignore */ }
@@ -824,10 +843,12 @@ export async function researchLead(customer, { useAi = true } = {}) {
     });
 
     const searchedWebsite = website;
+    const productTerms = rfqProductTerms(`${customer.title || ''} ${customer.painPoints || ''}`);
     search = await searchCompanyPages(legalName || company, {
       maxQueries: 5,
       website: searchedWebsite,
       country: customer.country,
+      product: productTerms,
     });
     notes.push(...search.notes);
     const openWebsite = website;
@@ -840,7 +861,7 @@ export async function researchLead(customer, { useAi = true } = {}) {
     }
 
     let harvested = website
-      ? await harvestContacts(website, legalName || company, { extraUrls: search.urls })
+      ? await harvestContacts(website, legalName || company, { extraUrls: search.urls, country: customer.country })
       : { emails: [], phones: [], pages: [], verified: false };
 
     if (harvested.website && !harvested.verified && !openWebsite) {
@@ -851,12 +872,13 @@ export async function researchLead(customer, { useAi = true } = {}) {
     const haveVerifiedSite = Boolean(harvested.pages?.length && (harvested.verified || openWebsite));
     if (!haveVerifiedSite && (search.urls.length || resolved.facts.length)) {
       const guesses = [
+        ...search.urls.filter((u) => hostFitsCountry(u, customer.country)).slice(0, 4),
         ...search.urls.filter((u) => scoreResearchUrl(u) >= 3).slice(0, 4),
         ...guessWebsiteUrls(legalName || company, customer.country),
       ];
       for (const guess of guesses) {
         if (openWebsite && guess === openWebsite) continue;
-        const probe = await harvestContacts(guess, legalName || company, { extraUrls: search.urls });
+        const probe = await harvestContacts(guess, legalName || company, { extraUrls: search.urls, country: customer.country });
         if (probe.pages?.length && probe.verified) {
           harvested = probe;
           website = probe.website || guess;
@@ -881,7 +903,7 @@ export async function researchLead(customer, { useAi = true } = {}) {
       search = mergeSearchHits(search, siteSearch);
       notes.push(...siteSearch.notes);
       if (harvested.website) {
-        const again = await harvestContacts(website, legalName || company, { extraUrls: search.urls });
+        const again = await harvestContacts(website, legalName || company, { extraUrls: search.urls, country: customer.country });
         if (again.emails?.length || again.pages?.length) harvested = { ...harvested, ...again, emails: again.emails?.length ? again.emails : harvested.emails };
       }
     }

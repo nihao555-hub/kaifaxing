@@ -98,12 +98,103 @@ export function countryTld(country) {
   return hit ? COUNTRY_TLD[hit] : '';
 }
 
-/** 外贸找联系方式的搜索公式：site:域名 + 角色邮箱 + 联系页 + PDF信头，不是扒私人邮箱 */
-export function researchDorks(company, { website, country } = {}) {
+const COUNTRY_ALIASES = {
+  ae: ['UAE', 'Dubai', '"Abu Dhabi"', '"United Arab Emirates"'],
+  uk: ['UK', 'Britain', '"United Kingdom"'],
+  us: ['USA', '"United States"'],
+  de: ['Germany', 'Deutschland'],
+  fr: ['France'],
+  nl: ['Netherlands', 'Holland'],
+  in: ['India'],
+  cl: ['Chile', 'Santiago'],
+  ph: ['Philippines', 'Manila'],
+  tr: ['Turkey', 'Türkiye', 'Istanbul'],
+  pk: ['Pakistan', 'Karachi', 'Lahore'],
+  au: ['Australia'],
+  es: ['Spain'],
+  it: ['Italy'],
+  pl: ['Poland'],
+  at: ['Austria'],
+  fi: ['Finland'],
+  cz: ['Czech'],
+  pt: ['Portugal'],
+  be: ['Belgium'],
+  se: ['Sweden'],
+  no: ['Norway'],
+  dk: ['Denmark'],
+  ch: ['Switzerland'],
+  ca: ['Canada'],
+  mx: ['Mexico'],
+  br: ['Brazil'],
+  za: ['"South Africa"'],
+  sg: ['Singapore'],
+  my: ['Malaysia'],
+  id: ['Indonesia'],
+  th: ['Thailand'],
+  vn: ['Vietnam'],
+  jp: ['Japan'],
+  kr: ['Korea'],
+  sa: ['"Saudi Arabia"', 'Riyadh'],
+  eg: ['Egypt'],
+  ie: ['Ireland'],
+  nz: ['"New Zealand"'],
+};
+
+export function countrySearchTerms(country) {
+  const tld = countryTld(country);
+  const aliases = COUNTRY_ALIASES[tld] || [];
+  const raw = String(country || '').replace(/"/g, '').trim();
+  const extra = raw && raw.length >= 3 ? [`"${raw}"`] : [];
+  return [...new Set([...aliases, ...extra])];
+}
+
+export function countryOrClause(country) {
+  const terms = countrySearchTerms(country);
+  if (!terms.length) return '';
+  return terms.length === 1 ? terms[0] : `(${terms.join(' OR ')})`;
+}
+
+const PRODUCT_STOP = new Set([
+  'piece', 'pieces', 'quantity', 'hello', 'looking', 'need', 'public', 'rfq', 'alibaba',
+  'buyer', 'please', 'thank', 'thanks', 'quote', 'quotation', 'inquiry', 'enquiry',
+  'days', 'ago', 'before', 'released', 'posted', 'country', 'unit', 'units',
+  'hope', 'well', 'dear', 'sir', 'madam', 'kindly', 'wanted', 'want',
+]);
+
+export function rfqProductTerms(text, { max = 3 } = {}) {
+  const raw = String(text || '')
+    .replace(/公开询盘：/g, ' ')
+    .replace(/列表页无邮箱[\s\S]*$/g, ' ')
+    .replace(/数量[^，,]*/g, ' ');
+  const words = raw
+    .split(/[^a-zA-Z0-9]+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length >= 4 && !PRODUCT_STOP.has(w.toLowerCase()) && !/^\d+$/.test(w));
+  return [...new Set(words)].slice(0, max);
+}
+
+export function hostFitsCountry(url, country) {
+  const tld = countryTld(country);
+  const host = hostFromWebsite(url);
+  if (!host || !country) return false;
+  if (tld && (host === tld || host.endsWith(`.${tld}`) || host.endsWith(`.co.${tld}`) || host.endsWith(`.com.${tld}`))) {
+    return true;
+  }
+  const aliases = countrySearchTerms(country).map((s) => s.replace(/"/g, '').toLowerCase().replace(/\s+/g, ''));
+  return aliases.some((a) => a.length >= 3 && host.includes(a));
+}
+
+/** 外贸找联系方式的搜索公式：公司名+国家/产品，再 site:域名 / PDF，不是扒私人邮箱 */
+export function researchDorks(company, { website, country, product } = {}) {
   const q = quotedName(company);
   if (q.length < 5) return [];
   const host = hostFromWebsite(website);
   const tld = countryTld(country);
+  const place = countryOrClause(country);
+  const products = Array.isArray(product)
+    ? product.filter(Boolean).slice(0, 3)
+    : rfqProductTerms(product);
+  const productClause = products.length ? `(${products.map((p) => `"${String(p).replace(/"/g, '')}"`).join(' OR ')})` : '';
   const out = [];
   if (host) {
     out.push(`site:${host} (contact OR "contact us" OR impressum OR kontakt OR "info@" OR "sales@" OR "procurement@")`);
@@ -111,11 +202,16 @@ export function researchDorks(company, { website, country } = {}) {
     out.push(`site:${host} (inurl:impressum OR inurl:privacy OR inurl:legal OR "privacy policy")`);
     out.push(`${q} (contact OR "info@" OR procurement) filetype:pdf`);
   } else {
+    if (place) {
+      out.push(`${q} ${place} (official OR website OR contact OR "contact us" OR "info@")`);
+      if (productClause) out.push(`${q} ${place} ${productClause} (contact OR email OR "info@")`);
+      if (tld) out.push(`${q} site:.${tld} (contact OR impressum OR "info@" OR inurl:contact)`);
+    }
     out.push(`${q} (contact OR "contact us" OR impressum OR kontakt OR procurement OR purchasing)`);
     out.push(`${q} (info@ OR sales@ OR procurement@ OR purchasing@ OR enquiry@ OR inquiry@ OR contact@)`);
-    if (tld) out.push(`${q} site:.${tld} (contact OR impressum OR "info@" OR inurl:contact)`);
-    out.push(`${q} (contact OR "info@" OR procurement OR impressum) filetype:pdf`);
-    out.push(`${q} (intitle:contact OR intitle:impressum OR "email us" OR "e-mail")`);
+    if (!place) out.push(`${q} (contact OR "info@" OR procurement OR impressum) filetype:pdf`);
+    if (!place) out.push(`${q} (intitle:contact OR intitle:impressum OR "email us" OR "e-mail")`);
+    else out.push(`${q} ${place} (contact OR "info@") filetype:pdf`);
   }
   return out;
 }
@@ -409,9 +505,10 @@ function isBlockedSearchPage(html) {
     && !/<cite|\/url\?q=|result__a|<item>/i.test(html);
 }
 
-export function pickOfficialSite(urls, company, items = []) {
+export function pickOfficialSite(urls, company, items = [], { country } = {}) {
   const tokens = companyTokens(company);
   const meta = new Map(items.map((it) => [normalizeUrl(it.url), it]));
+  const placeWords = countrySearchTerms(country).map((s) => s.replace(/"/g, '').toLowerCase());
   const ranked = urls
     .map((u) => {
       let s = 0;
@@ -421,6 +518,7 @@ export function pickOfficialSite(urls, company, items = []) {
         const path = parsed.pathname;
         const it = meta.get(normalizeUrl(u)) || { title: '', desc: '' };
         const title = String(it.title || '').toLowerCase();
+        const desc = String(it.desc || '').toLowerCase();
         const strongHost = tokens.filter((t) => !WEAK_TOKENS.has(t) && host.includes(t));
         const titleHits = tokens.filter((t) => title.includes(t));
         if (strongHost.length) s += 8;
@@ -429,6 +527,8 @@ export function pickOfficialSite(urls, company, items = []) {
         if (path === '/' || path === '') s += 3;
         else if (/contact|about|impressum|official/i.test(path)) s += 2;
         if (/\.edu$|\.ac\.|gov|go\.\w+$/i.test(host)) s += 1;
+        if (hostFitsCountry(u, country)) s += 8;
+        if (placeWords.some((w) => w.length >= 3 && (title.includes(w) || desc.includes(w) || host.includes(w.replace(/\s+/g, ''))))) s += 4;
         if (isEncyclopediaHost(host)) s -= 10;
         if (!resultRelevant({ url: u, title: it.title, desc: it.desc }, company) && !strongHost.length) s = 0;
       } catch {
@@ -451,8 +551,8 @@ function mergeParsed(into, extra) {
   into.snippetEmails.push(...(extra.snippetEmails || []));
 }
 
-export async function searchCompanyPages(company, { maxQueries = 4, website, country } = {}) {
-  const queries = researchDorks(company, { website, country }).slice(0, maxQueries);
+export async function searchCompanyPages(company, { maxQueries = 4, website, country, product } = {}) {
+  const queries = researchDorks(company, { website, country, product }).slice(0, maxQueries);
   const siteHost = hostFromWebsite(website);
   const urls = [];
   const items = [];
@@ -464,7 +564,18 @@ export async function searchCompanyPages(company, { maxQueries = 4, website, cou
   for (const query of queries) {
     const parsed = { urls: [], items: [], snippetEmails: [] };
     const wantHtml = /@|email|intitle:contact|site:/i.test(query);
+    const preferGoogle = Boolean(country) && !siteHost && /UAE|Dubai|site:\.|official OR website/i.test(query);
     try {
+      if (preferGoogle) {
+        const google = await searchGoogle(query);
+        if (google.status === 200 && google.html && !isBlockedSearchPage(google.html)) {
+          mergeParsed(parsed, parseSearchHtml(google.html, company, { siteHost, query }));
+          if (parsed.urls.length) engine = engine || 'google';
+        } else if (google.html && isBlockedSearchPage(google.html)) {
+          notes.push('谷歌结果页被 JS/验证码挡住，已改用必应公开结果');
+        }
+      }
+
       const rss = await searchBingRss(query);
       if (rss.status === 200 && rss.html && /<item>/i.test(rss.html)) {
         mergeParsed(parsed, parseBingRss(rss.html, company, { siteHost, query }));
@@ -481,7 +592,7 @@ export async function searchCompanyPages(company, { maxQueries = 4, website, cou
         }
       }
 
-      if (!parsed.urls.length && !parsed.snippetEmails.length) {
+      if (!preferGoogle && !parsed.urls.length && !parsed.snippetEmails.length) {
         const google = await searchGoogle(query);
         if (google.status === 200 && google.html && !isBlockedSearchPage(google.html)) {
           mergeParsed(parsed, parseSearchHtml(google.html, company, { siteHost, query }));
@@ -510,7 +621,7 @@ export async function searchCompanyPages(company, { maxQueries = 4, website, cou
   }
 
   urls.sort((a, b) => scoreResearchUrl(b) - scoreResearchUrl(a));
-  const officialGuess = pickOfficialSite(urls, company, items);
+  const officialGuess = pickOfficialSite(urls, company, items, { country });
 
   return {
     queries,
