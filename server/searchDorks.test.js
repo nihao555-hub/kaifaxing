@@ -10,6 +10,7 @@ import {
   pickOfficialSite,
   resultRelevant,
   emailsFromSnippets,
+  countryTld,
 } from './searchDorks.js';
 
 const BING_FIXTURE = `
@@ -58,14 +59,21 @@ const TYNE_JUNK_RSS = `
 `;
 
 describe('research dorks', () => {
-  it('builds quoted contact / role-email formulas without a known site', () => {
+  it('builds quoted contact / role-email / pdf formulas without a known site', () => {
     const q = researchDorks('Tyne Coast College');
-    assert.equal(q.length, 3);
+    assert.ok(q.length >= 4);
     assert.ok(q[0].startsWith('"Tyne Coast College"'));
     assert.ok(/contact us|procurement|impressum/i.test(q[0]));
     assert.ok(/info@|procurement@/i.test(q[1]));
-    assert.ok(/intitle:contact|email us/i.test(q[2]));
+    assert.ok(q.some((s) => /filetype:pdf/i.test(s)));
+    assert.ok(q.some((s) => /intitle:contact|email us/i.test(s)));
     assert.deepEqual(researchDorks(''), []);
+  });
+
+  it('adds a country TLD formula for Alibaba-style leads', () => {
+    assert.equal(countryTld('United Arab Emirates'), 'ae');
+    const q = researchDorks('NMG TECHNICAL SERVICE L.L.C', { country: 'United Arab Emirates' });
+    assert.ok(q.some((s) => /site:\.ae/i.test(s)));
   });
 
   it('adds site: and @domain formulas when the official website is known', () => {
@@ -74,6 +82,7 @@ describe('research dorks', () => {
     assert.ok(q.some((s) => /"info@"|"sales@"/i.test(s)));
     assert.ok(!q.some((s) => /info@stc\.ac\.uk/i.test(s)));
     assert.ok(q[0].startsWith('site:stc.ac.uk'));
+    assert.ok(q.some((s) => /filetype:pdf/i.test(s)));
   });
 });
 
@@ -85,6 +94,7 @@ describe('search result URL filters', () => {
     assert.equal(isUsefulResearchUrl('https://en.wikipedia.org/wiki/Tyne_Coast_College', 'Tyne Coast College'), true);
     assert.equal(isUsefulResearchUrl('https://www.stc.ac.uk/theme.css', 'Tyne Coast College'), false);
     assert.equal(isUsefulResearchUrl('https://www.xvideos.com/tags/oral', 'HOWOGE Wohnungsbaugesellschaft mbH'), false);
+    assert.equal(isUsefulResearchUrl('https://sourcing.alibaba.com/rfq_detail.htm?rfqId=1', 'Quazar Technologies'), false);
   });
 
   it('scores contact pages above homepages', () => {

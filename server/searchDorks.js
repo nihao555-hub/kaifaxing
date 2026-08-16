@@ -46,19 +46,77 @@ function sameSiteHost(url, siteHost) {
   return host === site || host.endsWith(`.${site}`) || site.endsWith(`.${host}`);
 }
 
-/** 外贸找联系方式的搜索公式：site:域名 + 角色邮箱 + 联系页，不是扒私人邮箱 */
-export function researchDorks(company, { website } = {}) {
+/** 询盘国家 → 公开站点后缀。用来收窄官网/Impressum，不是猜私人邮箱。 */
+const COUNTRY_TLD = {
+  'united kingdom': 'uk', uk: 'uk', gb: 'uk', 英国: 'uk',
+  'united states': 'us', usa: 'us', us: 'us', 美国: 'us',
+  germany: 'de', de: 'de', 德国: 'de',
+  france: 'fr', fr: 'fr', 法国: 'fr',
+  netherlands: 'nl', nl: 'nl', 荷兰: 'nl',
+  india: 'in', in: 'in', 印度: 'in',
+  'united arab emirates': 'ae', uae: 'ae', ae: 'ae', 阿联酋: 'ae',
+  chile: 'cl', cl: 'cl', 智利: 'cl',
+  philippines: 'ph', ph: 'ph', 菲律宾: 'ph',
+  turkey: 'tr', tr: 'tr', 土耳其: 'tr',
+  pakistan: 'pk', pk: 'pk', 巴基斯坦: 'pk',
+  australia: 'au', au: 'au', 澳大利亚: 'au',
+  jamaica: 'jm', jm: 'jm',
+  spain: 'es', es: 'es', 西班牙: 'es',
+  italy: 'it', it: 'it', 意大利: 'it',
+  poland: 'pl', pl: 'pl', 波兰: 'pl',
+  austria: 'at', at: 'at', 奥地利: 'at',
+  finland: 'fi', fi: 'fi', 芬兰: 'fi',
+  'czech republic': 'cz', czech: 'cz', cze: 'cz', 捷克: 'cz',
+  portugal: 'pt', pt: 'pt', 葡萄牙: 'pt',
+  belgium: 'be', be: 'be', 比利时: 'be',
+  sweden: 'se', se: 'se', 瑞典: 'se',
+  norway: 'no', no: 'no', 挪威: 'no',
+  denmark: 'dk', dk: 'dk', 丹麦: 'dk',
+  switzerland: 'ch', ch: 'ch', 瑞士: 'ch',
+  canada: 'ca', ca: 'ca', 加拿大: 'ca',
+  mexico: 'mx', mx: 'mx', 墨西哥: 'mx',
+  brazil: 'br', br: 'br', 巴西: 'br',
+  'south africa': 'za', za: 'za', 南非: 'za',
+  singapore: 'sg', sg: 'sg', 新加坡: 'sg',
+  malaysia: 'my', my: 'my', 马来西亚: 'my',
+  indonesia: 'id', id: 'id', 印尼: 'id',
+  thailand: 'th', th: 'th', 泰国: 'th',
+  vietnam: 'vn', vn: 'vn', 越南: 'vn',
+  japan: 'jp', jp: 'jp', 日本: 'jp',
+  'south korea': 'kr', korea: 'kr', kr: 'kr', 韩国: 'kr',
+  'saudi arabia': 'sa', saudi: 'sa', sa: 'sa', 沙特: 'sa',
+  egypt: 'eg', eg: 'eg', 埃及: 'eg',
+  ireland: 'ie', ie: 'ie', 爱尔兰: 'ie',
+  'new zealand': 'nz', nz: 'nz',
+};
+
+export function countryTld(country) {
+  const key = String(country || '').trim().toLowerCase();
+  if (!key) return '';
+  if (COUNTRY_TLD[key]) return COUNTRY_TLD[key];
+  const hit = Object.keys(COUNTRY_TLD).find((k) => key.includes(k) && k.length >= 4);
+  return hit ? COUNTRY_TLD[hit] : '';
+}
+
+/** 外贸找联系方式的搜索公式：site:域名 + 角色邮箱 + 联系页 + PDF信头，不是扒私人邮箱 */
+export function researchDorks(company, { website, country } = {}) {
   const q = quotedName(company);
   if (q.length < 5) return [];
   const host = hostFromWebsite(website);
+  const tld = countryTld(country);
   const out = [];
   if (host) {
     out.push(`site:${host} (contact OR "contact us" OR impressum OR kontakt OR "info@" OR "sales@" OR "procurement@")`);
     out.push(`${q} ("@${host}" OR "info@" OR "sales@") site:${host}`);
+    out.push(`site:${host} (inurl:impressum OR inurl:privacy OR inurl:legal OR "privacy policy")`);
+    out.push(`${q} (contact OR "info@" OR procurement) filetype:pdf`);
+  } else {
+    out.push(`${q} (contact OR "contact us" OR impressum OR kontakt OR procurement OR purchasing)`);
+    out.push(`${q} (info@ OR sales@ OR procurement@ OR purchasing@ OR enquiry@ OR inquiry@ OR contact@)`);
+    if (tld) out.push(`${q} site:.${tld} (contact OR impressum OR "info@" OR inurl:contact)`);
+    out.push(`${q} (contact OR "info@" OR procurement OR impressum) filetype:pdf`);
+    out.push(`${q} (intitle:contact OR intitle:impressum OR "email us" OR "e-mail")`);
   }
-  out.push(`${q} (contact OR "contact us" OR impressum OR kontakt OR procurement OR purchasing)`);
-  out.push(`${q} (info@ OR sales@ OR procurement@ OR purchasing@ OR enquiry@ OR inquiry@ OR contact@)`);
-  out.push(`${q} (intitle:contact OR intitle:impressum OR "email us" OR "e-mail")`);
   return out;
 }
 
@@ -139,7 +197,7 @@ export function normalizeUrl(url) {
 }
 
 export function isJunkSearchHost(host) {
-  return /(?:^|\.)(bing|microsoft|msn|google|gstatic|duckduckgo|brave|yahoo|yandex|baidu|facebook|fbcdn|linkedin|twitter|x\.com|instagram|youtube|pinterest|tiktok|reddit|quora|imdb|nytimes|wordle|github|nasa\.gov|space\.com|devpost|pitchbook|play\.google|xvideos|pornhub|xhamster|xnxx|onlyfans)\./i.test(
+  return /(?:^|\.)(bing|microsoft|msn|google|gstatic|duckduckgo|brave|yahoo|yandex|baidu|facebook|fbcdn|linkedin|twitter|x\.com|instagram|youtube|pinterest|tiktok|reddit|quora|imdb|nytimes|wordle|github|nasa\.gov|space\.com|devpost|pitchbook|play\.google|alibaba|1688|made-in-china|globalsources|tradeindia|indiamart|xvideos|pornhub|xhamster|xnxx|onlyfans)\./i.test(
     `.${host}.`
   );
 }
@@ -393,8 +451,8 @@ function mergeParsed(into, extra) {
   into.snippetEmails.push(...(extra.snippetEmails || []));
 }
 
-export async function searchCompanyPages(company, { maxQueries = 4, website } = {}) {
-  const queries = researchDorks(company, { website }).slice(0, maxQueries);
+export async function searchCompanyPages(company, { maxQueries = 4, website, country } = {}) {
+  const queries = researchDorks(company, { website, country }).slice(0, maxQueries);
   const siteHost = hostFromWebsite(website);
   const urls = [];
   const items = [];

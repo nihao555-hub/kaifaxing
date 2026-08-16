@@ -824,7 +824,11 @@ export async function researchLead(customer, { useAi = true } = {}) {
     });
 
     const searchedWebsite = website;
-    search = await searchCompanyPages(legalName || company, { maxQueries: 4, website: searchedWebsite });
+    search = await searchCompanyPages(legalName || company, {
+      maxQueries: 5,
+      website: searchedWebsite,
+      country: customer.country,
+    });
     notes.push(...search.notes);
     const openWebsite = website;
     if (search.officialGuess && !website) website = search.officialGuess;
@@ -869,7 +873,11 @@ export async function researchLead(customer, { useAi = true } = {}) {
     }
 
     if (!(harvested.emails || []).length && website && hostFromWebsite(website) !== hostFromWebsite(searchedWebsite)) {
-      const siteSearch = await searchCompanyPages(legalName || company, { maxQueries: 2, website });
+      const siteSearch = await searchCompanyPages(legalName || company, {
+        maxQueries: 3,
+        website,
+        country: customer.country,
+      });
       search = mergeSearchHits(search, siteSearch);
       notes.push(...siteSearch.notes);
       if (harvested.website) {
