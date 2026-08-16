@@ -6,6 +6,7 @@ import BatchModal from './components/BatchModal.jsx';
 import AddCustomerModal from './components/AddCustomerModal.jsx';
 import ImportRfqModal from './components/ImportRfqModal.jsx';
 import LeadsPage from './components/LeadsPage.jsx';
+import SettingsPage from './components/SettingsPage.jsx';
 import { api } from './api.js';
 
 export default function App() {
@@ -81,7 +82,9 @@ export default function App() {
   return (
     <div className="flex h-full overflow-hidden bg-page">
       <Sidebar page={page} onNavigate={setPage} />
-      {page === 'leads' ? (
+      {page === 'settings' ? (
+        <SettingsPage />
+      ) : page === 'leads' ? (
         <LeadsPage
           onGoOutreach={async () => {
             setPage('outreach');

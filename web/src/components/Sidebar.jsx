@@ -9,7 +9,7 @@ const NAV_ITEMS = [
   { key: 'settings', label: '设置', icon: Settings },
 ];
 
-const OPEN_KEYS = new Set(['outreach', 'leads']);
+const OPEN_KEYS = new Set(['outreach', 'leads', 'settings']);
 
 export default function Sidebar({ page = 'outreach', onNavigate }) {
   return (

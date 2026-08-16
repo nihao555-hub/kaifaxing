@@ -739,6 +739,7 @@ export default function LeadsPage({ onGoOutreach }) {
                   customer={customer}
                   research={research}
                   searchLinks={detail?.searchLinks || research?.searchLinks || []}
+                  googleReady={Boolean(detail?.searchStatus?.ready)}
                   pickedEmail={pickedEmail}
                   setPickedEmail={setPickedEmail}
                 />
@@ -841,13 +842,15 @@ function EmailPick({ emails, pickedEmail, setPickedEmail, name }) {
   );
 }
 
-function GoogleSearchLinks({ links }) {
+function GoogleSearchLinks({ links, googleReady = false }) {
   if (!links?.length) return null;
   return (
     <div className="space-y-2">
-      <div className="text-[12px] font-medium text-[#334155]">用谷歌搜（浏览器打开）</div>
+      <div className="text-[12px] font-medium text-[#334155]">{googleReady ? '谷歌公式（已接官方 API）' : '用谷歌搜（浏览器打开）'}</div>
       <p className="text-[11px] leading-relaxed text-[#94a3b8]">
-        服务器抓谷歌会被验证码挡住。同一套公式请在浏览器里打开，核到官网角色邮箱后再点「挖邮箱」或手工填入。
+        {googleReady
+          ? '背调已走谷歌官方 JSON 接口。下面公式仍可在浏览器里核对；核到官网角色邮箱后再点「挖邮箱」或手工填入。'
+          : '服务器抓谷歌会被验证码挡住。到「设置」填 Custom Search 的 Key + CX 即可自动跑。同一套公式也可先在浏览器里打开。'}
       </p>
       <ul className="space-y-1.5">
         {links.map((item) => (
@@ -864,7 +867,7 @@ function GoogleSearchLinks({ links }) {
   );
 }
 
-function DrawerBody({ tab, customer, research, searchLinks = [], pickedEmail, setPickedEmail }) {
+function DrawerBody({ tab, customer, research, searchLinks = [], googleReady = false, pickedEmail, setPickedEmail }) {
   const address = research?.address || factValue(research, /注册地址|总部|地址/);
   const industry = research?.industry || factValue(research, /行业/) || customer.industry;
   const size = research?.employees || factValue(research, /员工规模/);
@@ -908,7 +911,7 @@ function DrawerBody({ tab, customer, research, searchLinks = [], pickedEmail, se
         {research?.phones?.length > 0 && (
           <div className="text-[12px] text-[#475569]">公开电话：{research.phones.join(' · ')}</div>
         )}
-        <GoogleSearchLinks links={searchLinks} />
+        <GoogleSearchLinks links={searchLinks} googleReady={googleReady} />
       </div>
     );
   }
@@ -999,7 +1002,7 @@ function DrawerBody({ tab, customer, research, searchLinks = [], pickedEmail, se
           </div>
         )}
         <div className="mt-3">
-          <GoogleSearchLinks links={searchLinks} />
+          <GoogleSearchLinks links={searchLinks} googleReady={googleReady} />
         </div>
         {(research?.searchPages || []).length > 0 && (
           <div className="mt-2">

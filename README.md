@@ -38,6 +38,14 @@ npm run dev           # 同时启动后端(3001)和前端(5173)
 
 阿里国际站：用卖家账号在开放平台创建应用，申请 `alibaba.icbu.rfq.search`，授权后写入 `ALIBABA_APP_KEY` / `ALIBABA_APP_SECRET` / `ALIBABA_SESSION`。不爬页面。
 
+谷歌搜索：不要抓 `google.com/search` HTML（会被验证码挡住）。GitHub 上能接的是官方 [`googleapis` Custom Search](https://github.com/googleapis/google-api-nodejs-client)：
+
+1. 打开 [Programmable Search Engine](https://programmablesearchengine.google.com/) 新建搜索引擎，勾选 Search the entire web，记下 CX
+2. 在 Google Cloud 启用 Custom Search API，创建 API Key
+3. 写入 `GOOGLE_API_KEY` / `GOOGLE_CSE_ID`，或在应用「设置」页保存后点「试跑」
+
+免费额度约 100 次/天。新账号若已无法开通 CSE，可改用 Serper（同一套外贸公式，返回谷歌结果 JSON）。公共 SearXNG / 直接扒谷歌页在服务器上会被 403/验证码挡住，不会去绕。
+
 其他付费聚合（TendersOnTime、dgMarket 等）或卖家后台导出：
 
 ```bash
@@ -66,6 +74,8 @@ npm run build && npm start   # 后端 3001 端口同时托管前端构建产物
 | `SEND_DAILY_LIMIT` | 单日发送上限 | 50 |
 | `SAM_API_KEY` | SAM.gov Public API Key（可选） | 空 |
 | `ALIBABA_APP_KEY` / `ALIBABA_APP_SECRET` / `ALIBABA_SESSION` | 阿里国际站开放平台（可选） | 空 |
+| `GOOGLE_API_KEY` / `GOOGLE_CSE_ID` | 谷歌官方 Custom Search JSON API（也可在「设置」里填） | 空 |
+| `SERPER_API_KEY` | 可选，[serper.dev](https://serper.dev/) 谷歌 SERP JSON；CSE 没开通时用 | 空 |
 | `PIPELINE_DAILY_HOUR` | 北京时间每日拉新询盘的整点 | 7 |
 | `PIPELINE_REFRESH_HOURS` | 当天已同步后再扫一轮的间隔（小时） | 6 |
 

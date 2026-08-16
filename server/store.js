@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { seedCustomers, seedThreads, seedAiPanel } from './data/seed.js';
 import { isPersonLikeLead } from './research.js';
-import { config } from './config.js';
+import { config, googleSearchStatus } from './config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.join(__dirname, 'data', 'db.json');
@@ -23,6 +23,47 @@ function load() {
 }
 
 export const db = load();
+
+function ensureSearchSettings() {
+  if (!db.settings) db.settings = {};
+  if (!db.settings.search) db.settings.search = {};
+}
+
+export function applyStoredSearchSettings() {
+  ensureSearchSettings();
+  const saved = db.settings.search;
+  if (!process.env.GOOGLE_API_KEY && saved.apiKey) config.google.apiKey = saved.apiKey;
+  if (!process.env.GOOGLE_CSE_ID && !process.env.GOOGLE_CX && saved.cseId) config.google.cseId = saved.cseId;
+  if (!process.env.SERPER_API_KEY && saved.serperKey) config.google.serperKey = saved.serperKey;
+}
+
+export function saveSearchSettings({ apiKey, cseId, serperKey, clear } = {}) {
+  ensureSearchSettings();
+  if (clear) {
+    db.settings.search = {};
+    if (!process.env.GOOGLE_API_KEY) config.google.apiKey = '';
+    if (!process.env.GOOGLE_CSE_ID && !process.env.GOOGLE_CX) config.google.cseId = '';
+    if (!process.env.SERPER_API_KEY) config.google.serperKey = '';
+    save();
+    return googleSearchStatus();
+  }
+  if (typeof apiKey === 'string' && apiKey.trim()) {
+    db.settings.search.apiKey = apiKey.trim();
+    if (!process.env.GOOGLE_API_KEY) config.google.apiKey = apiKey.trim();
+  }
+  if (typeof cseId === 'string' && cseId.trim()) {
+    db.settings.search.cseId = cseId.trim();
+    if (!process.env.GOOGLE_CSE_ID && !process.env.GOOGLE_CX) config.google.cseId = cseId.trim();
+  }
+  if (typeof serperKey === 'string' && serperKey.trim()) {
+    db.settings.search.serperKey = serperKey.trim();
+    if (!process.env.SERPER_API_KEY) config.google.serperKey = serperKey.trim();
+  }
+  save();
+  return googleSearchStatus();
+}
+
+applyStoredSearchSettings();
 
 export function isDemoCustomer(c) {
   const email = String(c?.email || '').toLowerCase();

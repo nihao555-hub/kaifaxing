@@ -2,8 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { config } from './config.js';
-import { db, save, getCustomer, listCustomers, leadFacets } from './store.js';
+import { config, googleSearchReady, googleSearchStatus } from './config.js';
+import { db, save, getCustomer, listCustomers, leadFacets, saveSearchSettings } from './store.js';
 import { generateEmail, evaluateEmail, suggestSendTime } from './agent.js';
 import { createBatchJob, getJob, listJobs } from './scheduler.js';
 import { sentToday, logActivity } from './store.js';
@@ -12,7 +12,7 @@ import { ingestInbound } from './inbox.js';
 import { listSources, searchRfq, importRfqItems, ingestCommercial, crawlAlibabaPublic, crawlAllAndImport, ALIBABA_PUBLIC_FIELDS, PUBLIC_SINCE_DEFAULT } from './rfq.js';
 import { alibabaCrawlProgress } from './publicRfq.js';
 import { isPlausibleEmail, isPersonLikeLead } from './research.js';
-import { buildSearchLinks, rfqProductTerms } from './searchDorks.js';
+import { buildSearchLinks, rfqProductTerms, searchGoogleCse, searchSerper, parseGoogleCse, parseSerper } from './searchDorks.js';
 import { GITHUB_TOOLS } from './githubTools.js';
 import {
   startLeadPipeline,
@@ -164,6 +164,66 @@ app.post('/api/rfq/ingest', (req, res) => {
 });
 
 app.get('/api/research/tools', (req, res) => res.json({ tools: GITHUB_TOOLS }));
+
+app.get('/api/search/status', (req, res) => {
+  res.json({
+    ...googleSearchStatus(),
+    docs: {
+      cse: 'https://developers.google.com/custom-search/v1/overview',
+      cseGithub: 'https://github.com/googleapis/google-api-nodejs-client',
+      program: 'https://programmablesearchengine.google.com/',
+      serper: 'https://serper.dev/',
+    },
+  });
+});
+
+app.post('/api/search/settings', (req, res) => {
+  const status = saveSearchSettings({
+    apiKey: req.body?.apiKey,
+    cseId: req.body?.cseId,
+    serperKey: req.body?.serperKey,
+    clear: Boolean(req.body?.clear),
+  });
+  res.json(status);
+});
+
+app.post('/api/search/google/test', async (req, res) => {
+  const query = String(req.body?.query || '"NMG TECHNICAL SERVICE" Dubai (website OR contact OR "info@")').slice(0, 240);
+  const company = String(req.body?.company || 'NMG TECHNICAL SERVICE L.L.C');
+  const country = String(req.body?.country || 'United Arab Emirates');
+  if (!googleSearchReady()) {
+    return res.status(400).json({
+      error: '还没接上谷歌。GitHub 上能用的是官方 Custom Search JSON API，请先填 API Key + CX；或填 Serper Key。',
+      ...googleSearchStatus(),
+    });
+  }
+  try {
+    let engine = '';
+    let parsed = { urls: [], items: [], snippetEmails: [] };
+    if (config.google.apiKey && config.google.cseId) {
+      const cse = await searchGoogleCse(query);
+      if (!cse.ok) return res.status(cse.status || 502).json({ error: cse.error || '谷歌官方 API 失败', ...googleSearchStatus() });
+      parsed = parseGoogleCse(cse.json, company, { query, country });
+      engine = 'google-cse';
+    } else {
+      const serper = await searchSerper(query);
+      if (!serper.ok) return res.status(serper.status || 502).json({ error: serper.error || 'Serper 失败', ...googleSearchStatus() });
+      parsed = parseSerper(serper.json, company, { query, country });
+      engine = 'serper';
+    }
+    res.json({
+      query,
+      engine,
+      urls: parsed.urls,
+      items: parsed.items.slice(0, 8),
+      snippetEmails: parsed.snippetEmails,
+      officialGuess: parsed.urls.find((u) => /nmguae/i.test(u)) || parsed.urls[0] || '',
+      ...googleSearchStatus(),
+    });
+  } catch (err) {
+    res.status(502).json({ error: `谷歌搜索试跑失败：${err.message}`, ...googleSearchStatus() });
+  }
+});
 app.get('/api/rfq/pipeline', (req, res) => res.json(getPipelineState()));
 app.post('/api/rfq/pipeline/sync', async (req, res) => {
   try {
@@ -208,7 +268,7 @@ app.get('/api/rfq/leads/:id', (req, res) => {
         website: customer.website || customer.research?.website,
         product: rfqProductTerms(`${customer.title || ''} ${customer.painPoints || ''}`),
       }));
-  res.json({ customer, research: customer.research || null, searchLinks });
+  res.json({ customer, research: customer.research || null, searchLinks, searchStatus: googleSearchStatus() });
 });
 
 app.post('/api/rfq/leads/research-queue', (req, res) => {

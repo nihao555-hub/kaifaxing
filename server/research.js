@@ -21,6 +21,7 @@ import {
 } from './githubTools.js';
 import {
   searchCompanyPages,
+  searchEngineLabel,
   scoreResearchUrl,
   hostFromWebsite,
   hostFitsCountry,
@@ -966,7 +967,7 @@ export async function researchLead(customer, { useAi = true } = {}) {
       label: '搜索公式',
       ok: search.urls.length > 0 || search.snippetEmails.length > 0,
       detail: search.urls.length || search.snippetEmails.length
-        ? `${search.engine === 'google' ? '谷歌' : '必应'}解析到 ${search.urls.length} 个公开页${search.snippetEmails.length ? `，摘要里看到 ${search.snippetEmails.length} 个邮箱线索` : ''}`
+        ? `${searchEngineLabel(search.engine)}解析到 ${search.urls.length} 个公开页${search.snippetEmails.length ? `，摘要里看到 ${search.snippetEmails.length} 个邮箱线索` : ''}`
         : '搜索没有可用的背调页',
     });
   }
@@ -1133,7 +1134,9 @@ export async function researchLead(customer, { useAi = true } = {}) {
         || (t.id === 'whoiser' && Boolean(harvestedTools.whoiser))
         || (t.id === 'waybackurls' && Boolean(harvestedTools.wayback))
         || (t.id === 'subfinder' && Boolean(harvestedTools.crtsh))
-        || (t.id === 'search-dorks' && Boolean(harvestedTools.searchDorks)),
+        || (t.id === 'search-dorks' && Boolean(harvestedTools.searchDorks))
+        || (t.id === 'google-cse' && search.engine === 'google-cse')
+        || (t.id === 'serper' && search.engine === 'serper'),
     })),
   };
 }

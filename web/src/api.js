@@ -70,6 +70,9 @@ export const api = {
     req(`/api/rfq/leads/${id}/apply-contact`, { method: 'POST', body: JSON.stringify(payload) }),
   rfqPromote: (ids) => req('/api/rfq/leads/promote', { method: 'POST', body: JSON.stringify({ ids }) }),
   researchTools: () => req('/api/research/tools'),
+  searchStatus: () => req('/api/search/status'),
+  saveSearchSettings: (payload) => req('/api/search/settings', { method: 'POST', body: JSON.stringify(payload) }),
+  testGoogleSearch: (payload) => req('/api/search/google/test', { method: 'POST', body: JSON.stringify(payload || {}) }),
   rfqPipeline: () => req('/api/rfq/pipeline'),
   rfqPipelineSync: () => req('/api/rfq/pipeline/sync', { method: 'POST', body: '{}' }),
 };

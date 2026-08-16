@@ -42,6 +42,13 @@ export const config = {
 
   samApiKey: process.env.SAM_API_KEY || '',
 
+  // 谷歌搜索：官方 Custom Search JSON API（googleapis），或可选 Serper
+  google: {
+    apiKey: process.env.GOOGLE_API_KEY || '',
+    cseId: process.env.GOOGLE_CSE_ID || process.env.GOOGLE_CX || '',
+    serperKey: process.env.SERPER_API_KEY || '',
+  },
+
   // 阿里国际站官方开放平台（ICBU RFQ），不爬页面
   alibaba: {
     appKey: process.env.ALIBABA_APP_KEY || '',
@@ -68,3 +75,36 @@ export const config = {
     pass: process.env.SMTP_PASS || 'PB8dPj25kfvGVitE',
   },
 };
+
+export function maskSecret(value) {
+  const text = String(value || '');
+  if (!text) return '';
+  if (text.length <= 8) return '••••';
+  return `${text.slice(0, 4)}••••${text.slice(-4)}`;
+}
+
+export function googleCseReady() {
+  return Boolean(config.google.apiKey && config.google.cseId);
+}
+
+export function serperReady() {
+  return Boolean(config.google.serperKey);
+}
+
+export function googleSearchReady() {
+  return googleCseReady() || serperReady();
+}
+
+export function googleSearchStatus() {
+  return {
+    cseReady: googleCseReady(),
+    serperReady: serperReady(),
+    ready: googleSearchReady(),
+    apiKeySet: Boolean(config.google.apiKey),
+    cseIdSet: Boolean(config.google.cseId),
+    serperSet: Boolean(config.google.serperKey),
+    apiKeyMasked: maskSecret(config.google.apiKey),
+    cseIdMasked: maskSecret(config.google.cseId),
+    serperMasked: maskSecret(config.google.serperKey),
+  };
+}

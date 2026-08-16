@@ -15,7 +15,11 @@ import {
   rfqProductTerms,
   hostFitsCountry,
   buildSearchLinks,
+  parseGoogleCse,
+  parseSerper,
+  searchEngineLabel,
 } from './searchDorks.js';
+import { config, googleCseReady, maskSecret } from './config.js';
 
 const BING_FIXTURE = `
 <html><body>
@@ -259,5 +263,45 @@ describe('bing rss parse', () => {
     assert.ok(!urls.some((u) => /wordle/i.test(u)));
     const dropped = parseBingRss(rss, 'Tyne Coast College');
     assert.ok(!dropped.urls.includes('https://www.stc.ac.uk/contact'));
+  });
+});
+
+describe('google official json', () => {
+  it('parses Custom Search items and keeps snippet role email', () => {
+    const parsed = parseGoogleCse({
+      items: [
+        { title: 'NMG Technical Services Dubai', link: 'https://nmguae.com/', snippet: 'HVAC in UAE. Email info@nmguae.com' },
+        { title: 'NMG Aerospace', link: 'https://www.nmgaerospace.com/', snippet: 'Aerospace' },
+        { title: 'LinkedIn', link: 'https://www.linkedin.com/company/nmg', snippet: 'NMG' },
+      ],
+    }, 'NMG TECHNICAL SERVICE L.L.C', {
+      query: '"NMG TECHNICAL SERVICE" Dubai (info@ OR sales@)',
+      country: 'United Arab Emirates',
+    });
+    assert.ok(parsed.urls.includes('https://nmguae.com/'));
+    assert.ok(!parsed.urls.some((u) => /linkedin/i.test(u)));
+    assert.ok(parsed.snippetEmails.includes('info@nmguae.com'));
+  });
+
+  it('parses Serper organic results the same way', () => {
+    const parsed = parseSerper({
+      organic: [
+        { title: 'NMG Technical Services', link: 'https://nmguae.com/contact', snippet: 'Call us or write sales@nmguae.com' },
+      ],
+    }, 'NMG TECHNICAL SERVICE L.L.C', { country: 'United Arab Emirates' });
+    assert.ok(parsed.urls.includes('https://nmguae.com/contact'));
+    assert.ok(parsed.snippetEmails.includes('sales@nmguae.com'));
+  });
+
+  it('labels engines and reports CSE readiness from key+cx', () => {
+    assert.equal(searchEngineLabel('google-cse'), '谷歌官方 API');
+    assert.equal(searchEngineLabel('serper'), 'Serper（谷歌结果）');
+    assert.equal(maskSecret('AIzaSyDummyKey12'), 'AIza••••ey12');
+    const prev = { apiKey: config.google.apiKey, cseId: config.google.cseId };
+    config.google.apiKey = 'test-key';
+    config.google.cseId = 'test-cx';
+    assert.equal(googleCseReady(), true);
+    config.google.apiKey = prev.apiKey;
+    config.google.cseId = prev.cseId;
   });
 });

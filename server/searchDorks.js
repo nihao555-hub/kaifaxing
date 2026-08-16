@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import { config, googleCseReady, serperReady } from './config.js';
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -545,6 +546,86 @@ export async function searchDuckDuckGo(query) {
   return fetchSearch(url);
 }
 
+export function searchEngineLabel(engine) {
+  if (engine === 'google-cse' || engine === 'google') return '谷歌官方 API';
+  if (engine === 'serper') return 'Serper（谷歌结果）';
+  if (engine === 'ddg') return 'DuckDuckGo';
+  if (engine === 'bing') return '必应';
+  return '公开搜索';
+}
+
+export function parseGoogleCse(json, company, { siteHost, query, country } = {}) {
+  const items = [];
+  const urls = [];
+  const seen = new Set();
+  const snippetTexts = [];
+  for (const raw of json?.items || []) {
+    const title = String(raw.title || '').trim();
+    const desc = String(raw.snippet || raw.htmlSnippet || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    snippetTexts.push(title, desc);
+    const n = acceptItem(raw.link, company, { title, desc }, { siteHost, country });
+    if (!n || seen.has(n)) continue;
+    seen.add(n);
+    urls.push(n);
+    items.push({ url: n, title, desc });
+  }
+  return { urls, items, snippetEmails: emailsFromSnippets(snippetTexts, { query }) };
+}
+
+export function parseSerper(json, company, { siteHost, query, country } = {}) {
+  const items = [];
+  const urls = [];
+  const seen = new Set();
+  const snippetTexts = [];
+  for (const raw of json?.organic || []) {
+    const title = String(raw.title || '').trim();
+    const desc = String(raw.snippet || '').replace(/\s+/g, ' ').trim();
+    snippetTexts.push(title, desc);
+    const n = acceptItem(raw.link, company, { title, desc }, { siteHost, country });
+    if (!n || seen.has(n)) continue;
+    seen.add(n);
+    urls.push(n);
+    items.push({ url: n, title, desc });
+  }
+  return { urls, items, snippetEmails: emailsFromSnippets(snippetTexts, { query }) };
+}
+
+function googleApiError(json, status) {
+  return json?.error?.message || json?.message || `HTTP ${status}`;
+}
+
+export async function searchGoogleCse(query) {
+  if (!googleCseReady()) return { ok: false, status: 0, error: '未配置 GOOGLE_API_KEY / GOOGLE_CSE_ID', json: null };
+  const url = new URL('https://www.googleapis.com/customsearch/v1');
+  url.searchParams.set('key', config.google.apiKey);
+  url.searchParams.set('cx', config.google.cseId);
+  url.searchParams.set('q', query);
+  url.searchParams.set('num', '10');
+  const res = await fetch(url, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(15000),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, status: res.status, error: googleApiError(json, res.status), json };
+  return { ok: true, status: res.status, error: '', json };
+}
+
+export async function searchSerper(query) {
+  if (!serperReady()) return { ok: false, status: 0, error: '未配置 SERPER_API_KEY', json: null };
+  const res = await fetch('https://google.serper.dev/search', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-KEY': config.google.serperKey,
+    },
+    body: JSON.stringify({ q: query, num: 10 }),
+    signal: AbortSignal.timeout(15000),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, status: res.status, error: googleApiError(json, res.status), json };
+  return { ok: true, status: res.status, error: '', json };
+}
+
 function isBlockedSearchPage(html) {
   if (!html || html.length < 400) return true;
   return /enablejs|enable javascript|unusual traffic|captcha|detected unusual/i.test(html)
@@ -602,8 +683,27 @@ function mergeParsed(into, extra) {
   into.snippetEmails.push(...(extra.snippetEmails || []));
 }
 
+async function searchOfficialGoogle(query, company, { siteHost, country } = {}) {
+  if (googleCseReady()) {
+    const cse = await searchGoogleCse(query);
+    if (cse.ok) {
+      return { engine: 'google-cse', parsed: parseGoogleCse(cse.json, company, { siteHost, query, country }), error: '' };
+    }
+    return { engine: '', parsed: { urls: [], items: [], snippetEmails: [] }, error: `谷歌官方 API ${cse.status}：${String(cse.error || '').slice(0, 80)}` };
+  }
+  if (serperReady()) {
+    const serper = await searchSerper(query);
+    if (serper.ok) {
+      return { engine: 'serper', parsed: parseSerper(serper.json, company, { siteHost, query, country }), error: '' };
+    }
+    return { engine: '', parsed: { urls: [], items: [], snippetEmails: [] }, error: `Serper ${serper.status}：${String(serper.error || '').slice(0, 80)}` };
+  }
+  return { engine: '', parsed: { urls: [], items: [], snippetEmails: [] }, error: '' };
+}
+
 export async function searchCompanyPages(company, { maxQueries = 4, website, country, product } = {}) {
-  const queries = researchDorks(company, { website, country, product }).slice(0, maxQueries);
+  const officialReady = googleCseReady() || serperReady();
+  const queries = researchDorks(company, { website, country, product }).slice(0, officialReady ? Math.min(maxQueries, 3) : maxQueries);
   const siteHost = hostFromWebsite(website);
   const urls = [];
   const items = [];
@@ -627,7 +727,16 @@ export async function searchCompanyPages(company, { maxQueries = 4, website, cou
       }
     };
     try {
-      if (preferGoogle) {
+      if (officialReady) {
+        const official = await searchOfficialGoogle(query, company, { siteHost, country });
+        if (official.error) notes.push(official.error);
+        mergeParsed(parsed, official.parsed);
+        if (official.engine && (official.parsed.urls.length || official.parsed.snippetEmails.length)) {
+          engine = engine || official.engine;
+        }
+      }
+
+      if (!parsed.urls.length && !officialReady && preferGoogle) {
         const google = await searchGoogle(query);
         if (google.status === 200 && google.html && !isBlockedSearchPage(google.html)) {
           mergeParsed(parsed, parseSearchHtml(google.html, company, { siteHost, query, country }));
@@ -638,23 +747,25 @@ export async function searchCompanyPages(company, { maxQueries = 4, website, cou
         }
       }
 
-      const rss = await searchBingRss(query);
-      if (rss.status === 200 && rss.html && /<item>/i.test(rss.html)) {
-        mergeParsed(parsed, parseBingRss(rss.html, company, { siteHost, query, country }));
-        if (parsed.urls.length) engine = engine || 'bing';
-      }
-
-      if (wantHtml || !parsed.urls.length) {
-        const bing = await searchBing(query);
-        if (bing.status === 200 && bing.html && !isBlockedSearchPage(bing.html)) {
-          mergeParsed(parsed, parseSearchHtml(bing.html, company, { siteHost, query, country }));
+      if (!parsed.urls.length) {
+        const rss = await searchBingRss(query);
+        if (rss.status === 200 && rss.html && /<item>/i.test(rss.html)) {
+          mergeParsed(parsed, parseBingRss(rss.html, company, { siteHost, query, country }));
           if (parsed.urls.length) engine = engine || 'bing';
-        } else if (bing.status && bing.status !== 200) {
-          notes.push(`必应 ${bing.status}：${query.slice(0, 40)}`);
+        }
+
+        if (wantHtml || !parsed.urls.length) {
+          const bing = await searchBing(query);
+          if (bing.status === 200 && bing.html && !isBlockedSearchPage(bing.html)) {
+            mergeParsed(parsed, parseSearchHtml(bing.html, company, { siteHost, query, country }));
+            if (parsed.urls.length) engine = engine || 'bing';
+          } else if (bing.status && bing.status !== 200) {
+            notes.push(`必应 ${bing.status}：${query.slice(0, 40)}`);
+          }
         }
       }
 
-      if (!preferGoogle && !parsed.urls.length && !parsed.snippetEmails.length) {
+      if (!officialReady && !preferGoogle && !parsed.urls.length && !parsed.snippetEmails.length) {
         const google = await searchGoogle(query);
         if (google.status === 200 && google.html && !isBlockedSearchPage(google.html)) {
           mergeParsed(parsed, parseSearchHtml(google.html, company, { siteHost, query, country }));
@@ -675,14 +786,14 @@ export async function searchCompanyPages(company, { maxQueries = 4, website, cou
       items.push(...(parsed.items || []));
       snippetEmails.push(...parsed.snippetEmails);
       if (parsed.urls.length) {
-        notes.push(`${engine === 'google' ? '谷歌' : engine === 'ddg' ? 'DuckDuckGo' : '必应'}公式命中 ${parsed.urls.length} 页：${query.slice(0, 52)}`);
+        notes.push(`${searchEngineLabel(engine)}公式命中 ${parsed.urls.length} 页：${query.slice(0, 52)}`);
       } else {
         notes.push(`公式无相关页：${query.slice(0, 48)}`);
       }
     } catch (e) {
       notes.push(`搜索失败：${e.message}`);
     }
-    await new Promise((r) => setTimeout(r, 800));
+    await new Promise((r) => setTimeout(r, officialReady ? 400 : 800));
   }
 
   urls.sort((a, b) => scoreResearchUrl(b) - scoreResearchUrl(a));
@@ -696,6 +807,7 @@ export async function searchCompanyPages(company, { maxQueries = 4, website, cou
     snippetEmails: [...new Set(snippetEmails)],
     officialGuess,
     engine,
+    googleReady: officialReady,
     notes,
   };
 }
