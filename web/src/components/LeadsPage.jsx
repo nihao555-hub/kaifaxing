@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Search,
   ChevronLeft,
@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ExternalLink,
   Mail,
-  Globe,
   ShieldCheck,
   AlertTriangle,
   RefreshCw,
@@ -61,31 +60,63 @@ function pageNumbers(page, pages) {
   return items;
 }
 
-function FilterGroup({ title, children, defaultOpen = true }) {
-  const [open, setOpen] = useState(defaultOpen);
+function useOutsideClose(open, onClose) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDoc = (e) => {
+      if (!ref.current?.contains(e.target)) onClose();
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open, onClose]);
+  return ref;
+}
+
+function FilterMenu({ label, summary, active, width = 220, children }) {
+  const [open, setOpen] = useState(false);
+  const ref = useOutsideClose(open, () => setOpen(false));
   return (
-    <div className="border-b border-[#eef1f6] py-3">
+    <div ref={ref} className="relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between px-4 text-[13px] font-medium text-[#334155]"
+        className={`flex h-8 max-w-[220px] items-center gap-1 rounded border px-2.5 text-[12px] ${
+          active ? 'border-primary bg-primary-light text-primary' : 'border-[#dbe2ea] bg-white text-[#475569] hover:border-[#c5cedb]'
+        }`}
       >
-        {title}
-        <ChevronDown size={14} className={`text-slate-400 transition ${open ? '' : '-rotate-90'}`} />
+        <span className="truncate">{summary ? `${label}：${summary}` : label}</span>
+        <ChevronDown size={13} className={`shrink-0 ${open ? 'rotate-180' : ''}`} />
       </button>
-      {open && <div className="mt-2 space-y-0.5 px-4">{children}</div>}
+      {open && (
+        <div
+          className="absolute top-[calc(100%+4px)] left-0 z-30 rounded border border-[#e8edf4] bg-white py-1 shadow-lg"
+          style={{ width }}
+          onClick={(e) => {
+            if (e.target.closest('[data-close-menu]')) setOpen(false);
+          }}
+        >
+          {children}
+        </div>
+      )}
     </div>
   );
 }
 
-function CheckRow({ checked, onChange, label, count, leading }) {
+function MenuOption({ active, onClick, label, count, leading }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2 rounded px-0.5 py-1.5 text-[12px] text-[#475569] hover:bg-[#f7f9fc]">
-      <input type="checkbox" checked={checked} onChange={onChange} className="accent-primary" />
+    <button
+      type="button"
+      data-close-menu
+      onClick={onClick}
+      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] hover:bg-[#f7f9fc] ${
+        active ? 'text-primary' : 'text-[#475569]'
+      }`}
+    >
       {leading}
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {count != null && <span className="shrink-0 text-[11px] text-[#94a3b8]">{count.toLocaleString()}</span>}
-    </label>
+    </button>
   );
 }
 
@@ -103,9 +134,8 @@ export default function LeadsPage({ onGoOutreach }) {
   const [tab, setTab] = useState('all');
   const [countryKeys, setCountryKeys] = useState([]);
   const [countryQ, setCountryQ] = useState('');
-  const [qualities, setQualities] = useState([]);
-  const [contacts, setContacts] = useState([]);
-  const [researches, setResearches] = useState([]);
+  const [quality, setQuality] = useState('');
+  const [research, setResearch] = useState('');
   const [page, setPage] = useState(0);
   const [limit, setLimit] = useState(20);
   const [rows, setRows] = useState([]);
@@ -140,25 +170,21 @@ export default function LeadsPage({ onGoOutreach }) {
       : countryGroups;
     if (kw) return matched.slice(0, 40);
     const selected = matched.filter((g) => countryKeys.includes(g.key));
-    const rest = matched.filter((g) => !countryKeys.includes(g.key)).slice(0, 10);
+    const rest = matched.filter((g) => !countryKeys.includes(g.key)).slice(0, 20);
     const keys = new Set();
     return [...selected, ...rest].filter((g) => (keys.has(g.key) ? false : keys.add(g.key)));
   }, [countryGroups, countryQ, countryKeys]);
 
-  const query = useMemo(() => {
-    const contactFromTab = tab === 'need_email' ? 'missing' : tab === 'has_email' ? 'found' : '';
-    const contactFromFilter = contacts.length === 1 ? contacts[0] : '';
-    return {
-      q,
-      country: selectedNames.join(','),
-      contact: contactFromTab || contactFromFilter,
-      quality: qualities.length === 1 ? qualities[0] : '',
-      research: researches.length === 1 ? researches[0] : '',
-      today: tab === 'today',
-      limit,
-      offset: page * limit,
-    };
-  }, [q, tab, selectedNames, qualities, contacts, researches, limit, page]);
+  const query = useMemo(() => ({
+    q,
+    country: selectedNames.join(','),
+    contact: tab === 'need_email' ? 'missing' : tab === 'has_email' ? 'found' : '',
+    quality,
+    research,
+    today: tab === 'today',
+    limit,
+    offset: page * limit,
+  }), [q, tab, selectedNames, quality, research, limit, page]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -266,11 +292,19 @@ export default function LeadsPage({ onGoOutreach }) {
   const resetFilters = () => {
     setCountryKeys([]);
     setCountryQ('');
-    setQualities([]);
-    setContacts([]);
-    setResearches([]);
+    setQuality('');
+    setResearch('');
     setPage(0);
   };
+
+  const countrySummary = useMemo(() => {
+    if (!countryKeys.length) return '';
+    const first = countryGroups.find((g) => g.key === countryKeys[0])?.label || '';
+    return countryKeys.length === 1 ? first : `${first} 等${countryKeys.length}国`;
+  }, [countryKeys, countryGroups]);
+  const qualityLabel = quality === 'company' ? '公司名' : quality === 'person' ? '个人昵称' : '';
+  const researchLabel = research === 'done' ? '已背调' : research === 'none' ? '未背调' : '';
+  const hasFilters = countryKeys.length > 0 || quality || research;
 
   const allChecked = rows.length > 0 && rows.every((r) => checked.includes(r.id));
   const batchResearch = async () => {
@@ -354,7 +388,71 @@ export default function LeadsPage({ onGoOutreach }) {
           </button>
         </form>
 
-        <div className="mt-1 flex items-end gap-7">
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <FilterMenu label="国家/地区" summary={countrySummary} active={countryKeys.length > 0} width={280}>
+            <div className="px-2 py-1.5">
+              <div className="flex h-8 items-center gap-1.5 rounded border border-[#e2e8f0] bg-[#f8fafc] px-2">
+                <Search size={12} className="text-[#94a3b8]" />
+                <input
+                  value={countryQ}
+                  onChange={(e) => setCountryQ(e.target.value)}
+                  placeholder="搜索国家，如 美国 / US"
+                  className="h-full w-full bg-transparent text-[12px] text-[#334155] placeholder:text-[#94a3b8] focus:outline-none"
+                />
+              </div>
+            </div>
+            <div className="thin-scroll max-h-64 overflow-y-auto">
+              {visibleCountries.map((g) => (
+                <label
+                  key={g.key}
+                  className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[12px] text-[#475569] hover:bg-[#f7f9fc]"
+                >
+                  <input
+                    type="checkbox"
+                    checked={countryKeys.includes(g.key)}
+                    onChange={() => {
+                      setPage(0);
+                      setCountryKeys((cur) => toggleValue(cur, g.key));
+                    }}
+                    className="accent-primary"
+                  />
+                  <CountryFlag country={g.iso || g.names[0]} size={14} />
+                  <span className="min-w-0 flex-1 truncate">{g.label}</span>
+                  <span className="text-[11px] text-[#94a3b8]">{g.count.toLocaleString()}</span>
+                </label>
+              ))}
+              {countryQ && visibleCountries.length === 0 && (
+                <div className="px-3 py-2 text-[12px] text-[#94a3b8]">没有匹配的国家</div>
+              )}
+            </div>
+          </FilterMenu>
+
+          <FilterMenu label="线索类型" summary={qualityLabel} active={Boolean(quality)}>
+            <MenuOption active={!quality} label="全部" onClick={() => { setQuality(''); setPage(0); }} />
+            <MenuOption active={quality === 'company'} label="公司名" onClick={() => { setQuality('company'); setPage(0); }} />
+            <MenuOption active={quality === 'person'} label="个人昵称" onClick={() => { setQuality('person'); setPage(0); }} />
+          </FilterMenu>
+
+          <FilterMenu label="背调状态" summary={researchLabel} active={Boolean(research)}>
+            <MenuOption active={!research} label="全部" onClick={() => { setResearch(''); setPage(0); }} />
+            <MenuOption active={research === 'none'} label="未背调" onClick={() => { setResearch('none'); setPage(0); }} />
+            <MenuOption
+              active={research === 'done'}
+              label="已背调"
+              count={facets.researched}
+              onClick={() => { setResearch('done'); setPage(0); }}
+            />
+          </FilterMenu>
+
+          {hasFilters && (
+            <button type="button" onClick={resetFilters} className="flex h-8 items-center gap-1 px-1.5 text-[12px] text-[#94a3b8] hover:text-primary">
+              <RotateCcw size={12} />
+              重置
+            </button>
+          )}
+        </div>
+
+        <div className="mt-2 flex items-end gap-7">
           {TABS.map((t) => (
             <button
               key={t.key}
@@ -394,111 +492,7 @@ export default function LeadsPage({ onGoOutreach }) {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1">
-        <aside className="thin-scroll w-[240px] shrink-0 overflow-y-auto border-r border-[#e8edf4] bg-white">
-          <div className="flex h-11 items-center justify-between border-b border-[#eef1f6] px-4">
-            <span className="text-[13px] font-medium text-[#334155]">筛选条件</span>
-            <button type="button" onClick={resetFilters} className="flex items-center gap-1 text-[12px] text-[#94a3b8] hover:text-primary" title="重置">
-              <RotateCcw size={12} />
-              重置
-            </button>
-          </div>
-
-          <FilterGroup title="国家/地区">
-            <div className="mb-1.5 flex h-8 items-center gap-1.5 rounded border border-[#e2e8f0] bg-[#f8fafc] px-2">
-              <Search size={12} className="text-[#94a3b8]" />
-              <input
-                value={countryQ}
-                onChange={(e) => setCountryQ(e.target.value)}
-                placeholder="搜索国家，如 美国 / US"
-                className="h-full w-full bg-transparent text-[12px] text-[#334155] placeholder:text-[#94a3b8] focus:outline-none"
-              />
-            </div>
-            {visibleCountries.map((g) => (
-              <CheckRow
-                key={g.key}
-                checked={countryKeys.includes(g.key)}
-                onChange={() => {
-                  setPage(0);
-                  setCountryKeys((cur) => toggleValue(cur, g.key));
-                }}
-                leading={<CountryFlag country={g.iso || g.names[0]} size={14} />}
-                label={g.label}
-                count={g.count}
-              />
-            ))}
-            {!countryQ && countryGroups.length > visibleCountries.length && (
-              <div className="pt-1 text-[11px] text-[#94a3b8]">输入国家名继续筛选，共 {countryGroups.length} 个</div>
-            )}
-            {countryQ && visibleCountries.length === 0 && (
-              <div className="py-2 text-[12px] text-[#94a3b8]">没有匹配的国家</div>
-            )}
-          </FilterGroup>
-
-          <FilterGroup title="线索类型">
-            <CheckRow
-              checked={qualities.includes('company')}
-              onChange={() => {
-                setPage(0);
-                setQualities((cur) => toggleValue(cur, 'company'));
-              }}
-              label="公司名"
-            />
-            <CheckRow
-              checked={qualities.includes('person')}
-              onChange={() => {
-                setPage(0);
-                setQualities((cur) => toggleValue(cur, 'person'));
-              }}
-              label="个人昵称"
-            />
-          </FilterGroup>
-
-          {tab !== 'need_email' && tab !== 'has_email' && (
-            <FilterGroup title="联系方式">
-              <CheckRow
-                checked={contacts.includes('missing')}
-                onChange={() => {
-                  setPage(0);
-                  setContacts((cur) => toggleValue(cur, 'missing'));
-                }}
-                label="待补邮箱"
-                count={facets.needEmail}
-              />
-              <CheckRow
-                checked={contacts.includes('found')}
-                onChange={() => {
-                  setPage(0);
-                  setContacts((cur) => toggleValue(cur, 'found'));
-                }}
-                label="已有邮箱"
-                count={facets.hasEmail}
-              />
-            </FilterGroup>
-          )}
-
-          <FilterGroup title="背调状态">
-            <CheckRow
-              checked={researches.includes('none')}
-              onChange={() => {
-                setPage(0);
-                setResearches((cur) => toggleValue(cur, 'none'));
-              }}
-              label="未背调"
-            />
-            <CheckRow
-              checked={researches.includes('done')}
-              onChange={() => {
-                setPage(0);
-                setResearches((cur) => toggleValue(cur, 'done'));
-              }}
-              label="已背调"
-              count={facets.researched}
-            />
-          </FilterGroup>
-        </aside>
-
-        <div className="flex min-w-0 flex-1 flex-col bg-white">
+      <div className="flex min-h-0 flex-1 flex-col bg-white">
           {checked.length > 0 && (
             <div className="flex h-9 items-center gap-3 border-b border-[#eef1f6] bg-[#f7f9fc] px-4 text-[12px] text-[#475569]">
               <span>已选 {checked.length} 条</span>
@@ -594,7 +588,7 @@ export default function LeadsPage({ onGoOutreach }) {
                 {!loading && rows.length === 0 && (
                   <tr>
                     <td colSpan={8} className="px-6 py-20 text-center text-[13px] text-[#94a3b8]">
-                      没有符合条件的询盘，试试换关键词或放宽左侧筛选
+                      没有符合条件的询盘，试试换关键词或放宽筛选
                     </td>
                   </tr>
                 )}
@@ -658,7 +652,6 @@ export default function LeadsPage({ onGoOutreach }) {
               </select>
             </div>
           </div>
-        </div>
       </div>
 
       {drawerOpen && (
