@@ -5,6 +5,7 @@ import {
   significantTokens,
   tokenOverlap,
   isPersonLikeDisplayName,
+  isPersonLikeLead,
   isPlausibleEmail,
   scoreEmail,
   extractEmails,
@@ -61,6 +62,8 @@ describe('company name helpers', () => {
     assert.equal(isPersonLikeDisplayName('KIER TRANSPORTATION LIMITED'), false);
     assert.equal(isPersonLikeDisplayName('L3HARRIS TECHNOLOGIES, INC.'), false);
     assert.equal(isPersonLikeDisplayName('A. Kroeze Beheer B.V.'), false);
+    assert.equal(isPersonLikeLead({ company: 'CHRIS', name: 'chris V' }), true);
+    assert.equal(isPersonLikeLead({ company: 'L3HARRIS TECHNOLOGIES, INC.', name: 'John' }), false);
   });
 
   it('keeps distinctive tokens', () => {
@@ -92,6 +95,7 @@ describe('public contact extractors', () => {
     assert.equal(isPlausibleEmail('cropped-stc-logo@2x.png'), false);
     assert.equal(isPlausibleEmail('noreply@stc.ac.uk'), false);
     assert.equal(isPlausibleEmail('info@stc.ac.uk'), true);
+    assert.equal(isPlausibleEmail('5464-0uk@howoge.de'), false);
   });
 
   it('extracts international phones', () => {

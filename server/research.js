@@ -125,6 +125,13 @@ export function isPersonLikeDisplayName(name) {
   return words.length >= 2 && words.every((w) => /^[A-Za-z][A-Za-z.'-]{1,20}$/.test(w));
 }
 
+export function isPersonLikeLead(customer) {
+  const company = String(customer?.company || '').trim();
+  const name = String(customer?.name || '').trim();
+  if (company) return isPersonLikeDisplayName(company);
+  return isPersonLikeDisplayName(name);
+}
+
 export function registrableDomain(host) {
   return tldtsDomain(host);
 }
@@ -139,6 +146,7 @@ export function isPlausibleEmail(email) {
   if (JUNK_DOMAIN.some((d) => domain === d || domain.endsWith(`.${d}`))) return false;
   if (/\.(png|jpe?g|gif|webp|svg|css|js|woff2?|ttf)$/i.test(local) || /\.(png|jpe?g|gif|webp|svg)$/i.test(domain)) return false;
   if (local.includes('cropped-') || local.includes('logo@') || local.startsWith('font-')) return false;
+  if (/\d{3,}/.test(local)) return false;
   if (!/^[a-z0-9][a-z0-9._+-]*$/.test(local)) return false;
   if (!/^[a-z0-9.-]+\.[a-z]{2,24}$/.test(domain)) return false;
   return true;
@@ -631,7 +639,7 @@ async function aiBrief(payload) {
 
 export async function researchLead(customer, { useAi = true } = {}) {
   const company = String(customer.company || customer.name || '').trim();
-  const personLike = isPersonLikeDisplayName(company) && (!customer.company || customer.company === customer.name);
+  const personLike = isPersonLikeLead(customer);
   const facts = [];
   const sources = [];
   const notes = [];

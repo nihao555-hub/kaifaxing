@@ -1,7 +1,7 @@
 import { config } from './config.js';
 import { db, save, getCustomer, isRfqLead, isDemoCustomer, logActivity } from './store.js';
 import { crawlAllAndImport } from './rfq.js';
-import { researchLead, isPersonLikeDisplayName, isPlausibleEmail } from './research.js';
+import { researchLead, isPersonLikeLead, isPlausibleEmail } from './research.js';
 import { VERIFIED_SOURCES } from './openSources.js';
 
 const AUTO_ROLES = new Set([
@@ -102,7 +102,7 @@ function enqueueDailyBacklog() {
   for (const c of db.customers) {
     if (!isRfqLead(c)) continue;
     if (c.research?.status === 'done' || c.research?.status === 'running') continue;
-    const person = isPersonLikeDisplayName(c.company || c.name) && (!c.company || c.company === c.name);
+    const person = isPersonLikeLead(c);
     if (person) continue;
     pending.push(c);
     if (pending.length >= config.pipeline.backlogPerDay * 3) break;
@@ -140,8 +140,7 @@ export async function runLeadResearch(customer, { useAi = true, autoApply = fals
   customer.research = { ...(customer.research || {}), status: 'running', updatedAt: new Date().toISOString() };
   save();
   try {
-    const personLike = isPersonLikeDisplayName(customer.company || customer.name)
-      && (!customer.company || customer.company === customer.name);
+    const personLike = isPersonLikeLead(customer);
     const report = await researchLead(customer, { useAi: useAi && !personLike });
     customer.research = report;
     if (report.website && !customer.website) customer.website = report.website;
@@ -320,8 +319,7 @@ export async function promoteLeads(ids = [], { researchLimit = 6 } = {}) {
       skipped.push({ id, reason: '线索不存在' });
       continue;
     }
-    const personLike = isPersonLikeDisplayName(customer.company || customer.name)
-      && (!customer.company || customer.company === customer.name);
+    const personLike = isPersonLikeLead(customer);
     if (!customer.email && !customer.research?.emails?.[0]?.email && researched < researchLimit && !personLike) {
       try {
         await runLeadResearch(customer, { useAi: false, autoApply: false });

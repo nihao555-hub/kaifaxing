@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { seedCustomers, seedThreads, seedAiPanel } from './data/seed.js';
-import { isPersonLikeDisplayName } from './research.js';
+import { isPersonLikeLead } from './research.js';
 import { config } from './config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -96,7 +96,7 @@ export function isRfqLead(c) {
 }
 
 function leadRank(c) {
-  const person = isPersonLikeDisplayName(c.company || c.name) && (!c.company || c.company === c.name);
+  const person = isPersonLikeLead(c);
   if (person) return 2;
   const src = c.source || '';
   if (/阿里|Alibaba|GoldSupplier|TradeIndia/i.test(src)) return 0;
@@ -143,7 +143,7 @@ export function listCustomers({
     if (research === 'none' && c.research?.status === 'done') continue;
     if (ingestedOn && !String(c.ingestedAt || '').startsWith(ingestedOn)) continue;
     if (quality === 'company' || quality === 'person') {
-      const person = isPersonLikeDisplayName(c.company || c.name) && (!c.company || c.company === c.name);
+      const person = isPersonLikeLead(c);
       if (quality === 'company' && person) continue;
       if (quality === 'person' && !person) continue;
     }
