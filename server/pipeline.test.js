@@ -32,6 +32,11 @@ describe('auto apply rules', () => {
     }), null);
     assert.equal(pickAutoEmail({
       confidence: 'high',
+      facts: [{ source: 'GLEIF', label: 'LEI', value: '1' }],
+      emails: [{ email: 'info@stc.ac.uk', role: 'info', score: 96, evidence: { ready: true, score: 90 } }],
+    })?.email, 'info@stc.ac.uk');
+    assert.equal(pickAutoEmail({
+      confidence: 'high',
       facts: [],
       emails: [{ email: 'info@chrisvoorkom.nl', role: 'info', score: 96 }],
     }), null);

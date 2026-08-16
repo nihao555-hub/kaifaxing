@@ -1,4 +1,5 @@
 import { config } from './config.js';
+import { parseCompaniesHouseOfficers } from './intel.js';
 
 // 公开企业背调。只查公司主体和官网，不扒私人邮箱。
 // 对齐 GitHub 上专门做客户尽调的工具用的公开接口：
@@ -382,6 +383,21 @@ function pushFact(extra, sources, item) {
 
 export function companiesHouseReady() {
   return Boolean(config.companiesHouse?.apiKey);
+}
+
+export { parseCompaniesHouseOfficers };
+
+export async function fetchCompaniesHouseOfficers(number) {
+  if (!companiesHouseReady()) return [];
+  const id = String(number || '').replace(/\s+/g, '');
+  if (!/^[A-Z]{2}\d{6}$|^\d{6,8}$/.test(id)) return [];
+  const url = `https://api.company-information.service.gov.uk/company/${id}/officers?items_per_page=20`;
+  const auth = Buffer.from(`${config.companiesHouse.apiKey}:`).toString('base64');
+  const data = await getJson(url, { Authorization: `Basic ${auth}` });
+  return parseCompaniesHouseOfficers(data).map((row) => ({
+    ...row,
+    url: companyHouseUrl(id) ? `${companyHouseUrl(id)}/officers` : '',
+  }));
 }
 
 export function parseCompaniesHouseHit(row) {

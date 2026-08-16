@@ -96,7 +96,7 @@ export function contactHrefs(html, pageUrl) {
   $('a[href]').each((_, el) => {
     const href = String($(el).attr('href') || '').trim();
     if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
-    if (!/contact|kontakt|impressum|imprint|about|legal|enquiry|privacy|kontaktieren|contacto/i.test(href)) return;
+    if (!/contact|kontakt|impressum|imprint|about|legal|enquiry|privacy|kontaktieren|contacto|leadership|governance|governors|directors|board/i.test(href)) return;
     if (isAssetUrl(href)) return;
     try {
       const next = new URL(href, pageUrl);

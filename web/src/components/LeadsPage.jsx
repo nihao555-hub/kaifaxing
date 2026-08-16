@@ -235,7 +235,7 @@ export default function LeadsPage({ onGoOutreach }) {
     api.rfqLead(selectedId)
       .then((d) => {
         setDetail(d);
-        setPickedEmail(d.research?.emails?.[0]?.email || d.customer?.email || '');
+        setPickedEmail(d.research?.outreach?.email || d.research?.emails?.find((e) => e.evidence?.ready)?.email || d.research?.emails?.[0]?.email || d.customer?.email || '');
       })
       .catch(() => setDetail(null));
   }, [selectedId, drawerOpen]);
@@ -258,7 +258,7 @@ export default function LeadsPage({ onGoOutreach }) {
     try {
       const data = await api.identifyLead(selectedId, payload);
       setDetail(data);
-      setPickedEmail(data.research?.emails?.[0]?.email || '');
+      setPickedEmail(data.research?.outreach?.email || data.research?.emails?.find((e) => e.evidence?.ready)?.email || data.research?.emails?.[0]?.email || '');
       setDrawerTab('research');
       await load();
       setOkMsg(`已按「${data.customer?.company}」重新背调`);
@@ -276,7 +276,7 @@ export default function LeadsPage({ onGoOutreach }) {
       const data = await api.rfqResearch(id);
       setSelectedId(id);
       setDetail(data);
-      setPickedEmail(data.research?.emails?.[0]?.email || '');
+      setPickedEmail(data.research?.outreach?.email || data.research?.emails?.find((e) => e.evidence?.ready)?.email || data.research?.emails?.[0]?.email || '');
       setDrawerOpen(true);
       setDrawerTab('research');
       await load();
@@ -323,6 +323,11 @@ export default function LeadsPage({ onGoOutreach }) {
     if (!customer) return;
     if (research?.kyb?.grade === 'C' || (research?.kyb?.sanctions || []).length) {
       setErr(research.kyb?.nextAction || '分级为停，不能录入开发信');
+      return;
+    }
+    const picked = (research?.emails || []).find((e) => e.email === pickedEmail);
+    if (picked?.evidence && !picked.evidence.ready) {
+      setErr('这个邮箱证据分不够。开发信只收与官网同域的采购/总机角色箱。');
       return;
     }
     if (pickedEmail && !window.confirm(`把 ${pickedEmail} 写入该线索并录入开发信？Agent 会自动给这个公开角色邮箱写信。`)) return;
@@ -918,11 +923,15 @@ function researchChecks(customer, research) {
     && research?.kyb?.screened
     && !(research?.kyb?.sanctions || []).length;
   const trade = (research?.kyb?.traces || []).length > 0 || procurement;
+  const officers = (research?.officers || research?.intel?.officers || []).length > 0;
+  const ready = Boolean(research?.outreach?.ready);
   return [
     { label: '公司官网', ok: website },
     { label: '社交媒体', ok: social },
     { label: '工商信息', ok: registry },
+    { label: '公开职务', ok: officers },
     { label: '招投标/采购记录', ok: trade },
+    { label: '可发信角色邮箱', ok: ready },
     { label: '搜索公式', ok: search },
     { label: '制裁筛查', ok: sanctionsOk },
   ];
@@ -944,7 +953,12 @@ function EmailPick({ emails, pickedEmail, setPickedEmail, name }) {
           <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-600">
             {e.source || (e.role === 'info' || e.role === 'enquiry' || e.role === 'contact' ? '官网' : (e.role || '官网'))}
           </span>
-          <span className="ml-auto text-[10px] text-emerald-600">可用</span>
+          {e.evidence?.score != null && (
+            <span className="text-[10px] text-[#64748b]">{e.evidence.score}分</span>
+          )}
+          <span className={`ml-auto text-[10px] ${e.evidence?.ready || e.ready ? 'text-emerald-600' : 'text-[#94a3b8]'}`}>
+            {e.evidence?.ready || e.ready ? '可发信' : '仅供参考'}
+          </span>
         </label>
       ))}
     </div>
@@ -1153,6 +1167,13 @@ function DrawerBody({ tab, customer, research, searchLinks = [], imageSearchLink
             <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${gradeStyle(research.kyb.grade)}`}>{research.kyb.grade}级 · {research.kyb.label}</span>
           </div>
           <p className="text-[12px] leading-relaxed text-[#334155]">{research.kyb.nextAction || research.nextAction}</p>
+          {research.outreach?.ready && (
+            <p className="mt-1 text-[12px] text-emerald-700">
+              开发信入口 {research.outreach.email}
+              {research.outreach.score ? ` · 证据 ${research.outreach.score} 分` : ''}
+              {research.outreach.greetingName ? ` · 公开职务可称呼 ${research.outreach.greetingName}（${research.outreach.greetingTitle}）` : ''}
+            </p>
+          )}
           {research.kyb.needRegNo && (
             <p className="mt-1 text-[12px] text-[#64748b]">请对方提供法定全称、登记号、付款主体后再查。</p>
           )}
@@ -1206,12 +1227,37 @@ function DrawerBody({ tab, customer, research, searchLinks = [], imageSearchLink
           <InfoRow label="营业时间" value={factValue(research, /营业时间/)} />
           <InfoRow label="行业" value={industry} />
           <InfoRow label="员工规模" value={size} />
-          <InfoRow label="母公司" value={factValue(research, /最终母公司/)} />
-          <InfoRow label="登记号" value={factValue(research, /登记号|SIREN|Org\.nr|IČO|CNPJ/)} />
-          <InfoRow label="LEI" value={factValue(research, /^LEI$/)} />
+          <InfoRow label="母公司" value={research?.intel?.parent || factValue(research, /最终母公司/)} />
+          <InfoRow label="登记号" value={research?.intel?.regNo || factValue(research, /登记号|SIREN|Org\.nr|IČO|CNPJ|英国公司登记/)} />
+          <InfoRow label="LEI" value={research?.intel?.lei || factValue(research, /^LEI$/)} />
           <InfoRow label="搜索官网" value={factValue(research, /搜索官网/)} href={factValue(research, /搜索官网/)} />
           <InfoRow label="下一步" value={research?.nextAction || research?.kyb?.nextAction} />
         </dl>
+        {(research?.officers || []).length > 0 && (
+          <div className="mt-2">
+            <div className="mb-1 text-[12px] text-[#94a3b8]">公开职务（工商/官网/招标，不是私人邮箱）</div>
+            <ul className="space-y-1">
+              {research.officers.slice(0, 8).map((o) => (
+                <li key={`${o.name}-${o.title}`} className="text-[12px] text-[#475569]">
+                  {o.name}
+                  <span className="text-[#94a3b8]"> · {o.title} · {o.source}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {(research?.socials || []).length > 0 && (
+          <div className="mt-2">
+            <div className="mb-1 text-[12px] text-[#94a3b8]">公司社媒</div>
+            <ul className="space-y-1">
+              {research.socials.slice(0, 6).map((s) => (
+                <li key={s.url} className="truncate text-[12px]">
+                  <a href={s.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">{s.label}</a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {(research?.kyb?.traces || []).length > 0 && (
           <div className="mt-2">
             <div className="mb-1 text-[12px] text-[#94a3b8]">采购痕迹</div>

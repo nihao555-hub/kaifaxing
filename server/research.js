@@ -1,6 +1,6 @@
 import { parse as parseDomain } from 'tldts';
 import { chat, parseJson } from './ai.js';
-import { enrichOpenSources } from './openSources.js';
+import { enrichOpenSources, fetchCompaniesHouseOfficers } from './openSources.js';
 import {
   GITHUB_TOOLS,
   registrableDomain as tldtsDomain,
@@ -31,6 +31,16 @@ import {
   countryTld,
 } from './searchDorks.js';
 import { gradeKyb, hasVerifiedEntity, hasProcurementTrace, isForwarderName, filterOutreachEmails, isOutreachEmail } from './kyb.js';
+import {
+  attachEmailEvidence,
+  extractCompanySocials,
+  extractLeadership,
+  extractTenderPeople,
+  companyNumberFromFacts,
+  mergeOfficers,
+  mergeSocials,
+  buildIntel,
+} from './intel.js';
 import {
   rfqCorpus,
   extractRfqClues,
@@ -347,13 +357,15 @@ export function mergeSearchSnippetEmails(snippetEmails, { websiteHost = '', comp
 }
 
 export function mergeEmailLists(existing, extras) {
-  const map = new Map((existing || []).map((e) => [e.email, e]));
+  const map = new Map((existing || []).map((e) => [e.email, { ...e, pages: [...(e.pages || [])] }]));
   for (const item of extras || []) {
     if (!item?.email) continue;
     const prev = map.get(item.email);
-    if (!prev || item.score > prev.score) map.set(item.email, item);
+    const pages = [...new Set([...(prev?.pages || []), ...(item.pages || [])])];
+    if (!prev || (item.score || 0) > (prev.score || 0)) map.set(item.email, { ...item, pages });
+    else prev.pages = pages;
   }
-  return [...map.values()].sort((a, b) => b.score - a.score).slice(0, 8);
+  return [...map.values()].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 8);
 }
 
 function sameRegistrableHost(a, b) {
@@ -770,6 +782,9 @@ async function harvestContacts(website, company, { extraUrls = [], country = '' 
   const extra = [
     ...discovered,
     ...commonPaths,
+    ...['/about-us', '/leadership', '/governance'].map((p) => {
+      try { return new URL(p, homeRes.url).toString(); } catch { return ''; }
+    }),
     ...searchSameDomain,
   ].filter((u) => u && !isAssetUrl(u) && u !== homeRes.url);
   const ranked = [...new Set(extra)].sort((a, b) => {
@@ -780,7 +795,7 @@ async function harvestContacts(website, company, { extraUrls = [], country = '' 
   const extras = await Promise.all(ranked.map((url) => fetchText(url, { accept: 'text/html', timeout: 8000 })));
   for (const r of extras) {
     if (!r.ok || !r.text) continue;
-    if (isAssetUrl(r.url) || !/<html|mailto:|contact|@/i.test(r.text.slice(0, 4000))) continue;
+    if (isAssetUrl(r.url) || !/<html|mailto:|contact|@|leadership|about|director/i.test(r.text.slice(0, 4000))) continue;
     pages.push({ url: r.url, title: pageTitle(r.text) || r.url });
     htmls.push(r.text);
   }
@@ -789,14 +804,25 @@ async function harvestContacts(website, company, { extraUrls = [], country = '' 
   try { host = new URL(homeRes.url).hostname; } catch { /* ignore */ }
   const emailMap = new Map();
   const phones = new Set();
-  for (const html of htmls) {
+  const socials = [];
+  const officers = [];
+  htmls.forEach((html, i) => {
+    const pageUrl = pages[i]?.url || homeRes.url;
+    const pageHeading = pages[i]?.title || '';
     for (const item of extractEmails(html, { websiteHost: host })) {
       if (!emailBelongsToCompany(item.email, host, company)) continue;
       const prev = emailMap.get(item.email);
-      if (!prev || item.score > prev.score) emailMap.set(item.email, { ...item, source: '官网公开页' });
+      const pagesFor = [...new Set([...(prev?.pages || []), pageUrl])];
+      if (!prev || item.score > prev.score) {
+        emailMap.set(item.email, { ...item, source: '官网公开页', pages: pagesFor });
+      } else {
+        prev.pages = pagesFor;
+      }
     }
     for (const p of extractPhones(html, country)) phones.add(p);
-  }
+    socials.push(...extractCompanySocials(html, pageUrl));
+    officers.push(...extractLeadership(html, { pageUrl, title: pageHeading }));
+  });
 
   const meta = pageMeta(homeRes.text);
   const emails = [...emailMap.values()].sort((a, b) => b.score - a.score).slice(0, 8);
@@ -805,6 +831,8 @@ async function harvestContacts(website, company, { extraUrls = [], country = '' 
     emails,
     phones: [...phones].slice(0, 8),
     pages,
+    socials: mergeSocials(socials),
+    officers: mergeOfficers(officers),
     verified,
     website: homeRes.url,
     meta,
@@ -841,7 +869,7 @@ async function harvestSearchContacts({ urls = [], snippetEmails = [], company, w
     try { pageHost = host || new URL(r.url).hostname; } catch { /* ignore */ }
     for (const item of extractEmails(r.text, { websiteHost: pageHost })) {
       if (!emailBelongsToCompany(item.email, pageHost, company)) continue;
-      emails.push({ ...item, source: '搜索结果页' });
+      emails.push({ ...item, source: '搜索结果页', pages: [r.url] });
     }
     for (const p of extractPhones(r.text)) phones.push(p);
   }
@@ -955,6 +983,8 @@ export async function researchLead(customer, { useAi = true } = {}) {
   let harvestedTools = {};
   let search = { queries: [], urls: [], snippetEmails: [], officialGuess: '', notes: [], engine: '' };
   let crosspost = null;
+  let siteSocials = [];
+  let siteOfficers = [];
 
   if (personLike && !website && clues.emails[0]) {
     website = `https://${clues.emails[0].split('@')[1]}`;
@@ -1110,7 +1140,9 @@ export async function researchLead(customer, { useAi = true } = {}) {
 
     harvestedTools = { ...(harvested.tools || {}), searchDorks: Boolean(harvested.tools?.searchDorks || search.urls.length) };
     if (harvested.website && (harvested.verified || openWebsite)) website = harvested.website;
-    emails = [...(harvested.emails || [])].sort((a, b) => Number(isOutreachEmail(b)) - Number(isOutreachEmail(a)) || (b.score || 0) - (a.score || 0));
+    emails = harvested.emails || [];
+    siteSocials = harvested.socials || [];
+    siteOfficers = harvested.officers || [];
     const wikiPhones = facts.filter((f) => f.label === '公开电话').map((f) => f.value);
     phones = [...new Set([...(harvested.phones || []), ...snippetPhones, ...wikiPhones])].slice(0, 8);
     if (phones.length && !facts.some((f) => f.label === '公开电话')) {
@@ -1162,7 +1194,15 @@ export async function researchLead(customer, { useAi = true } = {}) {
     detail: customer.painPoints ? String(customer.painPoints).slice(0, 160) : '入库摘要为空',
   });
 
-  const [sanctions, traces] = await Promise.all([
+  emails = attachEmailEvidence(emails, {
+    website,
+    country: customer.country,
+    verifiedEntity: hasVerifiedEntity(facts),
+    sameDomainFn: (item) => emailBelongsToCompany(item.email, hostFromWebsite(website), legalName || company),
+  });
+  const readyMails = emails.filter((e) => e.evidence?.ready);
+
+  const [sanctions, traces, chOfficers] = await Promise.all([
     personLike ? { hits: [], screened: false, lists: [] } : screenSanctions(legalName || company),
     personLike
       ? []
@@ -1173,7 +1213,33 @@ export async function researchLead(customer, { useAi = true } = {}) {
         sourceUrl: customer.sourceUrl,
         awardId: customer.awardId,
       }),
+    personLike ? [] : fetchCompaniesHouseOfficers(companyNumberFromFacts(facts)),
   ]);
+  const officers = mergeOfficers(
+    chOfficers,
+    siteOfficers,
+    personLike ? [] : extractTenderPeople(`${customer.painPoints || ''} ${customer.title || ''} ${rfqCorpus(customer)}`),
+  );
+  const wikiSocials = facts
+    .filter((f) => /LinkedIn|Facebook|^X$|Twitter|YouTube|Instagram|社媒/i.test(f.label))
+    .map((f) => ({ label: f.label, url: f.value, source: f.source }));
+  const socials = mergeSocials(siteSocials, wikiSocials);
+  for (const o of officers.slice(0, 6)) {
+    facts.push({ label: '公开职务', value: `${o.name} · ${o.title}`, source: o.source });
+  }
+  for (const s of socials) {
+    if (!facts.some((f) => f.label === s.label && f.value === s.url)) {
+      facts.push({ label: s.label, value: s.url, source: s.source || '官网公开页' });
+    }
+  }
+  if (officers.length) {
+    steps.push({
+      key: 'officers',
+      label: '公开职务',
+      ok: true,
+      detail: officers.slice(0, 3).map((o) => `${o.name}（${o.title}）`).join('、'),
+    });
+  }
   if (sanctions.error) notes.push(`制裁名单未能下载：${sanctions.error}`);
   else if (!personLike && !sanctions.screened) notes.push('制裁名单本轮未筛到，发信前请人工复核。');
   for (const hit of sanctions.hits || []) {
@@ -1209,7 +1275,7 @@ export async function researchLead(customer, { useAi = true } = {}) {
       forwarder: isForwarderName(legalName || company),
       verified: hasVerifiedEntity(facts),
       website,
-      emails,
+      emails: readyMails,
       sanctions: sanctions.hits || [],
       procurement: hasProcurementTrace(customer, traces),
       legalName: legalName || company,
@@ -1270,9 +1336,16 @@ export async function researchLead(customer, { useAi = true } = {}) {
         : 'low';
 
   const factOf = (re) => facts.find((f) => re.test(f.label))?.value || '';
-  const socials = facts
-    .filter((f) => /LinkedIn|Facebook|^X$|Twitter|社媒/i.test(f.label))
-    .map((f) => ({ label: f.label, url: f.value }));
+  const intel = buildIntel({
+    legalName,
+    website,
+    country: customer.country,
+    facts,
+    traces,
+    emails,
+    socials,
+    officers,
+  });
 
   return {
     status: 'done',
@@ -1313,12 +1386,17 @@ export async function researchLead(customer, { useAi = true } = {}) {
     grade: kyb.grade,
     nextAction: kyb.nextAction,
     needRegNo: kyb.needRegNo,
-    canApplyEmail: filterOutreachEmails(emails).length > 0 && kyb.grade === 'A',
+    officers,
+    intel,
+    canApplyEmail: readyMails.length > 0 && kyb.grade === 'A',
     outreach: {
-      ready: kyb.grade === 'A' && filterOutreachEmails(emails).length > 0,
-      email: filterOutreachEmails(emails)[0]?.email || '',
+      ready: kyb.grade === 'A' && readyMails.length > 0,
+      email: readyMails[0]?.email || '',
+      score: readyMails[0]?.evidence?.score || 0,
       website: website || '',
       reason: kyb.nextAction,
+      greetingTitle: officers[0] ? `${officers[0].title}` : '',
+      greetingName: officers[0]?.name || '',
     },
     tools: GITHUB_TOOLS.map((t) => ({
       ...t,

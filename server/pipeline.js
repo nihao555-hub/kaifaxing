@@ -69,7 +69,8 @@ export function pickAutoEmail(research) {
   const verified = (research.facts || []).some((f) => VERIFIED_SOURCES.has(f.source));
   if (!verified) return null;
   return (
-    research.emails.find((e) => isOutreachEmail(e) && (e.score || 0) >= 70) ||
+    research.emails.find((e) => e.evidence?.ready) ||
+    research.emails.find((e) => isOutreachEmail(e) && (e.evidence?.score || e.score || 0) >= 80) ||
     null
   );
 }
