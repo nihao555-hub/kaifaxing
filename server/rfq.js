@@ -198,7 +198,7 @@ export async function searchWorldBank({ keyword = 'power tools', limit = 10, sin
 export async function searchUk({ keyword = 'power tools', limit = 12, since } = {}) {
   const searchCriteria = { statuses: ['Open'] };
   if (keyword) searchCriteria.keyword = keyword;
-  if (since) searchCriteria.publishedFrom = since;
+  if (ymd(since)) searchCriteria.publishedFrom = ymd(since);
   const data = await postJson('https://www.contractsfinder.service.gov.uk/api/rest/2/search_notices/json', {
     searchCriteria,
     size: limit,
@@ -237,8 +237,9 @@ export async function searchTed({ keyword = 'tools', limit = 10, since } = {}) {
     q ? `FT~"${q}"` : '',
     q ? 'classification-cpv=44000000' : '',
     pd,
-    'SORT BY publication-date DESC',
   ].filter(Boolean);
+  if (!parts.length) parts.push('FT~"supply"');
+  parts.push('SORT BY publication-date DESC');
   const data = await postJson('https://api.ted.europa.eu/v3/notices/search', {
     query: parts.join(' AND ').replace(' AND SORT', ' SORT'),
     fields: ['publication-number', 'notice-title', 'buyer-name', 'buyer-country', 'classification-cpv'],
@@ -554,10 +555,10 @@ export async function crawlAllAndImport({
   fanout = true,
 } = {}) {
   const want = Array.isArray(sources) && sources.length ? new Set(sources) : null;
-  const add = (key, run) => (!want || want.has(key) ? run : null);
+  const add = (key, fn) => (!want || want.has(key) ? fn() : null);
   const reports = [];
   const buckets = await Promise.allSettled([
-    add('alibaba_public', crawlAlibabaPublic({
+    add('alibaba_public', () => crawlAlibabaPublic({
       keyword: '',
       since,
       maxPages: alibabaPages,
@@ -581,17 +582,17 @@ export async function crawlAllAndImport({
       items: doImport ? [] : r.items,
       extra: { pages: r.pages, totalItems: r.totalItems, kept: r.kept || r.items.length, created: alibabaCrawlProgress.created || 0, aborted: r.aborted },
     }))),
-    add('usaspending', searchUsaspending({ limit: govLimit, since, broad: true })
+    add('usaspending', () => searchUsaspending({ limit: govLimit, since, broad: true })
       .then((items) => ({ key: 'usaspending', name: 'USASpending.gov', items }))),
-    add('uk', searchUk({ keyword: '', limit: govLimit, since })
+    add('uk', () => searchUk({ keyword: '', limit: govLimit, since })
       .then((items) => ({ key: 'uk', name: 'UK Contracts Finder', items }))),
-    add('ted', searchTed({ keyword: '', limit: Math.min(govLimit, 100), since })
+    add('ted', () => searchTed({ keyword: '', limit: Math.min(govLimit, 100), since })
       .then((items) => ({ key: 'ted', name: 'TED Europa', items }))),
-    add('worldbank', searchWorldBank({ keyword: '', limit: govLimit, since })
+    add('worldbank', () => searchWorldBank({ keyword: '', limit: govLimit, since })
       .then((items) => ({ key: 'worldbank', name: 'World Bank', items }))),
-    add('goldsupplier', searchGoldSupplier({ since, maxPages: 12 })
+    add('goldsupplier', () => searchGoldSupplier({ since, maxPages: 12 })
       .then((items) => ({ key: 'goldsupplier', name: 'GoldSupplier 公开询盘', items }))),
-    add('tradeindia', searchTradeIndia({ since })
+    add('tradeindia', () => searchTradeIndia({ since })
       .then((items) => ({ key: 'tradeindia', name: 'TradeIndia 公开买盘', items }))),
   ].filter(Boolean));
 
