@@ -50,6 +50,13 @@ function leadRank(c) {
   return 1;
 }
 
+function splitCsv(value) {
+  return String(value || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 export function listCustomers({
   view = 'inbox',
   q = '',
@@ -57,29 +64,37 @@ export function listCustomers({
   country = '',
   contact = '',
   quality = '',
+  research = '',
+  ingestedOn = '',
   limit = 200,
   offset = 0,
 } = {}) {
   const kw = String(q || '').trim().toLowerCase();
-  const src = String(source || '').trim();
-  const ctry = String(country || '').trim().toLowerCase();
+  const srcList = splitCsv(source);
+  const ctryList = splitCsv(country);
   const items = [];
   for (const c of db.customers) {
     if (view === 'inbox' && !hasUsableEmail(c)) continue;
     if (view === 'leads' && !isRfqLead(c)) continue;
-    if (src && (c.source || '') !== src) continue;
-    if (ctry && !String(c.country || '').toLowerCase().includes(ctry)) continue;
+    if (srcList.length && !srcList.includes(c.source || '')) continue;
+    if (ctryList.length) {
+      const raw = String(c.country || '').trim() || '未标注';
+      if (!ctryList.some((x) => raw === x || raw.toLowerCase() === x.toLowerCase())) continue;
+    }
     if (contact === 'missing' && c.email) continue;
     if (contact === 'found' && !c.email) continue;
     if (contact === 'researched' && c.research?.status !== 'done') continue;
     if (contact === 'pending' && (c.email || c.research?.status === 'done')) continue;
+    if (research === 'done' && c.research?.status !== 'done') continue;
+    if (research === 'none' && c.research?.status === 'done') continue;
+    if (ingestedOn && !String(c.ingestedAt || '').startsWith(ingestedOn)) continue;
     if (quality === 'company' || quality === 'person') {
       const person = isPersonLikeDisplayName(c.company || c.name) && (!c.company || c.company === c.name);
       if (quality === 'company' && person) continue;
       if (quality === 'person' && !person) continue;
     }
     if (kw) {
-      const hay = [c.name, c.company, c.email, c.country, c.source, c.painPoints, c.rfq?.title]
+      const hay = [c.name, c.company, c.email, c.country, c.source, c.painPoints, c.rfq?.title, c.buyer]
         .map((x) => String(x || '').toLowerCase())
         .join(' ');
       if (!hay.includes(kw)) continue;
@@ -101,6 +116,7 @@ export function listCustomers({
 
 export function leadFacets() {
   const sources = {};
+  const countries = {};
   let total = 0;
   let needEmail = 0;
   let hasEmail = 0;
@@ -110,11 +126,13 @@ export function leadFacets() {
     total += 1;
     const key = c.source || '未知';
     sources[key] = (sources[key] || 0) + 1;
+    const country = String(c.country || '').trim() || '未标注';
+    countries[country] = (countries[country] || 0) + 1;
     if (c.email) hasEmail += 1;
     else needEmail += 1;
     if (c.research?.status === 'done') researched += 1;
   }
-  return { total, needEmail, hasEmail, researched, sources };
+  return { total, needEmail, hasEmail, researched, sources, countries };
 }
 
 export function appendThread(customerId, entry) {

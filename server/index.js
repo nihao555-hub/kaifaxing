@@ -168,6 +168,7 @@ app.post('/api/rfq/pipeline/sync', async (req, res) => {
 });
 
 app.get('/api/rfq/leads', (req, res) => {
+  const pipe = getPipelineState();
   const result = listCustomers({
     view: 'leads',
     q: String(req.query.q || ''),
@@ -175,10 +176,11 @@ app.get('/api/rfq/leads', (req, res) => {
     country: String(req.query.country || ''),
     contact: String(req.query.contact || ''),
     quality: String(req.query.quality || ''),
-    limit: Number(req.query.limit || 30),
+    research: String(req.query.research || ''),
+    ingestedOn: req.query.today === '1' ? pipe.today : '',
+    limit: Number(req.query.limit || 20),
     offset: Number(req.query.offset || 0),
   });
-  const pipe = getPipelineState();
   res.json({
     ...result,
     facets: { ...leadFacets(), todayNew: pipe.todayNew },

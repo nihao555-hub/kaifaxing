@@ -56,9 +56,11 @@ export const api = {
       contact: params.contact || '',
       quality: params.quality || '',
       country: params.country || '',
+      research: params.research || '',
       limit: String(params.limit || 20),
       offset: String(params.offset || 0),
     });
+    if (params.today) qs.set('today', '1');
     return req(`/api/rfq/leads?${qs}`);
   },
   rfqLead: (id) => req(`/api/rfq/leads/${id}`),

@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "node --watch index.js",
     "start": "node index.js",
-    "test": "node --test research.test.js pipeline.test.js rfq-ingest.test.js publicRfq.test.js b2bPublic.test.js"
+    "test": "node --test research.test.js pipeline.test.js rfq-ingest.test.js publicRfq.test.js b2bPublic.test.js store.test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

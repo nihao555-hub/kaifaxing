@@ -82,7 +82,12 @@ export default function App() {
     <div className="flex h-full overflow-hidden bg-page">
       <Sidebar page={page} onNavigate={setPage} />
       {page === 'leads' ? (
-        <LeadsPage />
+        <LeadsPage
+          onGoOutreach={() => {
+            setPage('outreach');
+            refreshCustomers();
+          }}
+        />
       ) : (
         <>
       <CustomerList
