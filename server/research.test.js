@@ -43,9 +43,12 @@ describe('company name helpers', () => {
   it('treats Alibaba display names as people, not companies', () => {
     assert.equal(isPersonLikeDisplayName('solo beck'), true);
     assert.equal(isPersonLikeDisplayName('Ahmed AlMansouri'), true);
+    assert.equal(isPersonLikeDisplayName('CHRIS'), true);
+    assert.equal(isPersonLikeDisplayName('H C'), true);
     assert.equal(isPersonLikeDisplayName('Tyne Coast College'), false);
     assert.equal(isPersonLikeDisplayName('KIER TRANSPORTATION LIMITED'), false);
     assert.equal(isPersonLikeDisplayName('L3HARRIS TECHNOLOGIES, INC.'), false);
+    assert.equal(isPersonLikeDisplayName('A. Kroeze Beheer B.V.'), false);
   });
 
   it('keeps distinctive tokens', () => {

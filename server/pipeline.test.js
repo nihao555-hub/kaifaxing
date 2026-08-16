@@ -18,14 +18,23 @@ describe('auto apply rules', () => {
   it('picks info/procurement and skips IR', () => {
     const picked = pickAutoEmail({
       confidence: 'high',
+      facts: [{ source: 'GLEIF', label: 'LEI', value: '1' }],
       emails: [
         { email: 'ir@kier.co.uk', role: 'ir', score: 80 },
         { email: 'info@stc.ac.uk', role: 'info', score: 96 },
       ],
     });
     assert.equal(picked.email, 'info@stc.ac.uk');
-    assert.equal(pickAutoEmail({ confidence: 'high', emails: [{ email: 'ir@kier.co.uk', role: 'ir', score: 80 }] }), null);
-    assert.equal(pickAutoEmail({ confidence: 'none', emails: [{ email: 'info@stc.ac.uk', role: 'info', score: 96 }] }), null);
+    assert.equal(pickAutoEmail({
+      confidence: 'high',
+      facts: [{ source: 'GLEIF', label: 'LEI', value: '1' }],
+      emails: [{ email: 'ir@kier.co.uk', role: 'ir', score: 80 }],
+    }), null);
+    assert.equal(pickAutoEmail({
+      confidence: 'high',
+      facts: [],
+      emails: [{ email: 'info@chrisvoorkom.nl', role: 'info', score: 96 }],
+    }), null);
   });
 
   it('flags freight forwarders', () => {

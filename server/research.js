@@ -70,6 +70,7 @@ const PHONE_RE = /(?:\+|00)[1-9][\d\s().-]{7,16}\d/g;
 
 export function stripLegalSuffix(name) {
   return String(name || '')
+    .replace(/\b(b\.v\.?|n\.v\.?|s\.a\.?|l\.l\.c\.?)\b/gi, ' ')
     .replace(LEGAL_SUFFIX_RE, ' ')
     .replace(/[(),.]/g, ' ')
     .replace(/\s+/g, ' ')
@@ -97,10 +98,17 @@ export function tokenOverlap(a, b) {
 export function isPersonLikeDisplayName(name) {
   const s = String(name || '').trim();
   if (!s) return false;
-  if (new RegExp(LEGAL_SUFFIX_RE.source, 'i').test(s) || INSTITUTION_RE.test(s)) return false;
-  const words = s.split(/\s+/);
-  if (words.length < 2 || words.length > 4 || s.length > 42) return false;
-  return words.every((w) => /^[A-Za-z][A-Za-z.'-]{1,20}$/.test(w));
+  if (
+    new RegExp(LEGAL_SUFFIX_RE.source, 'i').test(s)
+    || /(?:^|[\s,])(?:b\.v\.?|n\.v\.?|s\.a\.?|l\.l\.c\.?|gmbh|ltd|llc|plc|inc)(?:$|[\s,])/i.test(s)
+    || INSTITUTION_RE.test(s)
+  ) return false;
+  const words = s.split(/\s+/).filter(Boolean);
+  if (s.length > 42) return false;
+  if (words.length === 1) return /^[A-Za-z][A-Za-z.'-]{2,24}$/.test(words[0]);
+  if (words.length > 4) return false;
+  if (words.every((w) => w.replace(/\./g, '').length <= 2)) return true;
+  return words.length >= 2 && words.every((w) => /^[A-Za-z][A-Za-z.'-]{1,20}$/.test(w));
 }
 
 export function registrableDomain(host) {

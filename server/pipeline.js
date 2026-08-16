@@ -59,6 +59,8 @@ export function ensurePipeline() {
 export function pickAutoEmail(research) {
   if (!research?.emails?.length) return null;
   if (!['high', 'medium'].includes(research.confidence)) return null;
+  const verified = (research.facts || []).some((f) => f.source === 'GLEIF' || f.source === 'Wikidata');
+  if (!verified) return null;
   return (
     research.emails.find((e) => AUTO_ROLES.has(e.role) && !SKIP_ROLES.has(e.role) && (e.score || 0) >= 70) ||
     null
@@ -286,8 +288,7 @@ export function getPipelineState() {
   let todayNew = 0;
   for (const c of db.customers) {
     if (!isRfqLead(c)) continue;
-    const stamp = c.ingestedAt || c.lastActivity || '';
-    if (String(stamp).startsWith(today)) todayNew += 1;
+    if (c.ingestedAt && String(c.ingestedAt).startsWith(today)) todayNew += 1;
   }
   return {
     timezone: config.pipeline.timezone,
