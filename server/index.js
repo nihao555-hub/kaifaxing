@@ -10,6 +10,7 @@ import { sentToday, logActivity } from './store.js';
 import { startAgent, stopAgent, getAgentState } from './autopilot.js';
 import { ingestInbound } from './inbox.js';
 import { listSources, searchRfq, importRfqItems, ingestCommercial, crawlAlibabaPublic, crawlAllAndImport, ALIBABA_PUBLIC_FIELDS, PUBLIC_SINCE_DEFAULT } from './rfq.js';
+import { alibabaCrawlProgress } from './publicRfq.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -99,7 +100,7 @@ app.post('/api/rfq/public/crawl', async (req, res) => {
 });
 
 let crawlAllJob = { status: 'idle' };
-app.get('/api/rfq/crawl-all', (req, res) => res.json(crawlAllJob));
+app.get('/api/rfq/crawl-all', (req, res) => res.json({ ...crawlAllJob, progress: alibabaCrawlProgress }));
 app.post('/api/rfq/crawl-all', (req, res) => {
   if (crawlAllJob.status === 'running') return res.json(crawlAllJob);
   const since = req.body?.since || PUBLIC_SINCE_DEFAULT;

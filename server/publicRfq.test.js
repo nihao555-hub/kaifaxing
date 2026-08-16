@@ -39,6 +39,12 @@ describe('alibaba public parser', () => {
     assert.equal(items[0].email, undefined);
   });
 
+  it('reads country filter counts', () => {
+    const { countries } = parseAlibabaPublicHtml('{"count":49420,"item":"US"}{"count":8095,"item":"IN"}');
+    assert.equal(countries[0].code, 'US');
+    assert.equal(countries[0].count, 49420);
+  });
+
   it('parses relative open time', () => {
     const now = new Date('2026-08-16T12:00:00Z');
     const d = parseOpenTime('13 days ago', now);
