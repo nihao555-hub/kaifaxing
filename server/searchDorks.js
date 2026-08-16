@@ -211,7 +211,8 @@ export function researchDorks(company, { website, country, product } = {}) {
     out.push(`${q} (contact OR "info@" OR procurement) filetype:pdf`);
   } else {
     if (place) {
-      out.push(`${q} ${place} (official OR website OR contact OR "contact us" OR "info@")`);
+      const aliases = countrySearchTerms(country).filter((t) => !t.includes(' ')).slice(0, 2);
+      for (const city of aliases) out.push(`${q} ${city} (website OR contact OR "info@")`);
       if (productClause) out.push(`${q} ${place} ${productClause} (contact OR email OR "info@")`);
       if (tld) out.push(`${q} site:.${tld} (contact OR impressum OR "info@" OR inurl:contact)`);
     }
@@ -543,6 +544,11 @@ export function pickOfficialSite(urls, company, items = [], { country } = {}) {
         if (hostFitsCountry(u, country)) s += 8;
         if (placeWords.some((w) => w.length >= 3 && (title.includes(w) || desc.includes(w) || host.includes(w.replace(/\s+/g, ''))))) s += 4;
         if (isEncyclopediaHost(host)) s -= 10;
+        const shortBrand = tokens.filter((t) => t.length <= 4 && !WEAK_TOKENS.has(t));
+        if (country && shortBrand.length && !hostFitsCountry(u, country)
+          && !placeWords.some((w) => w.length >= 3 && (title.includes(w) || desc.includes(w)))) {
+          s = 0;
+        }
         if (!resultRelevant({ url: u, title: it.title, desc: it.desc }, company) && !strongHost.length) s = 0;
       } catch {
         /* ignore */

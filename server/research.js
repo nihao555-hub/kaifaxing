@@ -628,7 +628,7 @@ async function harvestContacts(website, company, { extraUrls = [], country = '' 
   if (!homeRes.ok) return { emails: [], phones: [], pages: [], verified: false, error: homeRes.error || `HTTP ${homeRes.status}` };
 
   const verified = pageMentionsCompany(homeRes.text, company, { country, pageUrl: homeRes.url })
-    || pageMentionsCompany(homeRes.text, pageTitle(homeRes.text), { country, pageUrl: homeRes.url });
+    || (!country && pageMentionsCompany(homeRes.text, pageTitle(homeRes.text)));
   const pages = [{ url: homeRes.url, title: pageTitle(homeRes.text) || '官网首页' }];
   const htmls = [homeRes.text];
   const [wayback, crtHosts] = await Promise.all([
