@@ -207,6 +207,7 @@ export function researchDorks(company, { website, country, product } = {}) {
   const out = [];
   if (host) {
     out.push(`site:${host} (contact OR "contact us" OR impressum OR kontakt OR "info@" OR "sales@" OR "procurement@")`);
+    out.push(`site:${host} (address OR "P.O. Box" OR "P.O Box" OR phone OR tel OR mobile OR "info@")`);
     out.push(`${q} ("@${host}" OR "info@" OR "sales@") site:${host}`);
     out.push(`site:${host} (inurl:impressum OR inurl:privacy OR inurl:legal OR "privacy policy")`);
     out.push(`${q} (contact OR "info@" OR procurement) filetype:pdf`);
@@ -214,6 +215,7 @@ export function researchDorks(company, { website, country, product } = {}) {
     if (place) {
       const aliases = countrySearchTerms(country).filter((t) => !t.includes(' ')).slice(0, 2);
       for (const city of aliases) out.push(`${q} ${city} (website OR contact OR "info@")`);
+      if (aliases[0]) out.push(`${q} ${aliases[0]} (address OR "P.O. Box" OR "P.O Box" OR phone OR tel OR mobile)`);
       if (productClause) out.push(`${q} ${place} ${productClause} (contact OR email OR "info@")`);
       if (tld) out.push(`${q} site:.${tld} (contact OR impressum OR "info@" OR inurl:contact)`);
     }
@@ -403,6 +405,33 @@ function citeToUrl(text) {
 
 export function emailsInQuery(query) {
   return [...new Set((String(query || '').match(EMAIL_RE) || []).map((e) => e.toLowerCase()))];
+}
+
+export function addressFromSnippets(texts = []) {
+  const blob = (texts || []).join('\n').replace(/\s+/g, ' ');
+  const patterns = [
+    /NO\.?\s*[A-Z0-9]+[,\s]+[A-Za-z0-9 .,'\/-]{8,90}P\.?O\.?\s*Box[:\s]*\d+[,\s-]+[A-Za-z .'-]{2,40}(?:UAE|United Arab Emirates)/i,
+    /(?:Location[:.\s]+)?((?:NO\.?\s*)?[A-Z0-9]+[,\s]+[A-Za-z0-9 .,'\/-]{12,90}(?:P\.?O\.?\s*Box[:\s]*\d+)[,\s-]+[A-Za-z .'-]{2,40})/i,
+    /((?:P\.?O\.?\s*Box[:\s]*\d+)[,\s-]+[A-Za-z .'-]{3,40}(?:Dubai|UAE|United Arab Emirates))/i,
+    /([A-Za-z0-9 .,'-]{8,80}(?:Street|St|Road|Rd|Building|Bldg|Avenue|Ave)[A-Za-z0-9 .,'-]{0,60}(?:,\s*)?(?:Dubai|London|Berlin|Paris|Amsterdam|Singapore)[^.]{0,28})/i,
+  ];
+  for (const re of patterns) {
+    const m = blob.match(re);
+    if (!m) continue;
+    const value = String(m[1] || m[0] || '')
+      .replace(/^Location[:.\s]+/i, '')
+      .replace(/\s+/g, ' ')
+      .replace(/[.;]+$/, '')
+      .trim();
+    if (value.length >= 16 && value.length <= 180) return value;
+  }
+  return '';
+}
+
+export function hoursFromSnippets(texts = []) {
+  const blob = (texts || []).join('\n');
+  const m = blob.match(/(?:Monday|Mon)\s*[-–to]+\s*(?:Saturday|Friday|Sunday|Sun)[:\s]*\d{1,2}\s*(?::\d{2})?\s*(?:am|pm)\s*[-–to]+\s*\d{1,2}\s*(?::\d{2})?\s*(?:am|pm)/i);
+  return m ? m[0].replace(/\s+/g, ' ').trim() : '';
 }
 
 export function emailsFromSnippets(texts, { query = '' } = {}) {
@@ -703,7 +732,7 @@ async function searchOfficialGoogle(query, company, { siteHost, country } = {}) 
 
 export async function searchCompanyPages(company, { maxQueries = 4, website, country, product } = {}) {
   const officialReady = googleCseReady() || serperReady();
-  const queries = researchDorks(company, { website, country, product }).slice(0, officialReady ? Math.min(maxQueries, 3) : maxQueries);
+  const queries = researchDorks(company, { website, country, product }).slice(0, officialReady ? Math.min(maxQueries, 4) : maxQueries);
   const siteHost = hostFromWebsite(website);
   const urls = [];
   const items = [];
@@ -798,6 +827,7 @@ export async function searchCompanyPages(company, { maxQueries = 4, website, cou
 
   urls.sort((a, b) => scoreResearchUrl(b) - scoreResearchUrl(a));
   const officialGuess = pickOfficialSite(urls, company, items, { country });
+  const intelTexts = items.flatMap((it) => [it.title, it.desc]);
 
   return {
     queries,
@@ -805,6 +835,8 @@ export async function searchCompanyPages(company, { maxQueries = 4, website, cou
     urls: urls.slice(0, 20),
     items: items.slice(0, 20),
     snippetEmails: [...new Set(snippetEmails)],
+    snippetAddress: addressFromSnippets(intelTexts),
+    snippetHours: hoursFromSnippets(intelTexts),
     officialGuess,
     engine,
     googleReady: officialReady,

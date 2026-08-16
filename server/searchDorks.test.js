@@ -18,6 +18,8 @@ import {
   parseGoogleCse,
   parseSerper,
   searchEngineLabel,
+  addressFromSnippets,
+  hoursFromSnippets,
 } from './searchDorks.js';
 import { config, googleCseReady, maskSecret } from './config.js';
 
@@ -88,6 +90,7 @@ describe('research dorks', () => {
     assert.ok(q[0].includes('UAE') || q[0].includes('Dubai'));
     assert.ok(q[0].startsWith('"NMG TECHNICAL SERVICE"'));
     assert.ok(q.some((s) => /site:\.ae/i.test(s)));
+    assert.ok(q.some((s) => /P\.O\. Box|phone OR tel/i.test(s)));
     assert.ok(q.some((s) => /Chiller|Compressor/i.test(s)));
     assert.deepEqual(rfqProductTerms('公开询盘：Chiller Compressor Refrigeration Spare Parts，数量 100 Piece'), ['Chiller', 'Compressor', 'Refrigeration']);
     assert.equal(hostFitsCountry('https://nmguae.com/', 'United Arab Emirates'), true);
@@ -291,6 +294,17 @@ describe('google official json', () => {
     }, 'NMG TECHNICAL SERVICE L.L.C', { country: 'United Arab Emirates' });
     assert.ok(parsed.urls.includes('https://nmguae.com/contact'));
     assert.ok(parsed.snippetEmails.includes('sales@nmguae.com'));
+  });
+
+  it('reads address hours and role email from Google snippets', () => {
+    const texts = [
+      'Location. NO G14, Al Habtoor Alkhabaisi Building, Salah Al Din St, P.O Box: 83260, Dubai - UAE',
+      'Phone 04-2383200 Mobile +971 55 801 5796. Email info@nmguae.com',
+      'Monday - Saturday : 9 am - 6 pm',
+    ];
+    assert.match(addressFromSnippets(texts), /Al Habtoor Alkhabaisi Building/);
+    assert.match(addressFromSnippets(texts), /83260/);
+    assert.match(hoursFromSnippets(texts), /9 am - 6 pm/i);
   });
 
   it('labels engines and reports CSE readiness from key+cx', () => {

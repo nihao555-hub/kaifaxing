@@ -980,6 +980,7 @@ function DrawerBody({ tab, customer, research, searchLinks = [], googleReady = f
           <InfoRow label="电话" value={research?.phones?.join(' · ')} />
           <InfoRow label="官网" value={website} href={website} />
           <InfoRow label="地址" value={address} />
+          <InfoRow label="营业时间" value={factValue(research, /营业时间/)} />
           <InfoRow label="行业" value={industry} />
           <InfoRow label="员工规模" value={size} />
           <InfoRow label="母公司" value={factValue(research, /最终母公司/)} />

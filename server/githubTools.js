@@ -109,7 +109,8 @@ export function contactHrefs(html, pageUrl) {
   return [...new Set(hrefs)].slice(0, 12);
 }
 
-export function parsePhones(text, html = '') {
+export function parsePhones(text, html = '', defaultCountry = 'US') {
+  const iso = /^[A-Za-z]{2}$/.test(String(defaultCountry || '')) ? String(defaultCountry).toUpperCase() : 'US';
   const set = new Set();
   const add = (raw, country) => {
     const parsed = parsePhoneNumberFromString(String(raw || ''), country);
@@ -120,9 +121,9 @@ export function parsePhones(text, html = '') {
     const compact = String(raw || '').replace(/[^\d+]/g, '');
     if (compact.replace(/\D/g, '').length >= 8) set.add(String(raw).replace(/[()\s.-]+/g, ' ').trim());
   };
-  for (const raw of telFromHtml(html)) add(raw);
+  for (const raw of telFromHtml(html)) add(raw, iso);
   try {
-    for (const hit of findPhoneNumbersInText(String(text || ''), 'US')) {
+    for (const hit of findPhoneNumbersInText(String(text || ''), iso)) {
       if (hit.number?.isValid()) set.add(hit.number.formatInternational());
     }
   } catch { /* ignore */ }

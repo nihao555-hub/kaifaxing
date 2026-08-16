@@ -36,6 +36,8 @@ describe('github tools wrappers', () => {
   it('parses phones with libphonenumber-js', () => {
     const phones = parsePhones('Call +44 191 427 3500', '<a href="tel:+441914273500">x</a>');
     assert.ok(phones.some((p) => p.includes('44') && p.includes('191')));
+    const uae = parsePhones('Call 04-2383200 or +971 55 801 5796', '', 'AE');
+    assert.ok(uae.some((p) => p.includes('971')));
   });
 
   it('reads the page title with cheerio', () => {

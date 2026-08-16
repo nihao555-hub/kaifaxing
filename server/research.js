@@ -28,6 +28,9 @@ import {
   countrySearchTerms,
   rfqProductTerms,
   buildSearchLinks,
+  addressFromSnippets,
+  hoursFromSnippets,
+  countryTld,
 } from './searchDorks.js';
 import { gradeKyb, hasVerifiedEntity, hasProcurementTrace, isForwarderName } from './kyb.js';
 import { screenSanctions } from './sanctions.js';
@@ -218,8 +221,20 @@ export function extractEmails(html, { websiteHost = '' } = {}) {
   return [...found.values()].sort((a, b) => b.score - a.score);
 }
 
-export function extractPhones(html) {
-  return parsePhones(pageText(html), html);
+const PHONE_ISO = {
+  ae: 'AE', uk: 'GB', us: 'US', de: 'DE', fr: 'FR', nl: 'NL', in: 'IN', cl: 'CL',
+  ph: 'PH', tr: 'TR', pk: 'PK', au: 'AU', es: 'ES', it: 'IT', pl: 'PL', at: 'AT',
+  fi: 'FI', cz: 'CZ', pt: 'PT', be: 'BE', se: 'SE', no: 'NO', dk: 'DK', ch: 'CH',
+  ca: 'CA', mx: 'MX', br: 'BR', za: 'ZA', sg: 'SG', my: 'MY', id: 'ID', th: 'TH',
+  vn: 'VN', jp: 'JP', kr: 'KR', sa: 'SA', eg: 'EG', ie: 'IE', nz: 'NZ',
+};
+
+export function phoneCountry(country) {
+  return PHONE_ISO[countryTld(country)] || 'US';
+}
+
+export function extractPhones(html, country = '') {
+  return parsePhones(pageText(html), html, phoneCountry(country));
 }
 
 function pageTitle(html) {
@@ -682,7 +697,7 @@ async function harvestContacts(website, company, { extraUrls = [], country = '' 
       const prev = emailMap.get(item.email);
       if (!prev || item.score > prev.score) emailMap.set(item.email, { ...item, source: '官网公开页' });
     }
-    for (const p of extractPhones(html)) phones.add(p);
+    for (const p of extractPhones(html, country)) phones.add(p);
   }
 
   const meta = pageMeta(homeRes.text);
@@ -754,6 +769,8 @@ function mergeSearchHits(base, extra) {
     items: [...(base.items || []), ...(extra.items || [])],
     snippetEmails: [...new Set([...(base.snippetEmails || []), ...(extra.snippetEmails || [])])],
     officialGuess: base.officialGuess || extra.officialGuess || '',
+    snippetAddress: base.snippetAddress || extra.snippetAddress || '',
+    snippetHours: base.snippetHours || extra.snippetHours || '',
     engine: base.engine || extra.engine || '',
     notes: [...(base.notes || []), ...(extra.notes || [])],
   };
@@ -910,12 +927,19 @@ export async function researchLead(customer, { useAi = true } = {}) {
       }
     }
 
+    const intelTexts = (search.items || []).flatMap((it) => [it.title, it.desc]);
+    const snippetAddress = search.snippetAddress || addressFromSnippets(intelTexts);
+    const snippetHours = search.snippetHours || hoursFromSnippets(intelTexts);
+    const snippetPhones = parsePhones(intelTexts.join('\n'), '', phoneCountry(customer.country));
+    if (snippetAddress) facts.push({ label: '公开地址', value: snippetAddress, source: '搜索摘要' });
+    if (snippetHours) facts.push({ label: '营业时间', value: snippetHours, source: '搜索摘要' });
+
     const fromSearch = await harvestSearchContacts({
       urls: search.urls,
       snippetEmails: search.snippetEmails,
       company: legalName || company,
       website,
-      fetchPages: !(harvested.emails || []).length,
+      fetchPages: !(snippetAddress && snippetPhones.length && (harvested.emails?.length || search.snippetEmails?.length)),
     });
     if (fromSearch.emails.length || fromSearch.pages.length) {
       harvested = {
@@ -932,7 +956,10 @@ export async function researchLead(customer, { useAi = true } = {}) {
     if (harvested.website && (harvested.verified || openWebsite)) website = harvested.website;
     emails = harvested.emails || [];
     const wikiPhones = facts.filter((f) => f.label === '公开电话').map((f) => f.value);
-    phones = [...new Set([...(harvested.phones || []), ...wikiPhones])].slice(0, 8);
+    phones = [...new Set([...(harvested.phones || []), ...snippetPhones, ...wikiPhones])].slice(0, 8);
+    if (phones.length && !facts.some((f) => f.label === '公开电话')) {
+      facts.push({ label: '公开电话', value: phones.join(' · '), source: '搜索摘要' });
+    }
     pages = harvested.pages || [];
     if (harvested.error && !website) notes.push(`官网抓取：${harvested.error}`);
     if (harvested.whois?.created) {
@@ -1099,7 +1126,7 @@ export async function researchLead(customer, { useAi = true } = {}) {
     website: website || '',
     emails,
     phones,
-    address: factOf(/注册地址|总部/),
+    address: factOf(/注册地址|总部|公开地址/),
     industry: factOf(/行业/),
     employees: factOf(/员工规模/),
     socials,
