@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import { api } from '../api.js';
 import { Spinner } from './common.jsx';
+import CountryFlag from './CountryFlag.jsx';
+import { countryLabel, countrySearchText, groupCountryFacets } from '../countries.js';
 
 const TABS = [
   { key: 'all', label: '采购商询盘' },
@@ -29,26 +31,6 @@ const DRAWER_TABS = [
   { key: 'research', label: '公开背调' },
   { key: 'contacts', label: '联系人' },
 ];
-
-const FLAGS = {
-  英国: '🇬🇧', UK: '🇬🇧', GB: '🇬🇧', 'United Kingdom': '🇬🇧',
-  美国: '🇺🇸', US: '🇺🇸', USA: '🇺🇸', 'United States': '🇺🇸',
-  德国: '🇩🇪', DE: '🇩🇪', Germany: '🇩🇪',
-  荷兰: '🇳🇱', Netherlands: '🇳🇱', NL: '🇳🇱',
-  法国: '🇫🇷', FR: '🇫🇷', France: '🇫🇷',
-  印度: '🇮🇳', IN: '🇮🇳', India: '🇮🇳',
-  中国: '🇨🇳', CN: '🇨🇳', China: '🇨🇳',
-  波兰: '🇵🇱', PL: '🇵🇱', Poland: '🇵🇱',
-  西班牙: '🇪🇸', ES: '🇪🇸', Spain: '🇪🇸',
-  意大利: '🇮🇹', IT: '🇮🇹', Italy: '🇮🇹',
-  芬兰: '🇫🇮', FI: '🇫🇮', Finland: '🇫🇮',
-  澳大利亚: '🇦🇺', AU: '🇦🇺', Australia: '🇦🇺',
-  Indonesia: '🇮🇩', Kenya: '🇰🇪',
-};
-
-function flagOf(country) {
-  return FLAGS[country] || '🌐';
-}
 
 function formatTime(iso) {
   if (!iso) return '尚未执行';
@@ -82,34 +64,34 @@ function pageNumbers(page, pages) {
 function FilterGroup({ title, children, defaultOpen = true }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="border-b border-slate-100 py-2.5">
+    <div className="border-b border-[#eef1f6] py-3">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between px-3 text-[12px] font-medium text-slate-700"
+        className="flex w-full items-center justify-between px-4 text-[13px] font-medium text-[#334155]"
       >
         {title}
-        <ChevronDown size={13} className={`text-slate-400 transition ${open ? '' : '-rotate-90'}`} />
+        <ChevronDown size={14} className={`text-slate-400 transition ${open ? '' : '-rotate-90'}`} />
       </button>
-      {open && <div className="mt-1.5 space-y-0.5 px-3">{children}</div>}
+      {open && <div className="mt-2 space-y-0.5 px-4">{children}</div>}
     </div>
   );
 }
 
-function CheckRow({ checked, onChange, label, count }) {
+function CheckRow({ checked, onChange, label, count, leading }) {
   return (
-    <label className="flex cursor-pointer items-center gap-2 rounded px-0.5 py-1 text-[12px] text-slate-600 hover:bg-slate-50">
+    <label className="flex cursor-pointer items-center gap-2 rounded px-0.5 py-1.5 text-[12px] text-[#475569] hover:bg-[#f7f9fc]">
       <input type="checkbox" checked={checked} onChange={onChange} className="accent-primary" />
+      {leading}
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {count != null && <span className="shrink-0 text-[11px] text-slate-400">{count.toLocaleString()}</span>}
+      {count != null && <span className="shrink-0 text-[11px] text-[#94a3b8]">{count.toLocaleString()}</span>}
     </label>
   );
 }
 
-function ResearchDot({ done }) {
+function ResearchStatus({ done }) {
   return (
-    <span className="inline-flex items-center gap-1.5 text-[12px] text-slate-600">
-      <span className={`h-1.5 w-1.5 rounded-full ${done ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+    <span className={`text-[12px] ${done ? 'text-emerald-600' : 'text-[#94a3b8]'}`}>
       {done ? '已背调' : '未背调'}
     </span>
   );
@@ -119,17 +101,16 @@ export default function LeadsPage({ onGoOutreach }) {
   const [draftQ, setDraftQ] = useState('');
   const [q, setQ] = useState('');
   const [tab, setTab] = useState('all');
-  const [sources, setSources] = useState([]);
-  const [countries, setCountries] = useState([]);
+  const [countryKeys, setCountryKeys] = useState([]);
+  const [countryQ, setCountryQ] = useState('');
   const [qualities, setQualities] = useState([]);
   const [contacts, setContacts] = useState([]);
   const [researches, setResearches] = useState([]);
-  const [moreCountries, setMoreCountries] = useState(false);
   const [page, setPage] = useState(0);
   const [limit, setLimit] = useState(20);
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
-  const [facets, setFacets] = useState({ sources: {}, countries: {}, total: 0, needEmail: 0, hasEmail: 0, researched: 0 });
+  const [facets, setFacets] = useState({ countries: {}, total: 0, needEmail: 0, hasEmail: 0, researched: 0 });
   const [loading, setLoading] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -144,23 +125,40 @@ export default function LeadsPage({ onGoOutreach }) {
   const [checked, setChecked] = useState([]);
   const [okMsg, setOkMsg] = useState('');
 
+  const countryGroups = useMemo(() => groupCountryFacets(facets.countries), [facets.countries]);
+  const selectedNames = useMemo(
+    () => countryGroups.filter((g) => countryKeys.includes(g.key)).flatMap((g) => g.names),
+    [countryGroups, countryKeys]
+  );
+
+  const visibleCountries = useMemo(() => {
+    const kw = countryQ.trim().toLowerCase();
+    const matched = kw
+      ? countryGroups.filter((g) =>
+          [g.label, g.iso, ...g.names].some((n) => countrySearchText(n).includes(kw) || String(n).toLowerCase().includes(kw))
+        )
+      : countryGroups;
+    if (kw) return matched.slice(0, 40);
+    const selected = matched.filter((g) => countryKeys.includes(g.key));
+    const rest = matched.filter((g) => !countryKeys.includes(g.key)).slice(0, 10);
+    const keys = new Set();
+    return [...selected, ...rest].filter((g) => (keys.has(g.key) ? false : keys.add(g.key)));
+  }, [countryGroups, countryQ, countryKeys]);
+
   const query = useMemo(() => {
     const contactFromTab = tab === 'need_email' ? 'missing' : tab === 'has_email' ? 'found' : '';
     const contactFromFilter = contacts.length === 1 ? contacts[0] : '';
-    const quality = qualities.length === 1 ? qualities[0] : '';
-    const research = researches.length === 1 ? researches[0] : '';
     return {
       q,
-      source: sources.join(','),
-      country: countries.join(','),
+      country: selectedNames.join(','),
       contact: contactFromTab || contactFromFilter,
-      quality,
-      research,
+      quality: qualities.length === 1 ? qualities[0] : '',
+      research: researches.length === 1 ? researches[0] : '',
       today: tab === 'today',
       limit,
       offset: page * limit,
     };
-  }, [q, tab, sources, countries, qualities, contacts, researches, limit, page]);
+  }, [q, tab, selectedNames, qualities, contacts, researches, limit, page]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -206,15 +204,6 @@ export default function LeadsPage({ onGoOutreach }) {
   const pages = Math.max(1, Math.ceil(total / limit));
   const customer = detail?.customer;
   const research = detail?.research || customer?.research;
-  const sourceEntries = useMemo(
-    () => Object.entries(facets.sources || {}).sort((a, b) => b[1] - a[1]),
-    [facets.sources]
-  );
-  const countryEntries = useMemo(
-    () => Object.entries(facets.countries || {}).sort((a, b) => b[1] - a[1]),
-    [facets.countries]
-  );
-  const visibleCountries = moreCountries ? countryEntries : countryEntries.slice(0, 8);
 
   const openDrawer = (id, nextTab = 'research') => {
     setSelectedId(id);
@@ -227,13 +216,11 @@ export default function LeadsPage({ onGoOutreach }) {
     setErr('');
     try {
       const data = await api.rfqResearch(id);
-      if (selectedId === id || !selectedId) {
-        setSelectedId(id);
-        setDetail(data);
-        setPickedEmail(data.research?.emails?.[0]?.email || '');
-        setDrawerOpen(true);
-        setDrawerTab('research');
-      }
+      setSelectedId(id);
+      setDetail(data);
+      setPickedEmail(data.research?.emails?.[0]?.email || '');
+      setDrawerOpen(true);
+      setDrawerTab('research');
       await load();
     } catch (e) {
       setErr(String(e.message || e));
@@ -277,17 +264,12 @@ export default function LeadsPage({ onGoOutreach }) {
   };
 
   const resetFilters = () => {
-    setSources([]);
-    setCountries([]);
+    setCountryKeys([]);
+    setCountryQ('');
     setQualities([]);
     setContacts([]);
     setResearches([]);
     setPage(0);
-  };
-
-  const submitSearch = () => {
-    setPage(0);
-    setQ(draftQ.trim());
   };
 
   const allChecked = rows.length > 0 && rows.every((r) => checked.includes(r.id));
@@ -308,36 +290,31 @@ export default function LeadsPage({ onGoOutreach }) {
   };
 
   return (
-    <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-[#f5f7fa]">
-      <header className="shrink-0 border-b border-slate-200 bg-white px-5 py-3">
+    <section className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-white">
+      <header className="shrink-0 border-b border-[#e8edf4] px-6 pt-5">
         <div className="flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-baseline gap-3">
-            <h1 className="text-[16px] font-semibold text-slate-800">询盘获客</h1>
-            <p className="truncate text-[12px] text-slate-400">
+            <h1 className="text-[20px] font-semibold tracking-tight text-[#1e293b]">询盘获客</h1>
+            <p className="truncate text-[12px] text-[#94a3b8]">
               每日 {String(pipeline?.dailyHour ?? 7).padStart(2, '0')}:00 自动更新
-              <span className="mx-1.5 text-slate-200">·</span>
+              <span className="mx-1.5 text-[#e2e8f0]">·</span>
               今日新增 {(pipeline?.todayNew ?? facets.todayNew ?? 0).toLocaleString()}
-              {pipeline?.lastDailyAt ? (
-                <>
-                  <span className="mx-1.5 text-slate-200">·</span>
-                  上次同步 {formatTime(pipeline.lastDailyAt)}
-                </>
-              ) : null}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
               onClick={() => setShowLog((v) => !v)}
-              className="h-8 rounded border border-slate-200 bg-white px-3 text-[12px] text-slate-600 hover:bg-slate-50"
+              className="flex h-8 items-center gap-1.5 rounded border border-[#dbe2ea] bg-white px-3 text-[12px] text-[#475569] hover:bg-[#f8fafc]"
             >
+              <RefreshCw size={13} />
               同步记录
             </button>
             <button
               type="button"
               onClick={syncToday}
               disabled={syncing || pipeline?.syncStatus === 'running'}
-              className="flex h-8 items-center gap-1.5 rounded bg-primary px-3 text-[12px] font-medium text-white hover:bg-blue-600 disabled:opacity-50"
+              className="flex h-8 items-center gap-1.5 rounded bg-primary px-3.5 text-[12px] font-medium text-white hover:bg-blue-600 disabled:opacity-50"
             >
               {syncing || pipeline?.syncStatus === 'running' ? <Spinner className="h-3! w-3!" /> : <RefreshCw size={13} />}
               立即同步
@@ -346,7 +323,7 @@ export default function LeadsPage({ onGoOutreach }) {
         </div>
 
         {showLog && pipeline && (
-          <div className="mt-2 rounded border border-slate-100 bg-slate-50 px-3 py-2 text-[12px] leading-relaxed text-slate-500">
+          <div className="mt-3 rounded border border-[#e8edf4] bg-[#f8fafc] px-3 py-2 text-[12px] leading-relaxed text-[#64748b]">
             北京时间 {pipeline.today}。上次同步 {formatTime(pipeline.lastDailyAt)}
             {pipeline.lastSync ? `，抓到 ${pipeline.lastSync.fetched} / 新入库 ${pipeline.lastSync.createdCount}` : ''}
             。队列 {pipeline.queue} · 今日已背调 {pipeline.researchedToday} · 自动写入邮箱 {pipeline.appliedToday}
@@ -356,19 +333,20 @@ export default function LeadsPage({ onGoOutreach }) {
         )}
 
         <form
-          className="mt-3 flex h-10 overflow-hidden rounded border border-slate-200 bg-white"
+          className="leads-search mt-4 flex h-10 overflow-hidden rounded border border-[#d7dee8] bg-white"
           onSubmit={(e) => {
             e.preventDefault();
-            submitSearch();
+            setPage(0);
+            setQ(draftQ.trim());
           }}
         >
           <div className="flex min-w-0 flex-1 items-center gap-2 px-3">
-            <Search size={15} className="shrink-0 text-slate-400" />
+            <Search size={15} className="shrink-0 text-[#94a3b8]" />
             <input
               value={draftQ}
               onChange={(e) => setDraftQ(e.target.value)}
               placeholder="输入产品词、公司名或询盘摘要，如 cordless drill"
-              className="h-full w-full bg-transparent text-[13px] text-slate-700 placeholder:text-slate-400 focus:outline-none"
+              className="h-full w-full bg-transparent text-[13px] text-[#334155] placeholder:text-[#94a3b8] focus:outline-none"
             />
           </div>
           <button type="submit" className="h-full w-[88px] shrink-0 bg-primary text-[13px] font-medium text-white hover:bg-blue-600">
@@ -376,7 +354,7 @@ export default function LeadsPage({ onGoOutreach }) {
           </button>
         </form>
 
-        <div className="mt-1 flex items-end gap-6">
+        <div className="mt-1 flex items-end gap-7">
           {TABS.map((t) => (
             <button
               key={t.key}
@@ -386,22 +364,22 @@ export default function LeadsPage({ onGoOutreach }) {
                 setPage(0);
                 setChecked([]);
               }}
-              className={`relative h-9 text-[13px] ${
-                tab === t.key ? 'font-medium text-primary' : 'text-slate-500 hover:text-slate-700'
+              className={`relative h-10 text-[13px] ${
+                tab === t.key ? 'font-medium text-primary' : 'text-[#64748b] hover:text-[#334155]'
               }`}
             >
               {t.label}
               {t.key === 'today' && (pipeline?.todayNew || 0) > 0 && (
-                <span className="ml-1 text-[11px] text-slate-400">{pipeline.todayNew}</span>
+                <span className="ml-1 text-[11px] text-[#94a3b8]">{pipeline.todayNew}</span>
               )}
-              {tab === t.key && <span className="absolute inset-x-0 -bottom-px h-0.5 bg-primary" />}
+              {tab === t.key && <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-primary" />}
             </button>
           ))}
         </div>
       </header>
 
       {(err || okMsg) && (
-        <div className="shrink-0 px-5 pt-2">
+        <div className="shrink-0 px-6 pt-3">
           {err && <div className="rounded border border-rose-100 bg-rose-50 px-3 py-1.5 text-[12px] text-rose-600">{err}</div>}
           {okMsg && !err && (
             <div className="flex items-center justify-between rounded border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-[12px] text-emerald-700">
@@ -417,51 +395,43 @@ export default function LeadsPage({ onGoOutreach }) {
       )}
 
       <div className="flex min-h-0 flex-1">
-        <aside className="thin-scroll w-[220px] shrink-0 overflow-y-auto border-r border-slate-200 bg-white">
-          <div className="flex h-10 items-center justify-between border-b border-slate-100 px-3">
-            <span className="text-[12px] font-medium text-slate-700">筛选条件</span>
-            <button type="button" onClick={resetFilters} className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-primary" title="重置">
-              <RotateCcw size={11} />
+        <aside className="thin-scroll w-[240px] shrink-0 overflow-y-auto border-r border-[#e8edf4] bg-white">
+          <div className="flex h-11 items-center justify-between border-b border-[#eef1f6] px-4">
+            <span className="text-[13px] font-medium text-[#334155]">筛选条件</span>
+            <button type="button" onClick={resetFilters} className="flex items-center gap-1 text-[12px] text-[#94a3b8] hover:text-primary" title="重置">
+              <RotateCcw size={12} />
               重置
             </button>
           </div>
 
-          <FilterGroup title="询盘来源">
-            {sourceEntries.map(([name, count]) => (
-              <CheckRow
-                key={name}
-                checked={sources.includes(name)}
-                onChange={() => {
-                  setPage(0);
-                  setSources((cur) => toggleValue(cur, name));
-                }}
-                label={name}
-                count={count}
-              />
-            ))}
-          </FilterGroup>
-
           <FilterGroup title="国家/地区">
-            {visibleCountries.map(([name, count]) => (
+            <div className="mb-1.5 flex h-8 items-center gap-1.5 rounded border border-[#e2e8f0] bg-[#f8fafc] px-2">
+              <Search size={12} className="text-[#94a3b8]" />
+              <input
+                value={countryQ}
+                onChange={(e) => setCountryQ(e.target.value)}
+                placeholder="搜索国家，如 美国 / US"
+                className="h-full w-full bg-transparent text-[12px] text-[#334155] placeholder:text-[#94a3b8] focus:outline-none"
+              />
+            </div>
+            {visibleCountries.map((g) => (
               <CheckRow
-                key={name}
-                checked={countries.includes(name)}
+                key={g.key}
+                checked={countryKeys.includes(g.key)}
                 onChange={() => {
                   setPage(0);
-                  setCountries((cur) => toggleValue(cur, name));
+                  setCountryKeys((cur) => toggleValue(cur, g.key));
                 }}
-                label={`${flagOf(name)} ${name}`}
-                count={count}
+                leading={<CountryFlag country={g.iso || g.names[0]} size={14} />}
+                label={g.label}
+                count={g.count}
               />
             ))}
-            {countryEntries.length > 8 && (
-              <button
-                type="button"
-                onClick={() => setMoreCountries((v) => !v)}
-                className="pt-1 text-[11px] text-primary hover:underline"
-              >
-                {moreCountries ? '收起' : `更多 ${countryEntries.length - 8} 个国家`}
-              </button>
+            {!countryQ && countryGroups.length > visibleCountries.length && (
+              <div className="pt-1 text-[11px] text-[#94a3b8]">输入国家名继续筛选，共 {countryGroups.length} 个</div>
+            )}
+            {countryQ && visibleCountries.length === 0 && (
+              <div className="py-2 text-[12px] text-[#94a3b8]">没有匹配的国家</div>
             )}
           </FilterGroup>
 
@@ -492,7 +462,7 @@ export default function LeadsPage({ onGoOutreach }) {
                   setPage(0);
                   setContacts((cur) => toggleValue(cur, 'missing'));
                 }}
-                label="待挖邮箱"
+                label="待补邮箱"
                 count={facets.needEmail}
               />
               <CheckRow
@@ -530,12 +500,12 @@ export default function LeadsPage({ onGoOutreach }) {
 
         <div className="flex min-w-0 flex-1 flex-col bg-white">
           {checked.length > 0 && (
-            <div className="flex h-9 items-center gap-3 border-b border-slate-100 bg-[#f7f9fc] px-3 text-[12px] text-slate-600">
+            <div className="flex h-9 items-center gap-3 border-b border-[#eef1f6] bg-[#f7f9fc] px-4 text-[12px] text-[#475569]">
               <span>已选 {checked.length} 条</span>
               <button type="button" onClick={batchResearch} disabled={busy} className="text-primary hover:underline disabled:opacity-50">
                 批量挖邮箱
               </button>
-              <button type="button" onClick={() => setChecked([])} className="text-slate-400 hover:text-slate-600">
+              <button type="button" onClick={() => setChecked([])} className="text-[#94a3b8] hover:text-[#475569]">
                 取消选择
               </button>
             </div>
@@ -543,9 +513,9 @@ export default function LeadsPage({ onGoOutreach }) {
 
           <div className="thin-scroll min-h-0 flex-1 overflow-auto">
             <table className="w-full table-fixed text-left text-[12px]">
-              <thead className="sticky top-0 z-10 bg-[#fafbfc] text-[12px] font-medium text-slate-400">
-                <tr className="border-b border-slate-200">
-                  <th className="w-10 px-3 py-2">
+              <thead className="sticky top-0 z-10 bg-[#f8fafc] text-[12px] font-medium text-[#94a3b8]">
+                <tr className="border-b border-[#e8edf4]">
+                  <th className="w-11 px-4 py-2.5">
                     <input
                       type="checkbox"
                       checked={allChecked}
@@ -553,21 +523,21 @@ export default function LeadsPage({ onGoOutreach }) {
                       className="accent-primary"
                     />
                   </th>
-                  <th className="w-[18%] px-2 py-2">公司/买家</th>
-                  <th className="w-[10%] px-2 py-2">国家</th>
-                  <th className="px-2 py-2">询盘摘要</th>
-                  <th className="w-[14%] px-2 py-2">来源</th>
-                  <th className="w-[16%] px-2 py-2">联系人</th>
-                  <th className="w-[9%] px-2 py-2">背调</th>
-                  <th className="w-[12%] px-2 py-2">操作</th>
+                  <th className="w-[18%] px-3 py-2.5">公司/买家</th>
+                  <th className="w-[11%] px-3 py-2.5">国家</th>
+                  <th className="px-3 py-2.5">询盘摘要</th>
+                  <th className="w-[13%] px-3 py-2.5">来源</th>
+                  <th className="w-[16%] px-3 py-2.5">联系人</th>
+                  <th className="w-[8%] px-3 py-2.5">背调</th>
+                  <th className="w-[12%] px-3 py-2.5">操作</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((c) => {
                   const active = c.id === selectedId && drawerOpen;
                   return (
-                    <tr key={c.id} className={`border-b border-slate-100 ${active ? 'bg-primary-light' : 'hover:bg-[#f7f9fc]'}`}>
-                      <td className="px-3 py-2.5">
+                    <tr key={c.id} className={`border-b border-[#f1f5f9] ${active ? 'bg-primary-light' : 'hover:bg-[#f8fafc]'}`}>
+                      <td className="px-4 py-3">
                         <input
                           type="checkbox"
                           checked={checked.includes(c.id)}
@@ -575,7 +545,7 @@ export default function LeadsPage({ onGoOutreach }) {
                           className="accent-primary"
                         />
                       </td>
-                      <td className="px-2 py-2.5">
+                      <td className="px-3 py-3">
                         <button
                           type="button"
                           onClick={() => openDrawer(c.id, 'basic')}
@@ -585,24 +555,26 @@ export default function LeadsPage({ onGoOutreach }) {
                           {companyOf(c)}
                         </button>
                       </td>
-                      <td className="px-2 py-2.5 text-slate-600">
-                        <span className="mr-1">{flagOf(c.country)}</span>
-                        <span className="truncate">{c.country || '—'}</span>
+                      <td className="px-3 py-3">
+                        <span className="inline-flex min-w-0 items-center gap-1.5 text-[#475569]">
+                          <CountryFlag country={c.country} size={16} />
+                          <span className="truncate">{countryLabel(c.country)}</span>
+                        </span>
                       </td>
-                      <td className="px-2 py-2.5">
-                        <span className="line-clamp-2 leading-5 text-slate-500" title={snippetOf(c)}>
+                      <td className="px-3 py-3">
+                        <span className="line-clamp-2 leading-5 text-[#64748b]" title={snippetOf(c)}>
                           {snippetOf(c)}
                         </span>
                       </td>
-                      <td className="truncate px-2 py-2.5 text-slate-500">{c.source || '—'}</td>
-                      <td className="truncate px-2 py-2.5">
-                        {c.email ? <span className="text-slate-700">{c.email}</span> : <span className="text-slate-300">—</span>}
+                      <td className="truncate px-3 py-3 text-[#64748b]">{c.source || '—'}</td>
+                      <td className="truncate px-3 py-3">
+                        {c.email ? <span className="text-primary">{c.email}</span> : <span className="text-[#cbd5e1]">—</span>}
                       </td>
-                      <td className="px-2 py-2.5">
-                        <ResearchDot done={c.research?.status === 'done'} />
+                      <td className="px-3 py-3">
+                        <ResearchStatus done={c.research?.status === 'done'} />
                       </td>
-                      <td className="px-2 py-2.5">
-                        <div className="flex items-center gap-2 whitespace-nowrap">
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-3 whitespace-nowrap">
                           <button
                             type="button"
                             onClick={() => runResearch(c.id)}
@@ -611,7 +583,7 @@ export default function LeadsPage({ onGoOutreach }) {
                           >
                             挖邮箱
                           </button>
-                          <button type="button" onClick={() => openDrawer(c.id, 'research')} className="text-slate-500 hover:underline">
+                          <button type="button" onClick={() => openDrawer(c.id, 'research')} className="text-[#64748b] hover:underline">
                             详情
                           </button>
                         </div>
@@ -621,7 +593,7 @@ export default function LeadsPage({ onGoOutreach }) {
                 })}
                 {!loading && rows.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-6 py-20 text-center text-[13px] text-slate-400">
+                    <td colSpan={8} className="px-6 py-20 text-center text-[13px] text-[#94a3b8]">
                       没有符合条件的询盘，试试换关键词或放宽左侧筛选
                     </td>
                   </tr>
@@ -629,13 +601,13 @@ export default function LeadsPage({ onGoOutreach }) {
               </tbody>
             </table>
             {loading && (
-              <div className="flex items-center justify-center gap-2 py-10 text-[12px] text-slate-400">
+              <div className="flex items-center justify-center gap-2 py-10 text-[12px] text-[#94a3b8]">
                 <Spinner /> 加载询盘
               </div>
             )}
           </div>
 
-          <div className="flex h-11 shrink-0 items-center justify-between border-t border-slate-200 px-3 text-[12px] text-slate-500">
+          <div className="flex h-12 shrink-0 items-center justify-between border-t border-[#e8edf4] px-4 text-[12px] text-[#64748b]">
             <span>共 {total.toLocaleString()} 条</span>
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1">
@@ -643,20 +615,20 @@ export default function LeadsPage({ onGoOutreach }) {
                   type="button"
                   disabled={page <= 0}
                   onClick={() => setPage((p) => Math.max(0, p - 1))}
-                  className="flex h-7 w-7 items-center justify-center rounded border border-slate-200 text-slate-400 hover:bg-slate-50 disabled:opacity-30"
+                  className="flex h-7 w-7 items-center justify-center rounded border border-[#dbe2ea] text-[#94a3b8] hover:bg-[#f8fafc] disabled:opacity-30"
                 >
                   <ChevronLeft size={14} />
                 </button>
                 {pageNumbers(page, pages).map((item, i) =>
                   item === '…' ? (
-                    <span key={`e${i}`} className="px-1 text-slate-300">…</span>
+                    <span key={`e${i}`} className="px-1 text-[#cbd5e1]">…</span>
                   ) : (
                     <button
                       key={item}
                       type="button"
                       onClick={() => setPage(item)}
                       className={`h-7 min-w-7 rounded px-1.5 ${
-                        page === item ? 'bg-primary text-white' : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
+                        page === item ? 'bg-primary text-white' : 'border border-[#dbe2ea] text-[#475569] hover:bg-[#f8fafc]'
                       }`}
                     >
                       {item + 1}
@@ -667,7 +639,7 @@ export default function LeadsPage({ onGoOutreach }) {
                   type="button"
                   disabled={page + 1 >= pages}
                   onClick={() => setPage((p) => p + 1)}
-                  className="flex h-7 w-7 items-center justify-center rounded border border-slate-200 text-slate-400 hover:bg-slate-50 disabled:opacity-30"
+                  className="flex h-7 w-7 items-center justify-center rounded border border-[#dbe2ea] text-[#94a3b8] hover:bg-[#f8fafc] disabled:opacity-30"
                 >
                   <ChevronRight size={14} />
                 </button>
@@ -678,7 +650,7 @@ export default function LeadsPage({ onGoOutreach }) {
                   setPage(0);
                   setLimit(Number(e.target.value));
                 }}
-                className="h-7 rounded border border-slate-200 bg-white px-1.5 text-[12px]"
+                className="h-7 rounded border border-[#dbe2ea] bg-white px-1.5 text-[12px]"
               >
                 <option value={20}>20 条/页</option>
                 <option value={50}>50 条/页</option>
@@ -690,37 +662,40 @@ export default function LeadsPage({ onGoOutreach }) {
       </div>
 
       {drawerOpen && (
-        <div className="absolute inset-0 z-20 flex justify-end bg-slate-900/20" onClick={() => setDrawerOpen(false)}>
+        <div className="absolute inset-0 z-20 flex justify-end bg-slate-900/25" onClick={() => setDrawerOpen(false)}>
           <aside
-            className="flex h-full w-[440px] flex-col border-l border-slate-200 bg-white shadow-xl"
+            className="flex h-full w-[460px] flex-col border-l border-[#e8edf4] bg-white shadow-[-8px_0_24px_rgb(15_23_42/0.08)]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4">
-              <div className="min-w-0">
-                <div className="truncate text-[16px] font-semibold text-slate-800">{companyOf(customer || {})}</div>
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-slate-400">
-                  <span>{flagOf(customer?.country)} {customer?.country || '国家未知'}</span>
+            <div className="flex items-start justify-between border-b border-[#eef1f6] px-5 py-4">
+              <div className="min-w-0 pr-3">
+                <div className="truncate text-[16px] font-semibold text-[#1e293b]">{companyOf(customer || {})}</div>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[12px] text-[#64748b]">
+                  <span className="inline-flex items-center gap-1.5">
+                    <CountryFlag country={customer?.country} size={16} />
+                    {countryLabel(customer?.country)}
+                  </span>
                   {customer?.sourceUrl ? (
-                    <a href={customer.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
+                    <a href={customer.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded bg-[#f1f5f9] px-1.5 py-0.5 text-primary hover:underline">
                       {customer.source || '原始询盘'} <ExternalLink size={11} />
                     </a>
                   ) : (
-                    <span>{customer?.source || '公开询盘'}</span>
+                    <span className="rounded bg-[#f1f5f9] px-1.5 py-0.5">{customer?.source || '公开询盘'}</span>
                   )}
                 </div>
               </div>
-              <button type="button" onClick={() => setDrawerOpen(false)} className="rounded p-1 text-slate-400 hover:bg-slate-100">
+              <button type="button" onClick={() => setDrawerOpen(false)} className="rounded p-1 text-[#94a3b8] hover:bg-[#f1f5f9]">
                 <X size={16} />
               </button>
             </div>
 
-            <div className="flex shrink-0 gap-5 border-b border-slate-100 px-5">
+            <div className="flex shrink-0 gap-5 border-b border-[#eef1f6] px-5">
               {DRAWER_TABS.map((t) => (
                 <button
                   key={t.key}
                   type="button"
                   onClick={() => setDrawerTab(t.key)}
-                  className={`relative h-10 text-[13px] ${drawerTab === t.key ? 'font-medium text-primary' : 'text-slate-500'}`}
+                  className={`relative h-10 text-[13px] ${drawerTab === t.key ? 'font-medium text-primary' : 'text-[#64748b]'}`}
                 >
                   {t.label}
                   {drawerTab === t.key && <span className="absolute inset-x-0 -bottom-px h-0.5 bg-primary" />}
@@ -730,7 +705,7 @@ export default function LeadsPage({ onGoOutreach }) {
 
             <div className="thin-scroll min-h-0 flex-1 overflow-y-auto px-5 py-4">
               {!customer ? (
-                <div className="py-16 text-center text-[12px] text-slate-400">加载详情…</div>
+                <div className="py-16 text-center text-[12px] text-[#94a3b8]">加载详情…</div>
               ) : (
                 <DrawerBody
                   tab={drawerTab}
@@ -742,7 +717,7 @@ export default function LeadsPage({ onGoOutreach }) {
               )}
             </div>
 
-            <div className="flex shrink-0 gap-2 border-t border-slate-100 px-5 py-3">
+            <div className="flex shrink-0 gap-2 border-t border-[#eef1f6] px-5 py-3">
               <button
                 type="button"
                 onClick={() => customer && runResearch(customer.id)}
@@ -750,7 +725,7 @@ export default function LeadsPage({ onGoOutreach }) {
                 className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded border border-primary text-[13px] font-medium text-primary hover:bg-primary-light disabled:opacity-40"
               >
                 {busy ? <Spinner className="h-3! w-3!" /> : <Mail size={13} />}
-                {research?.status === 'done' ? '重新挖邮箱' : '挖邮箱'}
+                挖邮箱
               </button>
               <button
                 type="button"
@@ -773,11 +748,11 @@ function InfoRow({ label, value, href }) {
   if (!value) return null;
   return (
     <div className="flex gap-3 py-1.5 text-[12px]">
-      <dt className="w-16 shrink-0 text-slate-400">{label}</dt>
-      <dd className="min-w-0 break-all text-slate-700">
+      <dt className="w-16 shrink-0 text-[#94a3b8]">{label}</dt>
+      <dd className="min-w-0 break-all text-[#334155]">
         {href ? (
-          <a href={href} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-            {value}
+          <a href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
+            {value} <ExternalLink size={11} />
           </a>
         ) : (
           value
@@ -787,13 +762,26 @@ function InfoRow({ label, value, href }) {
   );
 }
 
+function researchChecks(customer, research) {
+  const website = Boolean(research?.website || customer.website);
+  const social = (research?.facts || []).some((f) => /linkedin|facebook|twitter|社媒|social/i.test(`${f.label} ${f.value}`));
+  const registry = (research?.facts || []).some((f) => /GLEIF|Wikidata|LEI|注册|工商/i.test(`${f.source} ${f.label}`));
+  const procurement = Boolean(customer.sourceUrl || customer.awardId || customer.rfq);
+  return [
+    { label: '公司官网', ok: website },
+    { label: '社交媒体', ok: social },
+    { label: '工商信息', ok: registry },
+    { label: '招投标/采购记录', ok: procurement },
+  ];
+}
+
 function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail }) {
   if (tab === 'basic') {
     return (
       <dl>
         <InfoRow label="公司" value={customer.company || customer.name} />
-        <InfoRow label="买家" value={customer.buyer || customer.name} />
-        <InfoRow label="国家" value={customer.country} />
+        <InfoRow label="买家" value={customer.buyer && customer.buyer !== customer.company ? customer.buyer : customer.name} />
+        <InfoRow label="国家" value={countryLabel(customer.country)} />
         <InfoRow label="来源" value={customer.source} />
         <InfoRow label="官网" value={research?.website || customer.website} href={research?.website || customer.website} />
         <InfoRow label="行业" value={research?.facts?.find((f) => /行业|industry/i.test(f.label))?.value || customer.industry} />
@@ -807,14 +795,14 @@ function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail }) {
 
   if (tab === 'rfq') {
     return (
-      <div className="space-y-3 text-[12px] leading-relaxed text-slate-600">
+      <div className="space-y-3 text-[12px] leading-relaxed text-[#475569]">
         <div>
-          <div className="mb-1 text-slate-400">询盘摘要</div>
+          <div className="mb-1 text-[#94a3b8]">询盘摘要</div>
           <p>{snippetOf(customer)}</p>
         </div>
         {customer.rfq?.title && (
           <div>
-            <div className="mb-1 text-slate-400">标题</div>
+            <div className="mb-1 text-[#94a3b8]">标题</div>
             <p>{customer.rfq.title}</p>
           </div>
         )}
@@ -823,7 +811,7 @@ function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail }) {
             打开原始询盘 <ExternalLink size={12} />
           </a>
         )}
-        {customer.ingestedAt && <div className="text-slate-400">入库时间 {formatTime(customer.ingestedAt)}</div>}
+        {customer.ingestedAt && <div className="text-[#94a3b8]">入库时间 {formatTime(customer.ingestedAt)}</div>}
       </div>
     );
   }
@@ -836,94 +824,94 @@ function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail }) {
           <label
             key={e.email}
             className={`flex cursor-pointer items-center gap-2 rounded border px-2.5 py-2 ${
-              pickedEmail === e.email ? 'border-primary bg-primary-light' : 'border-slate-200'
+              pickedEmail === e.email ? 'border-primary bg-primary-light' : 'border-[#e2e8f0]'
             }`}
           >
             <input type="radio" name="email" checked={pickedEmail === e.email} onChange={() => setPickedEmail(e.email)} />
-            <span className="text-[12px] text-slate-700">{e.email}</span>
-            <span className="ml-auto text-[10px] text-slate-400">{e.role || '公开邮箱'}</span>
+            <span className="text-[12px] text-[#334155]">{e.email}</span>
+            <span className="ml-auto text-[10px] text-[#94a3b8]">{e.role || '公开邮箱'}</span>
           </label>
         )) : (
-          <p className="text-[12px] text-slate-400">还没有可核验的公开角色邮箱，先点底部「挖邮箱」。</p>
+          <p className="text-[12px] text-[#94a3b8]">还没有可核验的公开角色邮箱，先点底部「挖邮箱」。</p>
         )}
         {research?.phones?.length > 0 && (
-          <div className="pt-2 text-[12px] text-slate-600">公开电话：{research.phones.join(' · ')}</div>
+          <div className="pt-2 text-[12px] text-[#475569]">公开电话：{research.phones.join(' · ')}</div>
         )}
       </div>
     );
   }
 
+  const checks = researchChecks(customer, research);
+  const address = research?.facts?.find((f) => /地址|address/i.test(f.label))?.value;
+  const industry = research?.facts?.find((f) => /行业|industry/i.test(f.label))?.value || customer.industry;
+  const size = research?.facts?.find((f) => /员工|规模|employee/i.test(f.label))?.value;
+
   return (
-    <div className="space-y-4">
-      {research?.status === 'running' && <p className="text-[12px] text-slate-500">正在查 Wikidata / GLEIF / 官网联系页…</p>}
+    <div className="space-y-5">
+      {research?.status === 'running' && <p className="text-[12px] text-[#64748b]">正在查 Wikidata / GLEIF / 官网联系页…</p>}
       {research?.status === 'failed' && <p className="text-[12px] text-rose-500">{research.error || '背调失败'}</p>}
-      {!research?.status && (
-        <p className="text-[12px] leading-relaxed text-slate-500">
-          还没做过公开背调。点底部「挖邮箱」，只查 Wikidata / GLEIF / 官网联系页上的角色邮箱，不扒私人邮箱。
-        </p>
+
+      <div className="space-y-2.5">
+        {checks.map((s) => (
+          <div key={s.label} className="flex items-center justify-between text-[12px]">
+            <div className="flex items-center gap-2.5">
+              <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] ${s.ok ? 'bg-emerald-500 text-white' : 'bg-[#e2e8f0] text-[#94a3b8]'}`}>
+                {s.ok ? '✓' : '–'}
+              </span>
+              <span className="text-[#334155]">{s.label}</span>
+            </div>
+            <span className={s.ok ? 'text-emerald-600' : 'text-[#94a3b8]'}>{s.ok ? '已找到' : '未找到'}</span>
+          </div>
+        ))}
+      </div>
+
+      {research?.status === 'done' && research.brief && (
+        <p className="text-[12px] leading-relaxed text-[#475569]">{research.brief}</p>
       )}
 
-      {research?.status === 'done' && (
-        <>
-          <div className="space-y-2.5">
-            {(research.steps || []).map((s) => (
-              <div key={s.key} className="flex gap-2.5">
-                <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] ${s.ok ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-500'}`}>
-                  {s.ok ? '✓' : '–'}
-                </span>
-                <div>
-                  <div className="text-[12px] font-medium text-slate-700">{s.label}</div>
-                  <div className="text-[11px] leading-relaxed text-slate-400">{s.detail}</div>
-                </div>
-              </div>
+      <div>
+        <div className="mb-2 text-[12px] font-medium text-[#334155]">公开角色邮箱</div>
+        {research?.emails?.length ? (
+          <div className="space-y-1.5">
+            {research.emails.map((e) => (
+              <label
+                key={e.email}
+                className={`flex cursor-pointer items-center gap-2 rounded border px-2.5 py-2 ${
+                  pickedEmail === e.email ? 'border-primary bg-primary-light' : 'border-[#e2e8f0]'
+                }`}
+              >
+                <input type="radio" name="email-research" checked={pickedEmail === e.email} onChange={() => setPickedEmail(e.email)} />
+                <span className="text-[12px] text-[#334155]">{e.email}</span>
+                <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-600">{e.role || '官网'}</span>
+                <span className="ml-auto text-[10px] text-emerald-600">可用</span>
+              </label>
             ))}
           </div>
+        ) : (
+          <p className="text-[12px] leading-relaxed text-[#64748b]">
+            {research?.status === 'done'
+              ? '这次没有拿到可验证的公开邮箱。大公司常用联系表单；阿里公开 RFQ 往往只有昵称。'
+              : '还没做过公开背调。点底部「挖邮箱」，只查 Wikidata / GLEIF / 官网联系页上的角色邮箱。'}
+          </p>
+        )}
+      </div>
 
-          {research.brief && <p className="text-[12px] leading-relaxed text-slate-600">{research.brief}</p>}
+      <dl className="border-t border-[#eef1f6] pt-3">
+        <InfoRow label="电话" value={research?.phones?.join(' · ')} />
+        <InfoRow label="官网" value={research?.website || customer.website} href={research?.website || customer.website} />
+        <InfoRow label="地址" value={address} />
+        <InfoRow label="行业" value={industry} />
+        <InfoRow label="员工规模" value={size} />
+      </dl>
 
-          {research.website && (
-            <div className="flex items-start gap-2 text-[12px] text-slate-600">
-              <Globe size={14} className="mt-0.5 text-slate-400" />
-              <a href={research.website} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-                {research.website}
-              </a>
-            </div>
-          )}
-
-          <div>
-            <div className="mb-1.5 text-[12px] font-medium text-slate-700">公开角色邮箱</div>
-            {research.emails?.length ? (
-              <div className="space-y-1.5">
-                {research.emails.map((e) => (
-                  <label
-                    key={e.email}
-                    className={`flex cursor-pointer items-center gap-2 rounded border px-2.5 py-2 ${
-                      pickedEmail === e.email ? 'border-primary bg-primary-light' : 'border-slate-200'
-                    }`}
-                  >
-                    <input type="radio" name="email-research" checked={pickedEmail === e.email} onChange={() => setPickedEmail(e.email)} />
-                    <span className="text-[12px] text-slate-700">{e.email}</span>
-                    <span className="ml-auto text-[10px] text-slate-400">{e.role}</span>
-                  </label>
-                ))}
-              </div>
-            ) : (
-              <p className="text-[12px] leading-relaxed text-slate-500">
-                这次没有拿到可验证的公开邮箱。大公司常用联系表单；阿里公开 RFQ 往往只有昵称。
-              </p>
-            )}
-          </div>
-
-          {research.outreachAdvice && (
-            <div className="rounded bg-[#f7f9fc] p-3 text-[12px] leading-relaxed text-slate-600">{research.outreachAdvice}</div>
-          )}
-          {research.risks?.length > 0 && (
-            <div className="flex gap-2 text-[12px] text-amber-700">
-              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-              <span>{research.risks.join('；')}</span>
-            </div>
-          )}
-        </>
+      {research?.outreachAdvice && (
+        <div className="rounded bg-[#f8fafc] p-3 text-[12px] leading-relaxed text-[#475569]">{research.outreachAdvice}</div>
+      )}
+      {research?.risks?.length > 0 && (
+        <div className="flex gap-2 text-[12px] text-amber-700">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+          <span>{research.risks.join('；')}</span>
+        </div>
       )}
     </div>
   );
