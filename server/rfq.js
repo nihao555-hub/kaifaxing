@@ -224,9 +224,15 @@ export async function searchUk({ keyword = 'power tools', limit = 12, since } = 
   });
 }
 
+function ymd(since) {
+  const s = String(since || '');
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
+}
+
 export async function searchTed({ keyword = 'tools', limit = 10, since } = {}) {
   const q = String(keyword || '').replace(/"/g, '');
-  const pd = since ? `PD>=${String(since).replace(/-/g, '')}` : '';
+  const day = ymd(since);
+  const pd = day ? `PD>=${day.replace(/-/g, '')}` : '';
   const parts = [
     q ? `FT~"${q}"` : '',
     q ? 'classification-cpv=44000000' : '',
