@@ -47,6 +47,8 @@ import {
   classifyResearchPath,
   crosspostLinks,
   suggestCrosspostCompany,
+  distinctiveSubjectPhrase,
+  rfqSubject,
 } from './researchPath.js';
 import { screenSanctions } from './sanctions.js';
 import { findTradeTraces } from './tradeTraces.js';
@@ -158,7 +160,7 @@ export function isPersonLikeDisplayName(name) {
   if (/@/.test(s)) return true;
   if (/[\u0400-\u04FF\u0600-\u06FF\u3040-\u30FF\u4E00-\u9FFF]/.test(s)) return true;
   const words = s.split(/\s+/).filter(Boolean);
-  if (words.some((w) => /^(company|group|trading|services|service|enterprise|industries|holdings|international|technologies|solutions|systems)$/i.test(w))) {
+  if (words.some((w) => /^(company|group|trading|services|service|enterprise|industries|holdings|international|technologies|solutions|systems|equipment|supplies|healthcare|authority|designs?|agency)$/i.test(w))) {
     return false;
   }
   if (words.length === 1) return /^[\p{L}][\p{L}.'-]{2,24}$/u.test(words[0]);
@@ -1026,8 +1028,8 @@ export async function researchLead(customer, { useAi = true } = {}) {
     website = `https://${clues.emails[0].split('@')[1]}`;
   }
 
-  if (personLike && clues.fingerprints.length) {
-    crosspost = await suggestCrosspostCompany(clues, customer.country);
+  if (personLike && (clues.fingerprints.length || distinctiveSubjectPhrase(rfqSubject(customer)))) {
+    crosspost = await suggestCrosspostCompany(clues, customer.country, customer);
     if (crosspost.company) {
       try {
         applyLeadIdentity(customer, { company: crosspost.company, website });

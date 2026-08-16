@@ -6,6 +6,7 @@ import {
   crosspostQueries,
   companiesFromSnippets,
   parseAlibabaExportRow,
+  distinctiveSubjectPhrase,
 } from './researchPath.js';
 
 describe('extractRfqClues', () => {
@@ -49,6 +50,22 @@ describe('classifyResearchPath', () => {
     const qs = crosspostQueries(clues, 'UAE');
     assert.ok(qs.some((q) => q.includes('OIL00048')));
     assert.ok(qs.every((q) => !/Abdi/i.test(q)));
+  });
+
+  it('crossposts a distinctive product title without the nickname', () => {
+    const customer = {
+      company: 'Yash Kumar',
+      name: 'Yash Kumar',
+      country: 'Palau',
+      publicCard: { subject: 'Custom Logo PP Woven Sack Plastic 50kg Copra Meal Packaging Bags' },
+    };
+    const phrase = distinctiveSubjectPhrase(customer.publicCard.subject);
+    assert.match(phrase, /Woven Sack/);
+    const path = classifyResearchPath(customer, { personLike: true, clues: extractRfqClues('Need bags') });
+    assert.equal(path.key, 'crosspost');
+    const qs = crosspostQueries({}, 'Palau', customer);
+    assert.ok(qs.some((q) => q.includes(phrase)));
+    assert.ok(qs.every((q) => !/Yash/i.test(q)));
   });
 
   it('asks for seller-backend identity when the card is only a nickname', () => {

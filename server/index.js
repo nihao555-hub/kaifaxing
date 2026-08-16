@@ -28,6 +28,7 @@ import {
   kickResearch,
   applyTextCompanyHints,
   startFullKybPass,
+  startSignalPass,
   identifyLead,
   applyPublicContact,
   promoteLeads,
@@ -323,6 +324,11 @@ app.get('/api/rfq/leads/:id', (req, res) => {
 
 app.post('/api/rfq/leads/research-queue', (req, res) => {
   const all = Boolean(req.body?.all);
+  if (req.body?.signal) {
+    if (googleSearchReady()) config.pipeline.researchDelayMs = Math.min(config.pipeline.researchDelayMs, 2500);
+    const pass = startSignalPass();
+    return res.json({ ...getPipelineState(), ...pass });
+  }
   if (all) {
     if (googleSearchReady()) config.pipeline.researchDelayMs = Math.min(config.pipeline.researchDelayMs, 2500);
     const pass = startFullKybPass();

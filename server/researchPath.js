@@ -15,9 +15,36 @@ const EMAIL_RE = /[a-zA-Z0-9][a-zA-Z0-9._%+-]{0,63}@[a-zA-Z0-9][a-zA-Z0-9.-]*\.[
 const PHONE_RE = /(?:\+|00)\d{1,3}[\s-]?(?:\(?\d{2,4}\)?[\s-]?)?\d{3,4}[\s-]?\d{3,4}/g;
 
 export function rfqCorpus(customer = {}) {
-  return [customer.painPoints, customer.title, customer.rfq?.title, customer.rfq?.description]
-    .filter(Boolean)
-    .join(' ');
+  return [
+    customer.painPoints,
+    customer.title,
+    customer.product,
+    customer.publicCard?.subject,
+    customer.publicCard?.description,
+    customer.rfq?.title,
+    customer.rfq?.description,
+  ].filter(Boolean).join(' ');
+}
+
+const SUBJECT_STOP = new Set([
+  'the', 'and', 'for', 'with', 'from', 'this', 'that', 'buyer', 'alibaba', 'rfq',
+  'wholesale', 'custom', 'high', 'quality', 'factory',
+]);
+
+export function rfqSubject(customer = {}) {
+  return String(
+    customer.publicCard?.subject || customer.product || customer.title || customer.rfq?.title || '',
+  ).replace(/&[a-z]+;/gi, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** Quoted product phrase for crosspost. Never includes the buyer nickname. */
+export function distinctiveSubjectPhrase(subject) {
+  const words = String(subject || '')
+    .split(/\s+/)
+    .map((w) => w.replace(/[^a-zA-Z0-9.-]/g, ''))
+    .filter((w) => w.length >= 3 && !SUBJECT_STOP.has(w.toLowerCase()) && !/^\d+$/.test(w));
+  if (words.length < 4) return '';
+  return words.slice(0, 8).join(' ');
 }
 
 export function extractRfqClues(text) {
@@ -95,11 +122,14 @@ export function classifyResearchPath(customer = {}, { personLike = false, clues 
       clues: found,
     };
   }
-  if (found.fingerprints.length) {
+  const phrase = distinctiveSubjectPhrase(rfqSubject(customer));
+  if (found.fingerprints.length || phrase) {
     return {
       key: 'crosspost',
       label: '用询盘指纹交叉检索',
-      next: `不搜「${customer.company || customer.name}」这个人。用型号 ${found.fingerprints.join(' / ')} 找同款公开询盘，看别的站点有没有写出公司名。`,
+      next: found.fingerprints.length
+        ? `不搜「${customer.company || customer.name}」这个人。用型号 ${found.fingerprints.join(' / ')} 找同款公开询盘，看别的站点有没有写出公司名。`
+        : `不搜「${customer.company || customer.name}」这个人。用产品「${phrase}」在公开招标/其它 B2B 站找写出公司名的同款需求。`,
       clues: found,
     };
   }
@@ -111,7 +141,7 @@ export function classifyResearchPath(customer = {}, { personLike = false, clues 
   };
 }
 
-export function crosspostQueries(clues = {}, country = '') {
+export function crosspostQueries(clues = {}, country = '', customer = {}) {
   const place = countrySearchTerms(country).filter((t) => !t.includes(' ')).slice(0, 2);
   const queries = [];
   for (const fp of (clues.fingerprints || []).slice(0, 2)) {
@@ -119,7 +149,14 @@ export function crosspostQueries(clues = {}, country = '') {
     queries.push(`${token} (RFQ OR "buying request" OR "want to buy" OR inquiry)`);
     if (place[0]) queries.push(`${token} ${place[0]} (company OR Ltd OR LLC OR contact)`);
   }
-  return [...new Set(queries)].slice(0, 3);
+  const phrase = distinctiveSubjectPhrase(rfqSubject(customer) || clues.subject || '');
+  if (phrase) {
+    queries.push(`"${phrase}" (RFQ OR "buying request" OR "want to buy" OR "looking for") -site:alibaba.com -site:alicdn.com`);
+    if (place[0]) {
+      queries.push(`"${phrase}" ${place[0]} (Ltd OR Limited OR Inc OR GmbH OR "Pvt Ltd" OR company)`);
+    }
+  }
+  return [...new Set(queries)].slice(0, 4);
 }
 
 export function crosspostLinks(clues, country) {
@@ -163,8 +200,8 @@ function rawSearchItems(json) {
   })).filter((r) => r.url || r.title);
 }
 
-export async function suggestCrosspostCompany(clues, country) {
-  const queries = crosspostQueries(clues, country);
+export async function suggestCrosspostCompany(clues, country, customer = {}) {
+  const queries = crosspostQueries(clues, country, customer);
   const items = [];
   let engine = '';
   let error = '';

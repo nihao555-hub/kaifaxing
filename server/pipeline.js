@@ -1,9 +1,10 @@
-import { config } from './config.js';
+import { config, googleSearchReady } from './config.js';
 import { db, save, getCustomer, isRfqLead, isDemoCustomer, logActivity } from './store.js';
-import { crawlAllAndImport } from './rfq.js';
+import { crawlAllAndImport, importRfqItems } from './rfq.js';
 import { researchLead, isPersonLikeLead, isPlausibleEmail, applyLeadIdentity, compactSkippedReport } from './research.js';
 import { extractCompanyHintFromText } from './rfqHints.js';
-import { extractRfqClues, rfqCorpus, classifyResearchPath } from './researchPath.js';
+import { extractRfqClues, rfqCorpus, classifyResearchPath, distinctiveSubjectPhrase, rfqSubject } from './researchPath.js';
+import { clusterDemandKeywords, searchDemandPeers } from './demandPeers.js';
 import { VERIFIED_SOURCES } from './openSources.js';
 import { isForwarderName, isOutreachEmail } from './kyb.js';
 
@@ -220,6 +221,110 @@ export function prepareFullKybPass() {
   }
   if (promoted || stamped) save();
   return { promoted, stamped, live };
+}
+
+function isCompactNicknameReport(r) {
+  return r?.status === 'done' && r?.grade === 'C' && !r?.steps
+    && /个人显示名/.test(String(r?.brief || ''));
+}
+
+export function reopenSignalLeads({ limit = 2500 } = {}) {
+  const canSearch = googleSearchReady();
+  const candidates = [];
+  for (const c of db.customers) {
+    if (!isRfqLead(c)) continue;
+    if (c.research?.status === 'running') continue;
+    if (c.research?.status === 'done' && !isCompactNicknameReport(c.research)) continue;
+    const text = rfqCorpus(c);
+    const hint = extractCompanyHintFromText(text);
+    const clues = extractRfqClues(text);
+    const phrase = distinctiveSubjectPhrase(rfqSubject(c));
+    let score = 0;
+    if (hint) score += 100;
+    if (clues.websites[0] || clues.emails[0]) score += 80;
+    if (clues.fingerprints.length) score += 40;
+    if (phrase) score += Math.min(phrase.split(' ').length * 3, 30);
+    if (score < 20) continue;
+    if (!hint && !canSearch && !clues.websites[0] && !clues.emails[0] && !clues.fingerprints.length) continue;
+    candidates.push({ c, score, hint });
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  let promoted = 0;
+  let reopened = 0;
+  const toQueue = [];
+  for (const { c, hint } of candidates.slice(0, Math.min(Math.max(Number(limit) || 2500, 1), 8000))) {
+    if (hint) {
+      try {
+        applyLeadIdentity(c, { company: hint, website: extractRfqClues(rfqCorpus(c)).websites[0] });
+      } catch {
+        c.buyerAlias = c.buyerAlias || c.company || c.name;
+        c.company = hint;
+        c.forceCompany = true;
+        c.research = null;
+      }
+      c.identitySource = c.identitySource || 'rfq_text';
+      c.research = null;
+      stampLeadPath(c);
+      promoted += 1;
+      toQueue.push(c);
+      continue;
+    }
+    if (!canSearch) continue;
+    c.research = null;
+    c.researchPath = 'crosspost';
+    reopened += 1;
+    toQueue.push(c);
+  }
+  const added = enqueueResearch(toQueue);
+  if (promoted || reopened) save();
+  return { promoted, reopened, added, considered: candidates.length };
+}
+
+export async function importDemandPeerClusters({ maxClusters = 12, perCluster = 6 } = {}) {
+  const compact = db.customers.filter((c) => isRfqLead(c) && isCompactNicknameReport(c.research));
+  const clusters = clusterDemandKeywords(compact, { maxClusters });
+  let fetched = 0;
+  const items = [];
+  for (const cluster of clusters) {
+    const rows = await searchDemandPeers(cluster.sample, { limit: perCluster });
+    fetched += rows.length;
+    items.push(...rows);
+  }
+  const created = importRfqItems(items, { quiet: true });
+  const added = enqueueResearch(created);
+  return { clusters: clusters.length, fetched, created: created.length, added };
+}
+
+let signalPass = { status: 'idle' };
+
+export function getSignalPassState() {
+  return signalPass;
+}
+
+export function startSignalPass() {
+  if (signalPass.status === 'running') return signalPass;
+  signalPass = { status: 'running', startedAt: new Date().toISOString() };
+  setImmediate(async () => {
+    try {
+      const reopened = reopenSignalLeads({ limit: 2500 });
+      const peers = await importDemandPeerClusters({ maxClusters: 12, perCluster: 6 });
+      kickResearch();
+      signalPass = {
+        status: 'done',
+        startedAt: signalPass.startedAt,
+        finishedAt: new Date().toISOString(),
+        ...reopened,
+        peers,
+      };
+    } catch (err) {
+      signalPass = {
+        status: 'error',
+        startedAt: signalPass.startedAt,
+        error: String(err.message || err),
+      };
+    }
+  });
+  return signalPass;
 }
 
 export function startFullKybPass() {
@@ -532,6 +637,7 @@ export function getPipelineState() {
     appliedToday: p.appliedDate === today ? p.appliedToday || 0 : 0,
     nextDaily: p.lastDailyDate === today ? `明天 ${String(config.pipeline.dailyHour).padStart(2, '0')}:00` : `今天 ${String(config.pipeline.dailyHour).padStart(2, '0')}:00 后`,
     kybPass,
+    signalPass,
   };
 }
 

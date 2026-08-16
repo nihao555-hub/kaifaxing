@@ -24,6 +24,26 @@ describe('extractCompanyHintFromText', () => {
       extractCompanyHintFromText('On behalf of Apache S.A we need packaging.'),
       'Apache S.A',
     );
+    assert.equal(
+      extractCompanyHintFromText('writing on behalf of Tobago Healthcare Equipment and Supplies'),
+      'Tobago Healthcare Equipment and Supplies',
+    );
+    assert.equal(
+      extractCompanyHintFromText('MY COMPANY NAME IS AEVI DESIGNS Polish furniture'),
+      'AEVI DESIGNS',
+    );
+    assert.equal(
+      extractCompanyHintFromText('on behalf of SBDC Bahamas we need LED tables'),
+      'SBDC Bahamas',
+    );
+    assert.equal(
+      extractCompanyHintFromText('Our company is looking for 10,000 bags Material:PP woven'),
+      '',
+    );
+    assert.equal(
+      extractCompanyHintFromText('on behalf of the brand Fidan Novruzova'),
+      '',
+    );
   });
 
   it('ignores we-are-seeking and product titles that happen to end in Limited', () => {
