@@ -350,7 +350,10 @@ export default function LeadsPage({ onGoOutreach }) {
     const first = countryGroups.find((g) => g.key === countryKeys[0])?.label || '';
     return countryKeys.length === 1 ? first : `${first} 等${countryKeys.length}国`;
   }, [countryKeys, countryGroups]);
-  const qualityLabel = quality === 'company' ? '公司名' : quality === 'person' ? '个人昵称' : '';
+  const qualityLabel = quality === 'company' ? '公司名'
+    : quality === 'person' ? '个人昵称'
+      : quality === 'auto' ? '可自动背调'
+        : quality === 'import' ? '需补主体' : '';
   const researchLabel = researchFilter === 'done' ? '已背调' : researchFilter === 'none' ? '未背调' : '';
   const hasFilters = countryKeys.length > 0 || quality || researchFilter;
 
@@ -378,6 +381,8 @@ export default function LeadsPage({ onGoOutreach }) {
           <div className="flex min-w-0 items-baseline gap-3">
             <h1 className="text-[20px] font-semibold tracking-tight text-[#1e293b]">询盘获客</h1>
             <p className="truncate text-[12px] text-[#94a3b8]">
+              符合要求的背调 = 主体已核 + 官网 + 角色邮箱 + 未制裁
+              <span className="mx-1.5 text-[#e2e8f0]">·</span>
               每日 {String(pipeline?.dailyHour ?? 7).padStart(2, '0')}:00 自动更新
               <span className="mx-1.5 text-[#e2e8f0]">·</span>
               今日新增 {(pipeline?.todayNew ?? facets.todayNew ?? 0).toLocaleString()}
@@ -442,6 +447,24 @@ export default function LeadsPage({ onGoOutreach }) {
           </button>
         </form>
 
+        <div className="mt-3 grid gap-2 rounded-lg border border-[#e8edf4] bg-[#f8fafc] px-3 py-2.5 text-[11px] leading-relaxed text-[#64748b] sm:grid-cols-3">
+          <div>
+            <span className="font-medium text-[#334155]">1. 可自动背调</span>
+            {' '}
+            政府招标、写出 Ltd/LLC 的询盘：公开库 + 搜索公式挖官网角色邮箱。
+          </div>
+          <div>
+            <span className="font-medium text-[#334155]">2. 询盘指纹</span>
+            {' '}
+            有型号/SKU 时搜同款公开询盘，不搜买家昵称。命中公司名再核主体。
+          </div>
+          <div>
+            <span className="font-medium text-[#334155]">3. 需补主体</span>
+            {' '}
+            只有 Linda N 这种：导入阿里后台报价后的公司名，或填「补主体」。
+          </div>
+        </div>
+
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <FilterMenu label="国家/地区" summary={countrySummary} active={countryKeys.length > 0} width={280}>
             <div className="px-2 py-1.5">
@@ -483,6 +506,8 @@ export default function LeadsPage({ onGoOutreach }) {
 
           <FilterMenu label="线索类型" summary={qualityLabel} active={Boolean(quality)}>
             <MenuOption active={!quality} label="全部" onClick={() => { setQuality(''); setPage(0); }} />
+            <MenuOption active={quality === 'auto'} label="可自动背调" onClick={() => { setQuality('auto'); setPage(0); }} />
+            <MenuOption active={quality === 'import'} label="需补主体" onClick={() => { setQuality('import'); setPage(0); }} />
             <MenuOption active={quality === 'company'} label="公司名" onClick={() => { setQuality('company'); setPage(0); }} />
             <MenuOption active={quality === 'person'} label="个人昵称" onClick={() => { setQuality('person'); setPage(0); }} />
           </FilterMenu>
@@ -880,7 +905,7 @@ function IdentifyForm({ customer, onSubmit, busy = false }) {
       <p className="text-[11px] leading-relaxed text-[#64748b]">
         公开列表只有「{customer?.buyerAlias || customer?.company || customer?.name || '昵称'}」，没有公司名和邮箱。
         邦阅/米课那套「领英对人、Lusha 挖私人邮箱、猜 Gmail」这里不做。
-        能用的只有：正文里的法定名、公开缩略图里的 logo、你从别处核到的 Ltd/LLC 全称。
+        能用的只有：正文里的法定名、型号交叉检索到的同款询盘、公开缩略图里的 logo、阿里后台导出/报价后的公司名。
       </p>
       {customer?.sourceUrl && (
         <a href={customer.sourceUrl} target="_blank" rel="noreferrer" className="inline-block text-[11px] text-primary hover:underline">
@@ -1028,6 +1053,25 @@ function DrawerBody({ tab, customer, research, searchLinks = [], imageSearchLink
       {research?.status === 'failed' && <p className="text-[12px] text-rose-500">{research.error || '背调失败'}</p>}
       {!research?.status && (
         <p className="text-[12px] leading-relaxed text-[#64748b]">排队自动背调中。只查公开主体库和官网联系页，不扒私人邮箱。</p>
+      )}
+
+      {(research?.path || customer.researchPath) && (
+        <div className="rounded-lg border border-[#e8edf4] bg-[#f8fafc] px-3 py-2.5">
+          <div className="text-[12px] font-medium text-[#334155]">
+            背调路径 · {(research?.path?.label) || (customer.researchPath === 'import' ? '需补主体' : '可自动背调')}
+          </div>
+          <p className="mt-1 text-[12px] leading-relaxed text-[#475569]">
+            {research?.path?.next || '先确认可核验主体，再查官网角色邮箱。不搜人名、不猜 Gmail。'}
+          </p>
+          {research?.clues?.fingerprints?.length > 0 && (
+            <p className="mt-1 text-[11px] text-[#64748b]">询盘指纹：{research.clues.fingerprints.join(' · ')}</p>
+          )}
+          {(research?.crosspost?.companies || []).length > 0 && (
+            <p className="mt-1 text-[11px] text-[#64748b]">
+              交叉检索候选：{research.crosspost.companies.map((x) => x.name).join('；')}
+            </p>
+          )}
+        </div>
       )}
 
       {research?.kyb?.grade && (

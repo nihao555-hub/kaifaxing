@@ -33,6 +33,13 @@ import {
   countryTld,
 } from './searchDorks.js';
 import { gradeKyb, hasVerifiedEntity, hasProcurementTrace, isForwarderName } from './kyb.js';
+import {
+  rfqCorpus,
+  extractRfqClues,
+  classifyResearchPath,
+  crosspostLinks,
+  suggestCrosspostCompany,
+} from './researchPath.js';
 import { screenSanctions } from './sanctions.js';
 import { findTradeTraces } from './tradeTraces.js';
 
@@ -172,14 +179,15 @@ export function skippedLeadReport(customer) {
     ],
     brief: `${company || '该询盘'} 只有个人显示名或产品句，公开库核不到公司，未跑谷歌公式。`,
     notes: [
-      '阿里等公开 RFQ 卡片经常只有买家昵称。没有公司全称时，外贸公式到此结束。',
-      '不走领英对人、不猜 Gmail、不爬 Buyer profile。正文若写出 Ltd/LLC 会自动抽；公开缩略图只给人眼/浏览器以图搜图。',
+      '符合要求的背调必须先有可核验主体，再查官网角色邮箱。',
+      '公开卡只有昵称时：正文抽 Ltd、型号交叉检索同款询盘、或导入阿里后台报价后的公司名。不搜人名、不猜 Gmail。',
     ],
     kyb,
     grade: 'C',
     nextAction: kyb.nextAction,
     needRegNo: true,
     canApplyEmail: false,
+    path: classifyResearchPath(customer, { personLike: true, clues: extractRfqClues(rfqCorpus(customer)) }),
   };
 }
 
@@ -874,12 +882,27 @@ async function aiBrief(payload) {
 }
 
 export async function researchLead(customer, { useAi = true } = {}) {
+  const clues = extractRfqClues(rfqCorpus(customer));
+  let personLike = isPersonLikeLead(customer);
+  const path = classifyResearchPath(customer, { personLike, clues });
+  customer.researchPath = path.key;
+
+  if (personLike && clues.companyHint) {
+    try {
+      applyLeadIdentity(customer, { company: clues.companyHint });
+      customer.identitySource = customer.identitySource || 'rfq_text';
+      personLike = false;
+    } catch {
+      /* 抽到的仍不像法定名 */
+    }
+  }
+
   const company = String(customer.company || customer.name || '').trim();
-  const personLike = isPersonLikeLead(customer);
   const facts = [];
   const sources = [];
   const notes = [];
   const steps = [];
+  notes.push(`背调路径：${path.label}。${path.next}`);
 
   if (customer.country) facts.push({ label: '国家/地区', value: customer.country, source: '入库' });
   if (customer.regNo) facts.push({ label: '登记号', value: customer.regNo, source: '补主体' });
@@ -889,23 +912,54 @@ export async function researchLead(customer, { useAi = true } = {}) {
   if (customer.painPoints) facts.push({ label: '询盘/招标摘要', value: String(customer.painPoints).slice(0, 300), source: '入库' });
   if (customer.sourceUrl) sources.push({ title: '原始询盘/公告', url: customer.sourceUrl });
 
-  let website = '';
+  let website = clues.websites[0] || '';
   let legalName = company;
   let extract = '';
   let relatedNote = '';
   let emails = [];
-  let phones = [];
+  let phones = [...(clues.phones || [])];
   let pages = [];
   let harvestedTools = {};
   let search = { queries: [], urls: [], snippetEmails: [], officialGuess: '', notes: [], engine: '' };
+  let crosspost = null;
+
+  if (personLike && !website && clues.emails[0]) {
+    website = `https://${clues.emails[0].split('@')[1]}`;
+  }
+
+  if (personLike && clues.fingerprints.length) {
+    crosspost = await suggestCrosspostCompany(clues, customer.country);
+    if (crosspost.company) {
+      try {
+        applyLeadIdentity(customer, { company: crosspost.company, website });
+        customer.identitySource = customer.identitySource || 'rfq_crosspost';
+        personLike = false;
+        legalName = crosspost.company;
+        notes.push(`同款询盘交叉检索命中 ${crosspost.company}，按这家核主体，没有搜买家昵称。`);
+      } catch {
+        notes.push('交叉检索抽到的名字仍不像法定名，未自动写入。');
+      }
+    }
+  }
+
+  if (personLike && website) {
+    personLike = false;
+    notes.push(`正文里的官网/角色邮箱域名 ${website} 当作起点，不搜买家昵称。`);
+  }
 
   if (personLike) {
     steps.push({ key: 'entity', label: '主体核验', ok: false, detail: '只有个人显示名，公开库无法核到公司' });
-    steps.push({ key: 'website', label: '官网定位', ok: false, detail: '无线索，未猜测域名' });
+    steps.push({ key: 'website', label: '官网定位', ok: false, detail: website || '无线索，未猜测域名' });
     steps.push({ key: 'contact', label: '公开联系方式', ok: false, detail: '不猜测私人邮箱，不从社交资料扒信' });
-    steps.push({ key: 'search', label: '搜索公式', ok: false, detail: '个人昵称不拿去撞搜索结果' });
-    notes.push('阿里等公开 RFQ 卡片经常只有买家昵称。没有公司全称时，外贸公式到此结束。');
-    notes.push('不走领英对人、不猜 Gmail、不爬 Buyer profile。正文若写出 Ltd/LLC 会自动抽；公开缩略图只给人眼/浏览器以图搜图。');
+    steps.push({
+      key: 'search',
+      label: '搜索公式',
+      ok: Boolean(clues.fingerprints.length),
+      detail: clues.fingerprints.length
+        ? `用型号 ${clues.fingerprints.join('、')} 交叉检索，不搜「${company}」`
+        : '个人昵称不拿去撞搜索结果',
+    });
+    notes.push('符合要求的背调到此缺主体。导入阿里后台报价后的公司名，或填「补主体」。');
   } else {
     const resolved = await resolveEntity(company, customer.country);
     website = resolved.website;
@@ -1203,13 +1257,18 @@ export async function researchLead(customer, { useAi = true } = {}) {
     outreachAdvice,
     risks,
     notes,
-    searchQueries: search.queries || [],
-    searchLinks: search.links || buildSearchLinks({
-      company: legalName || company,
-      country: customer.country,
-      website,
-      product: rfqProductTerms(`${customer.title || ''} ${customer.painPoints || ''}`),
-    }),
+    searchQueries: search.queries || (personLike ? crosspostLinks(clues, customer.country).map((l) => l.query) : []),
+    searchLinks: personLike
+      ? crosspostLinks(clues, customer.country)
+      : (search.links || buildSearchLinks({
+        company: legalName || company,
+        country: customer.country,
+        website,
+        product: rfqProductTerms(`${customer.title || ''} ${customer.painPoints || ''}`),
+      })),
+    path,
+    clues,
+    crosspost,
     searchPages: (search.urls || []).slice(0, 8),
     kyb,
     grade: kyb.grade,

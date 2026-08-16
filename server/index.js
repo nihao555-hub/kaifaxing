@@ -290,6 +290,7 @@ app.get('/api/rfq/leads/:id', (req, res) => {
     searchLinks,
     imageSearchLinks: imageSearchLinks(customer.imageUrl),
     searchStatus: googleSearchStatus(),
+    path: customer.research?.path || null,
   });
 });
 

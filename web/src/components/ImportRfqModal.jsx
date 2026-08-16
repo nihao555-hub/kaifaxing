@@ -4,16 +4,15 @@ import { api } from '../api.js';
 import { Spinner } from './common.jsx';
 
 const SAMPLE_JSON = `{
-  "source": "TendersOnTime",
+  "source": "阿里国际站后台导出",
   "items": [
     {
-      "company": "Acme GmbH",
-      "name": "Procurement",
-      "email": "procurement@acme.example",
-      "country": "德国",
-      "industry": "Power tools",
-      "painPoints": "Need 500 cordless drills for Q4 warehouse rollout",
-      "url": "https://example.com/rfq/123"
+      "buyer_company_name": "Sahel Tools Ltd",
+      "buyer_name": "Wilfried",
+      "buyer_email": "buy@sahel.example",
+      "country": "Burkina Faso",
+      "subject": "20v Cordless Drill",
+      "rfq_id": "1684056292"
     }
   ]
 }`;

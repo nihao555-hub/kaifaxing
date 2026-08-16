@@ -179,7 +179,7 @@ export default function SettingsPage() {
             这些这里都不做。
           </p>
           <p className="mt-2 text-[12px] leading-relaxed text-[#64748b]">
-            不走官方联系时，公开源还能用的只有三件事：正文里写出的 Ltd/LLC 全称（入库和批量背调会抽）、列表缩略图里的 logo（抽屉里用浏览器以图搜图，产品图没用）、你从别处核到的法定名填进「补主体」。
+            符合要求的背调必须先有可核验主体。公开源三条路：正文 Ltd/LLC、型号交叉检索同款询盘（不搜人名）、阿里后台导出的 buyer_company_name。缩略图只给人眼以图搜图。
             官方
             {' '}
             <a className="text-primary hover:underline" href="https://open.taobao.com/" target="_blank" rel="noreferrer">alibaba.icbu.rfq.search</a>

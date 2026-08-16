@@ -3,6 +3,7 @@ import { config } from './config.js';
 import { alibabaReady, searchAlibaba } from './alibaba.js';
 import { searchAlibabaPublic, crawlAlibabaPublic, ALIBABA_PUBLIC_FIELDS, PUBLIC_SINCE_DEFAULT } from './publicRfq.js';
 import { searchGoldSupplier, searchTradeIndia } from './b2bPublic.js';
+import { parseAlibabaExportRow } from './researchPath.js';
 
 // 聚合公开 RFQ / 采购数据源：一次请求并行打多个官方接口，结果归一化后合并。
 // 只走开放 API，不爬私人邮箱。某个源失败不影响其他源。
@@ -596,15 +597,16 @@ function firstText(row, keys) {
 
 export function normalizeIngestItem(raw, sourceName = '商业导入') {
   const row = raw && typeof raw === 'object' ? raw : {};
-  const company = firstText(row, ['company', 'companyName', 'organisation', 'organization', 'buyer', 'org']);
-  const name = firstText(row, ['name', 'contact', 'contactName', 'buyerName']) || company || 'Unknown buyer';
-  const email = firstText(row, ['email', 'contactEmail', 'buyerEmail']);
-  const country = firstText(row, ['country', 'countryName', 'nation']);
-  const title = firstText(row, ['title', 'subject', 'rfqTitle']);
-  const pain = firstText(row, ['painPoints', 'description', 'summary', 'requirement']) || title;
-  const url = firstText(row, ['url', 'link', 'sourceUrl', 'href']);
+  const ali = parseAlibabaExportRow(row);
+  const company = ali.company || firstText(row, ['company', 'companyName', 'organisation', 'organization', 'buyer', 'org']);
+  const name = ali.name || firstText(row, ['name', 'contact', 'contactName', 'buyerName']) || company || 'Unknown buyer';
+  const email = ali.email || firstText(row, ['email', 'contactEmail', 'buyerEmail']);
+  const country = ali.country || firstText(row, ['country', 'countryName', 'nation']);
+  const title = ali.title || firstText(row, ['title', 'subject', 'rfqTitle']);
+  const pain = ali.painPoints || firstText(row, ['painPoints', 'description', 'summary', 'requirement']) || title;
+  const url = ali.url || firstText(row, ['url', 'link', 'sourceUrl', 'href']);
   return lead({
-    id: firstText(row, ['id', 'rfqId', 'awardId']) || `ingest_${cryptoRandom()}`,
+    id: ali.awardId || firstText(row, ['id', 'rfqId', 'awardId']) || `ingest_${cryptoRandom()}`,
     source: firstText(row, ['source']) || sourceName,
     sourceType: 'commercial_ingest',
     kind: 'commercial',
@@ -617,7 +619,7 @@ export function normalizeIngestItem(raw, sourceName = '商业导入') {
     timezone: firstText(row, ['timezone', 'tz']) || guessTimezone(country, 'UTC'),
     industry: firstText(row, ['industry', 'category']),
     url,
-    awardId: firstText(row, ['awardId', 'rfqId', 'id']),
+    awardId: ali.awardId || firstText(row, ['awardId', 'rfqId', 'id']),
     amount: Number(row.amount || row.value || 0) || 0,
     currency: firstText(row, ['currency']),
     painPoints: pain,

@@ -183,10 +183,13 @@ export function listCustomers({
     if (research === 'done' && c.research?.status !== 'done') continue;
     if (research === 'none' && c.research?.status === 'done') continue;
     if (ingestedOn && !String(c.ingestedAt || '').startsWith(ingestedOn)) continue;
-    if (quality === 'company' || quality === 'person') {
+    if (quality === 'company' || quality === 'person' || quality === 'auto' || quality === 'import') {
       const person = isPersonLikeLead(c);
+      const path = c.researchPath || (person ? 'import' : 'auto');
       if (quality === 'company' && person) continue;
       if (quality === 'person' && !person) continue;
+      if (quality === 'auto' && path === 'import') continue;
+      if (quality === 'import' && path !== 'import') continue;
     }
     if (kw) {
       const hay = [c.name, c.company, c.email, c.country, c.source, c.painPoints, c.rfq?.title, c.buyer]

@@ -3,6 +3,7 @@ import { db, save, getCustomer, isRfqLead, isDemoCustomer, logActivity } from '.
 import { crawlAllAndImport } from './rfq.js';
 import { researchLead, isPersonLikeLead, isPlausibleEmail, skippedLeadReport, applyLeadIdentity } from './research.js';
 import { extractCompanyHintFromText } from './rfqHints.js';
+import { extractRfqClues, rfqCorpus, classifyResearchPath } from './researchPath.js';
 import { VERIFIED_SOURCES } from './openSources.js';
 import { isForwarderName } from './kyb.js';
 
@@ -75,24 +76,48 @@ function ownInbox(email) {
   return String(email || '').toLowerCase() === String(config.smtp.user || '').toLowerCase();
 }
 
+export function stampLeadPath(c) {
+  const clues = extractRfqClues(rfqCorpus(c));
+  const path = classifyResearchPath(c, { personLike: isPersonLikeLead(c), clues });
+  const changed = c.researchPath !== path.key;
+  c.researchPath = path.key;
+  return { path, changed };
+}
+
 export function applyTextCompanyHints() {
   let promoted = 0;
+  let dirty = false;
   for (const c of db.customers) {
     if (!isRfqLead(c)) continue;
-    if (c.forceCompany) continue;
-    if (!isPersonLikeLead(c)) continue;
-    const hint = extractCompanyHintFromText(`${c.painPoints || ''} ${c.title || ''}`);
-    if (!hint) continue;
+    const clues = extractRfqClues(rfqCorpus(c));
+    if (!c.website && clues.websites[0]) {
+      c.website = clues.websites[0];
+      dirty = true;
+    }
+    if (c.forceCompany) {
+      if (stampLeadPath(c).changed) dirty = true;
+      continue;
+    }
+    if (!isPersonLikeLead(c)) {
+      if (stampLeadPath(c).changed) dirty = true;
+      continue;
+    }
+    const hint = clues.companyHint || extractCompanyHintFromText(`${c.painPoints || ''} ${c.title || ''}`);
+    if (!hint) {
+      if (stampLeadPath(c).changed) dirty = true;
+      continue;
+    }
     try {
-      applyLeadIdentity(c, { company: hint });
+      applyLeadIdentity(c, { company: hint, website: clues.websites[0] });
       c.identitySource = c.identitySource || 'rfq_text';
       c.research = null;
+      stampLeadPath(c);
       promoted += 1;
     } catch {
-      // 抽到的仍不像法定名，保持昵称卡
+      if (stampLeadPath(c).changed) dirty = true;
     }
   }
-  if (promoted) save();
+  if (promoted || dirty) save();
   return promoted;
 }
 
@@ -102,6 +127,7 @@ export function stampPersonLikeLeads() {
     if (!isRfqLead(c)) continue;
     if (c.research?.status === 'running') c.research = { ...(c.research || {}), status: null };
     if (!isPersonLikeLead(c)) continue;
+    if (c.researchPath === 'clues' || c.researchPath === 'crosspost') continue;
     if (c.research?.status === 'done') continue;
     c.research = skippedLeadReport(c);
     stamped += 1;
@@ -116,7 +142,7 @@ export function pruneResearchQueue() {
   p.queue = p.queue.filter((id) => {
     const c = getCustomer(id);
     if (!c) return false;
-    if (isPersonLikeLead(c)) return false;
+    if (isPersonLikeLead(c) && c.researchPath !== 'clues' && c.researchPath !== 'crosspost') return false;
     if (c.research?.status === 'done') return false;
     return true;
   });
@@ -130,7 +156,7 @@ export function enqueuePendingResearch({ limit = 800 } = {}) {
   for (const c of db.customers) {
     if (!isRfqLead(c)) continue;
     if (c.research?.status === 'done' || c.research?.status === 'running') continue;
-    if (isPersonLikeLead(c)) continue;
+    if (isPersonLikeLead(c) && c.researchPath !== 'clues' && c.researchPath !== 'crosspost') continue;
     pending.push(c);
   }
   pending.sort((a, b) => {
@@ -176,8 +202,7 @@ function enqueueDailyBacklog() {
   for (const c of db.customers) {
     if (!isRfqLead(c)) continue;
     if (c.research?.status === 'done' || c.research?.status === 'running') continue;
-    const person = isPersonLikeLead(c);
-    if (person) continue;
+    if (isPersonLikeLead(c) && c.researchPath !== 'clues' && c.researchPath !== 'crosspost') continue;
     pending.push(c);
     if (pending.length >= config.pipeline.backlogPerDay * 3) break;
   }
