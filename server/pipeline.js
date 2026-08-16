@@ -301,13 +301,13 @@ export function getSignalPassState() {
   return signalPass;
 }
 
-export function startSignalPass() {
+export function startSignalPass({ limit = 800 } = {}) {
   if (signalPass.status === 'running') return signalPass;
-  signalPass = { status: 'running', startedAt: new Date().toISOString() };
+  signalPass = { status: 'running', startedAt: new Date().toISOString(), limit };
   setImmediate(async () => {
     try {
-      const reopened = reopenSignalLeads({ limit: 2500 });
-      const peers = await importDemandPeerClusters({ maxClusters: 12, perCluster: 6 });
+      const reopened = reopenSignalLeads({ limit });
+      const peers = await importDemandPeerClusters({ maxClusters: 8, perCluster: 4 });
       kickResearch();
       signalPass = {
         status: 'done',

@@ -326,7 +326,7 @@ app.post('/api/rfq/leads/research-queue', (req, res) => {
   const all = Boolean(req.body?.all);
   if (req.body?.signal) {
     if (googleSearchReady()) config.pipeline.researchDelayMs = Math.min(config.pipeline.researchDelayMs, 2500);
-    const pass = startSignalPass();
+    const pass = startSignalPass({ limit: Number(req.body?.limit || 800) });
     return res.json({ ...getPipelineState(), ...pass });
   }
   if (all) {
