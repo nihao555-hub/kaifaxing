@@ -125,13 +125,14 @@ function lead({ id, source, sourceType, kind, title, company, name, titleRole, e
   };
 }
 
-export async function searchUsaspending({ limit = 12 } = {}) {
+export async function searchUsaspending({ limit = 12, since, broad = false } = {}) {
+  const filters = {
+    award_type_codes: ['A', 'B', 'C', 'D'],
+    time_period: [{ start_date: since || '2023-01-01', end_date: new Date().toISOString().slice(0, 10) }],
+  };
+  if (!broad) filters.naics_codes = { require: POWER_TOOL_NAICS };
   const data = await postJson('https://api.usaspending.gov/api/v2/search/spending_by_award/', {
-    filters: {
-      award_type_codes: ['A', 'B', 'C', 'D'],
-      naics_codes: { require: POWER_TOOL_NAICS },
-      time_period: [{ start_date: '2023-01-01', end_date: new Date().toISOString().slice(0, 10) }],
-    },
+    filters,
     fields: [
       'Award ID', 'Recipient Name', 'Award Amount', 'Awarding Agency', 'Start Date',
       'NAICS Description', 'Place of Performance State Code',
@@ -165,13 +166,17 @@ export async function searchUsaspending({ limit = 12 } = {}) {
   });
 }
 
-export async function searchWorldBank({ keyword = 'power tools', limit = 10 } = {}) {
-  const q = encodeURIComponent(keyword);
+export async function searchWorldBank({ keyword = 'power tools', limit = 10, since } = {}) {
+  const q = encodeURIComponent(keyword || 'procurement');
   const data = await getJson(
     `https://search.worldbank.org/api/v2/procnotices?format=json&rows=${limit}&os=0&qterm=${q}&srt=noticedate&order=desc`,
     12000
   );
-  return (data.procnotices || []).map((n) => lead({
+  const from = since ? new Date(since).getTime() : 0;
+  return (data.procnotices || []).filter((n) => {
+    if (!from || !n.noticedate) return true;
+    return new Date(n.noticedate).getTime() >= from;
+  }).map((n) => lead({
     id: `wb_${n.id}`,
     source: 'World Bank',
     sourceType: 'world_bank_notice',
@@ -187,9 +192,12 @@ export async function searchWorldBank({ keyword = 'power tools', limit = 10 } = 
   }));
 }
 
-export async function searchUk({ keyword = 'power tools', limit = 12 } = {}) {
+export async function searchUk({ keyword = 'power tools', limit = 12, since } = {}) {
+  const searchCriteria = { statuses: ['Open'] };
+  if (keyword) searchCriteria.keyword = keyword;
+  if (since) searchCriteria.publishedFrom = since;
   const data = await postJson('https://www.contractsfinder.service.gov.uk/api/rest/2/search_notices/json', {
-    searchCriteria: { keyword, statuses: ['Open'] },
+    searchCriteria,
     size: limit,
   });
   return (data.noticeList || []).map((row) => {
@@ -213,10 +221,17 @@ export async function searchUk({ keyword = 'power tools', limit = 12 } = {}) {
   });
 }
 
-export async function searchTed({ keyword = 'tools', limit = 10 } = {}) {
-  const q = String(keyword || 'tools').replace(/"/g, '');
+export async function searchTed({ keyword = 'tools', limit = 10, since } = {}) {
+  const q = String(keyword || '').replace(/"/g, '');
+  const pd = since ? `PD>=${String(since).replace(/-/g, '')}` : '';
+  const parts = [
+    q ? `FT~"${q}"` : '',
+    q ? 'classification-cpv=44000000' : '',
+    pd,
+    'SORT BY publication-date DESC',
+  ].filter(Boolean);
   const data = await postJson('https://api.ted.europa.eu/v3/notices/search', {
-    query: `FT~"${q}" AND classification-cpv=44000000 SORT BY publication-date DESC`,
+    query: parts.join(' AND ').replace(' AND SORT', ' SORT'),
     fields: ['publication-number', 'notice-title', 'buyer-name', 'buyer-country', 'classification-cpv'],
     limit,
     scope: 'ACTIVE',
@@ -243,10 +258,10 @@ export async function searchTed({ keyword = 'tools', limit = 10 } = {}) {
   });
 }
 
-export async function searchSam({ keyword = 'power tools', limit = 10 } = {}) {
+export async function searchSam({ keyword = 'power tools', limit = 10, since } = {}) {
   const key = samKey();
   if (!key) throw new Error('未配置 SAM_API_KEY，请到 sam.gov 申请免费 Public API Key');
-  const postedFrom = new Date(Date.now() - 30 * 86400000);
+  const postedFrom = since ? new Date(since) : new Date(Date.now() - 30 * 86400000);
   const postedTo = new Date();
   const fmt = (d) => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
   const qs = new URLSearchParams({
@@ -445,7 +460,7 @@ function alreadyImported(it) {
   });
 }
 
-export function importRfqItems(items = []) {
+export function importRfqItems(items = [], { quiet = false } = {}) {
   const created = [];
   for (const it of items) {
     if (ownInbox(it.email)) continue;
@@ -469,16 +484,74 @@ export function importRfqItems(items = []) {
     };
     db.customers.unshift(customer);
     created.push(customer);
+    if (!quiet) {
+      logActivity({
+        customerId: customer.id,
+        action: 'RFQ 入库',
+        detail: `来自 ${it.source}：${customer.company}。${
+          customer.email ? '已有公开联系邮箱，Agent 将自动处理' : '公开源未提供邮箱，请补上对方公司采购邮箱后再发送'
+        }`,
+      });
+    }
+  }
+  if (quiet && created.length) {
+    const bySource = {};
+    for (const c of created) bySource[c.source || '未知'] = (bySource[c.source || '未知'] || 0) + 1;
     logActivity({
-      customerId: customer.id,
-      action: 'RFQ 入库',
-      detail: `来自 ${it.source}：${customer.company}。${
-        customer.email ? '已有公开联系邮箱，Agent 将自动处理' : '公开源未提供邮箱，请补上对方公司采购邮箱后再发送'
-      }`,
+      action: 'RFQ 批量入库',
+      detail: `新入库 ${created.length} 条：${Object.entries(bySource).map(([k, v]) => `${k} ${v}`).join('，')}`,
     });
   }
   save();
   return created;
+}
+
+export async function crawlAllAndImport({
+  since = PUBLIC_SINCE_DEFAULT,
+  alibabaPages = 100,
+  govLimit = 80,
+  doImport = true,
+} = {}) {
+  const reports = [];
+  const buckets = await Promise.allSettled([
+    crawlAlibabaPublic({ keyword: '', since, maxPages: alibabaPages, fanout: true })
+      .then((r) => ({ key: 'alibaba_public', name: '阿里国际站公开 RFQ', items: r.items, extra: { pages: r.pages, totalItems: r.totalItems } })),
+    searchUsaspending({ limit: govLimit, since, broad: true })
+      .then((items) => ({ key: 'usaspending', name: 'USASpending.gov', items })),
+    searchUk({ keyword: '', limit: govLimit, since })
+      .then((items) => ({ key: 'uk', name: 'UK Contracts Finder', items })),
+    searchTed({ keyword: '', limit: Math.min(govLimit, 100), since })
+      .then((items) => ({ key: 'ted', name: 'TED Europa', items })),
+    searchWorldBank({ keyword: '', limit: govLimit, since })
+      .then((items) => ({ key: 'worldbank', name: 'World Bank', items })),
+  ]);
+
+  const items = [];
+  for (const r of buckets) {
+    if (r.status === 'fulfilled') {
+      items.push(...r.value.items);
+      reports.push({
+        key: r.value.key,
+        name: r.value.name,
+        ok: true,
+        count: r.value.items.length,
+        ...(r.value.extra || {}),
+      });
+    } else {
+      reports.push({ key: 'unknown', name: 'source', ok: false, count: 0, error: String(r.reason?.message || r.reason) });
+    }
+  }
+
+  const seen = new Set();
+  const unique = [];
+  for (const it of items) {
+    const k = `${(it.source || '').toLowerCase()}|${it.awardId || it.url || it.id}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    unique.push(it);
+  }
+  const created = doImport ? importRfqItems(unique, { quiet: true }) : [];
+  return { since, items: unique, reports, createdCount: created.length, created };
 }
 
 function firstText(row, keys) {

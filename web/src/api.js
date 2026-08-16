@@ -37,6 +37,8 @@ export const api = {
   rfqImport: (items) => req('/api/rfq/import', { method: 'POST', body: JSON.stringify({ items }) }),
   rfqIngest: (payload) => req('/api/rfq/ingest', { method: 'POST', body: JSON.stringify(payload) }),
   rfqCrawl: (payload) => req('/api/rfq/public/crawl', { method: 'POST', body: JSON.stringify(payload) }),
+  rfqCrawlAll: (payload) => req('/api/rfq/crawl-all', { method: 'POST', body: JSON.stringify(payload || {}) }),
+  rfqCrawlAllStatus: () => req('/api/rfq/crawl-all'),
   rfqSchema: () => req('/api/rfq/schema'),
   updateCustomer: (id, payload) => req(`/api/customers/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
 };

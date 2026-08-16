@@ -96,7 +96,8 @@ export function parseAlibabaPublicHtml(html) {
   const totalItems = Number((html.match(/pageView\.totalItems = '(\d+)'/) || [])[1] || items.length);
   const currentPage = Number((html.match(/pageView\.currentPage = '(\d+)'/) || [])[1] || 1);
   const totalPages = Number((html.match(/pageView\.totalPages = '(\d+)'/) || [])[1] || 1);
-  return { items, totalItems, currentPage, totalPages };
+  const categoryIds = [...new Set([...String(html).matchAll(/categoryIds=(\d+)/g)].map((m) => m[1]))];
+  return { items, totalItems, currentPage, totalPages, categoryIds };
 }
 
 function toLead(row) {
@@ -133,9 +134,10 @@ function keepSince(row, since) {
   return new Date(row.postedAt).getTime() >= sinceMs(since);
 }
 
-async function fetchListPage({ keyword = '', page = 1, timeoutMs = 20000 } = {}) {
+async function fetchListPage({ keyword = '', page = 1, categoryIds = '', timeoutMs = 20000 } = {}) {
   const qs = new URLSearchParams({ recently: 'Y', page: String(page) });
   if (keyword) qs.set('searchText', keyword);
+  if (categoryIds) qs.set('categoryIds', String(categoryIds));
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -162,7 +164,7 @@ export async function searchAlibabaPublic({
   since = PUBLIC_SINCE_DEFAULT,
   maxPages,
 } = {}) {
-  const pages = Math.max(1, Math.min(maxPages || Math.ceil(limit / PAGE_SIZE) || 2, 40));
+  const pages = Math.max(1, Math.min(maxPages || Math.ceil(limit / PAGE_SIZE) || 2, 100));
   const seen = new Set();
   const items = [];
   let totalItems = 0;
@@ -187,16 +189,51 @@ export async function searchAlibabaPublic({
   return { items, reportsMeta: { pages, totalItems, totalPages } };
 }
 
+const FALLBACK_CATS = ['2', '6', '15', '17', '28', '36', '43', '44', '150', '100000305', '100003070', '100007307'];
+
 export async function crawlAlibabaPublic({
   keyword = '',
   since = PUBLIC_SINCE_DEFAULT,
-  maxPages = 15,
+  maxPages = 100,
+  fanout = true,
 } = {}) {
-  const { items, reportsMeta } = await searchAlibabaPublic({
-    keyword,
-    limit: Math.max(1, Math.min(Number(maxPages) || 15, 40)) * PAGE_SIZE,
-    since,
-    maxPages: Math.max(1, Math.min(Number(maxPages) || 15, 40)),
-  });
-  return { items, ...reportsMeta, since, keyword };
+  const cap = Math.max(1, Math.min(Number(maxPages) || 100, 100));
+  const seen = new Set();
+  const items = [];
+  let totalItems = 0;
+  let pagesFetched = 0;
+
+  async function ingestPage(opts) {
+    if (pagesFetched) await sleep(GAP_MS);
+    const data = await fetchListPage(opts);
+    pagesFetched += 1;
+    totalItems = Math.max(totalItems, data.totalItems || 0);
+    for (const row of data.items) {
+      if (!keepSince(row, since)) continue;
+      const key = row.rfqId || row.url || row.subject;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      items.push(toLead(row));
+    }
+    return data;
+  }
+
+  const first = await ingestPage({ keyword, page: 1 });
+  const mainPages = Math.min(cap, first.totalPages || cap);
+  for (let page = 2; page <= mainPages; page++) {
+    await ingestPage({ keyword, page });
+  }
+
+  if (fanout && !keyword) {
+    const cats = [...new Set([...(first.categoryIds || []), ...FALLBACK_CATS])].slice(0, 12);
+    for (const categoryIds of cats) {
+      const catFirst = await ingestPage({ page: 1, categoryIds });
+      const extra = Math.min(5, catFirst.totalPages || 1);
+      for (let page = 2; page <= extra; page++) {
+        await ingestPage({ page, categoryIds });
+      }
+    }
+  }
+
+  return { items, pages: pagesFetched, totalItems, totalPages: first.totalPages, since, keyword };
 }

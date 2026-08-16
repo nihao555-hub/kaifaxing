@@ -9,7 +9,7 @@ import { createBatchJob, getJob, listJobs } from './scheduler.js';
 import { sentToday, logActivity } from './store.js';
 import { startAgent, stopAgent, getAgentState } from './autopilot.js';
 import { ingestInbound } from './inbox.js';
-import { listSources, searchRfq, importRfqItems, ingestCommercial, crawlAlibabaPublic, ALIBABA_PUBLIC_FIELDS, PUBLIC_SINCE_DEFAULT } from './rfq.js';
+import { listSources, searchRfq, importRfqItems, ingestCommercial, crawlAlibabaPublic, crawlAllAndImport, ALIBABA_PUBLIC_FIELDS, PUBLIC_SINCE_DEFAULT } from './rfq.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -90,12 +90,37 @@ app.post('/api/rfq/public/crawl', async (req, res) => {
     const keyword = req.body?.keyword ?? req.body?.q ?? '';
     const since = req.body?.since || PUBLIC_SINCE_DEFAULT;
     const maxPages = Number(req.body?.maxPages || 15);
-    const crawled = await crawlAlibabaPublic({ keyword, since, maxPages });
-    const created = req.body?.import ? importRfqItems(crawled.items) : [];
+    const crawled = await crawlAlibabaPublic({ keyword, since, maxPages, fanout: false });
+    const created = req.body?.import ? importRfqItems(crawled.items, { quiet: true }) : [];
     res.json({ ...crawled, created });
   } catch (err) {
     res.status(502).json({ error: `公开询盘抓取失败：${err.message}` });
   }
+});
+
+let crawlAllJob = { status: 'idle' };
+app.get('/api/rfq/crawl-all', (req, res) => res.json(crawlAllJob));
+app.post('/api/rfq/crawl-all', (req, res) => {
+  if (crawlAllJob.status === 'running') return res.json(crawlAllJob);
+  const since = req.body?.since || PUBLIC_SINCE_DEFAULT;
+  const alibabaPages = Number(req.body?.alibabaPages || 100);
+  crawlAllJob = { status: 'running', since, startedAt: new Date().toISOString(), createdCount: 0, reports: [] };
+  crawlAllAndImport({ since, alibabaPages, govLimit: 80, doImport: true })
+    .then((r) => {
+      crawlAllJob = {
+        status: 'done',
+        since: r.since,
+        startedAt: crawlAllJob.startedAt,
+        finishedAt: new Date().toISOString(),
+        fetched: r.items.length,
+        createdCount: r.createdCount,
+        reports: r.reports,
+      };
+    })
+    .catch((err) => {
+      crawlAllJob = { status: 'error', error: String(err.message || err), finishedAt: new Date().toISOString() };
+    });
+  res.json(crawlAllJob);
 });
 app.post('/api/rfq/import', (req, res) => {
   const items = Array.isArray(req.body?.items) ? req.body.items : [];
