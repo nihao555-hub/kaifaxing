@@ -20,8 +20,14 @@ export function researchPriority(customer = {}) {
 }
 
 let tickTimer = null;
-let researchingId = null;
+const researchingIds = new Set();
 let researchLoop = false;
+let saveLock = Promise.resolve();
+
+function saveExclusive() {
+  saveLock = saveLock.then(() => save(), () => save());
+  return saveLock;
+}
 
 export function beijingDate(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', {
@@ -148,6 +154,7 @@ export function pruneResearchQueue() {
     const c = getCustomer(id);
     if (!c) return false;
     if (isPersonLikeLead(c) && c.researchPath !== 'clues' && c.researchPath !== 'crosspost') return false;
+    if (/World Bank/i.test(c.source || '')) return false;
     if (c.research?.status === 'done') return false;
     return true;
   });
@@ -243,12 +250,12 @@ export function applyPublicContact(customer, email, extra = {}) {
 }
 
 export async function runLeadResearch(customer, { useAi = true, autoApply = false } = {}) {
-  if (researchingId === customer.id) {
+  if (researchingIds.has(customer.id)) {
     const err = new Error('正在背调中');
     err.status = 409;
     throw err;
   }
-  researchingId = customer.id;
+  researchingIds.add(customer.id);
   customer.research = { ...(customer.research || {}), status: 'running', updatedAt: new Date().toISOString() };
   try {
     const personLike = isPersonLikeLead(customer);
@@ -281,7 +288,7 @@ export async function runLeadResearch(customer, { useAi = true, autoApply = fals
       p.researchedToday = 0;
     }
     p.researchedToday = (p.researchedToday || 0) + 1;
-    save();
+    await saveExclusive();
     logActivity({
       customerId: customer.id,
       action: applied ? '自动背调并写入公开邮箱' : '公开背调',
@@ -294,10 +301,28 @@ export async function runLeadResearch(customer, { useAi = true, autoApply = fals
     return report;
   } catch (err) {
     customer.research = { status: 'failed', error: String(err.message || err), updatedAt: new Date().toISOString() };
-    save();
+    await saveExclusive();
     throw err;
   } finally {
-    researchingId = null;
+    researchingIds.delete(customer.id);
+  }
+}
+
+async function pumpOne() {
+  while (true) {
+    const p = ensurePipeline();
+    const id = p.queue.shift();
+    if (!id) break;
+    const customer = getCustomer(id);
+    if (!customer || /World Bank/i.test(customer.source || '')) continue;
+    try {
+      await runLeadResearch(customer, { useAi: false, autoApply: true });
+    } catch (err) {
+      if (err.status !== 409) {
+        p.lastError = String(err.message || err);
+      }
+    }
+    await new Promise((r) => setTimeout(r, config.pipeline.researchDelayMs));
   }
 }
 
@@ -305,23 +330,8 @@ async function pumpResearch() {
   if (researchLoop) return;
   researchLoop = true;
   try {
-    while (true) {
-      const p = ensurePipeline();
-      const id = p.queue.shift();
-      if (!id) break;
-      save();
-      const customer = getCustomer(id);
-      if (!customer) continue;
-      try {
-        await runLeadResearch(customer, { useAi: false, autoApply: true });
-      } catch (err) {
-        if (err.status !== 409) {
-          p.lastError = String(err.message || err);
-          save();
-        }
-      }
-      await new Promise((r) => setTimeout(r, config.pipeline.researchDelayMs));
-    }
+    const n = Math.min(Math.max(Number(config.pipeline.researchConcurrency) || 1, 1), 4);
+    await Promise.all(Array.from({ length: n }, () => pumpOne()));
   } finally {
     researchLoop = false;
   }
@@ -414,7 +424,8 @@ export function getPipelineState() {
     lastError: p.lastError || '',
     lastSync: p.lastSync || null,
     queue: p.queue.length,
-    researchingId,
+    researchingId: [...researchingIds][0] || null,
+    researchingIds: [...researchingIds],
     researchedToday: p.researchDate === today ? p.researchedToday || 0 : 0,
     appliedToday: p.appliedDate === today ? p.appliedToday || 0 : 0,
     nextDaily: p.lastDailyDate === today ? `明天 ${String(config.pipeline.dailyHour).padStart(2, '0')}:00` : `今天 ${String(config.pipeline.dailyHour).padStart(2, '0')}:00 后`,
