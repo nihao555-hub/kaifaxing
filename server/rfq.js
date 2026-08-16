@@ -568,8 +568,8 @@ export async function crawlAllAndImport({
         if (!doImport) return;
         const added = importRfqItems(batch, { quiet: true, silent: true, persist: false });
         alibabaCrawlProgress.created = (alibabaCrawlProgress.created || 0) + added.length;
-        if ((alibabaCrawlProgress.created || 0) % 80 < added.length) save();
-        if ((alibabaCrawlProgress.created || 0) % 400 < added.length) {
+        if ((alibabaCrawlProgress.created || 0) % 200 < added.length) save();
+        if ((alibabaCrawlProgress.created || 0) % 800 < added.length) {
           logActivity({
             action: '阿里公开列表',
             detail: `已入库 ${alibabaCrawlProgress.created} 条（${alibabaCrawlProgress.slice || ''} 第 ${alibabaCrawlProgress.page} 页）`,

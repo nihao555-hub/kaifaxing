@@ -14,7 +14,8 @@ export const ALIBABA_PUBLIC_FIELDS = [
 
 const LIST_URL = 'https://sourcing.alibaba.com/rfq/rfq_search_list.htm';
 const PAGE_SIZE = 20;
-const GAP_MS = 1100;
+const GAP_MS = 80;
+const CRAWL_CONCURRENCY = 12;
 
 function decodeAli(s) {
   return String(s || '')
@@ -220,16 +221,30 @@ async function fetchListPage({
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(`${LIST_URL}?${qs}`, {
-      headers: {
-        Accept: 'text/html',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'User-Agent': 'Mozilla/5.0 (compatible; OutreachAI/1.0; public RFQ list)',
-      },
-      signal: ctrl.signal,
-    });
-    if (!res.ok) throw new Error(`阿里公开列表 ${res.status}`);
-    return parseAlibabaPublicHtml(await res.text());
+    let lastErr;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt) await sleep(400 * attempt);
+      try {
+        const res = await fetch(`${LIST_URL}?${qs}`, {
+          headers: {
+            Accept: 'text/html',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'User-Agent': 'Mozilla/5.0 (compatible; OutreachAI/1.0; public RFQ list)',
+          },
+          signal: ctrl.signal,
+        });
+        if (res.status === 429 || res.status === 503) {
+          lastErr = new Error(`阿里公开列表 ${res.status}`);
+          continue;
+        }
+        if (!res.ok) throw new Error(`阿里公开列表 ${res.status}`);
+        return parseAlibabaPublicHtml(await res.text());
+      } catch (err) {
+        lastErr = err;
+        if (String(err.message || err).includes('阿里公开列表 4') && !/429/.test(err.message)) throw err;
+      }
+    }
+    throw lastErr || new Error('阿里公开列表失败');
   } finally {
     clearTimeout(t);
   }
@@ -270,9 +285,19 @@ export async function searchAlibabaPublic({
 
 export const alibabaCrawlProgress = {
   pagesFetched: 0, kept: 0, created: 0, country: '', category: '', page: 0, slice: '',
+  workers: CRAWL_CONCURRENCY, etaMinutes: null,
 };
 
-const LETTERS = 'abcdefghijklmnopqrstuvwxyz0123456789'.split('');
+async function runPool(tasks, n = CRAWL_CONCURRENCY) {
+  const q = tasks.slice();
+  await Promise.all(Array.from({ length: Math.min(n, q.length || 1) }, async () => {
+    while (q.length && !crawlAbort) {
+      const job = q.shift();
+      if (!job) break;
+      await job();
+    }
+  }));
+}
 
 export async function crawlAlibabaPublic({
   keyword = '',
@@ -291,14 +316,32 @@ export async function crawlAlibabaPublic({
   let kept = 0;
   let totalItems = 0;
   let pagesFetched = 0;
-  const pageBudget = fanout ? 28000 : cap + 2;
+  let startedAt = Date.now();
+  const pageBudget = fanout ? 16000 : cap + 2;
   const categoryById = new Map();
+
+  function snapOf(opts) {
+    const elapsed = Math.max(1, Date.now() - startedAt);
+    const rate = pagesFetched / elapsed;
+    const remaining = Math.max(0, pageBudget - pagesFetched);
+    return {
+      pagesFetched,
+      kept,
+      created: alibabaCrawlProgress.created || 0,
+      country: opts.country || '',
+      category: opts.categoryName || opts.categoryIds || '',
+      page: opts.page,
+      workers: CRAWL_CONCURRENCY,
+      etaMinutes: rate > 0 ? Math.round((remaining / rate) / 60000) : null,
+      slice: [opts.country, opts.categoryName || opts.categoryIds, opts.silver ? 'silver' : '', opts.copper ? 'copper' : '']
+        .filter(Boolean).join('/') || 'all',
+    };
+  }
 
   async function ingestPage(opts) {
     if (crawlAbort || pagesFetched >= pageBudget) {
       return { items: [], old: 0, totalPages: 1, totalItems: 0, exhausted: true, aborted: crawlAbort };
     }
-    if (pagesFetched) await sleep(GAP_MS);
     const data = await fetchListPage(opts);
     pagesFetched += 1;
     totalItems = Math.max(totalItems, data.totalItems || 0);
@@ -322,16 +365,7 @@ export async function crawlAlibabaPublic({
       if (!onBatch) items.push(lead);
       fresh.push(lead);
     }
-    const snap = {
-      pagesFetched,
-      kept,
-      created: alibabaCrawlProgress.created || 0,
-      country: opts.country || '',
-      category: opts.categoryName || opts.categoryIds || '',
-      page: opts.page,
-      slice: [opts.country, opts.categoryName || opts.categoryIds, opts.silver ? 'silver' : '', opts.copper ? 'copper' : '', opts.keyword]
-        .filter(Boolean).join('/') || 'all',
-    };
+    const snap = snapOf(opts);
     Object.assign(alibabaCrawlProgress, snap);
     onProgress?.(snap);
     if (fresh.length && onBatch) await onBatch(fresh, snap);
@@ -341,56 +375,51 @@ export async function crawlAlibabaPublic({
   async function crawlSlice(base) {
     const first = await ingestPage({ ...base, page: 1 });
     if (first.exhausted) return first;
-    const pages = Math.min(cap, first.totalPages || cap);
+    const pages = Math.min(cap, first.totalPages || 1);
+    if (pages <= 1) return first;
+    const rest = [];
     for (let page = 2; page <= pages; page++) {
-      const data = await ingestPage({ ...base, page });
-      if (data.exhausted) return { ...first, exhausted: true, aborted: data.aborted };
-      if (data.items.length && data.old === data.items.length) break;
-      if (page >= (data.totalPages || 1)) break;
+      rest.push(() => ingestPage({ ...base, page }));
     }
+    await runPool(rest, CRAWL_CONCURRENCY);
     return first;
   }
 
-  async function crawlDeep(base, totalHint = 0) {
+  async function crawlDeep(base) {
     const first = await crawlSlice(base);
     if (first.exhausted || first.aborted) return first;
-    const size = first.totalItems || totalHint;
-    if (size <= cap * PAGE_SIZE) return first;
+    if ((first.totalItems || 0) <= cap * PAGE_SIZE) return first;
     if (!base.silver && !base.copper) {
-      await crawlDeep({ ...base, silver: true }, size);
-      await crawlDeep({ ...base, copper: true }, size);
-      return first;
-    }
-    if (!base.keyword) {
-      for (const letter of LETTERS) {
-        await crawlSlice({ ...base, keyword: letter });
-        if (crawlAbort) break;
-      }
+      await runPool([
+        () => crawlSlice({ ...base, silver: true }),
+        () => crawlSlice({ ...base, copper: true }),
+      ], 2);
     }
     return first;
   }
 
-  const first = await crawlSlice({ keyword });
+  const first = await ingestPage({ keyword, page: 1 });
   for (const cat of first.categories || []) categoryById.set(cat.id, cat.name);
 
   if (fanout && !keyword) {
     const catalog = first.categories?.length ? first.categories : [...categoryById].map(([id, name]) => ({ id, name }));
     const countries = (first.countries || []).filter((c) => c.count >= 1);
+    const jobs = [];
     for (const { code, count } of countries) {
-      if (crawlAbort) break;
       if (count <= cap * PAGE_SIZE) {
-        await crawlSlice({ country: code });
-        for (const cat of catalog) {
-          if (crawlAbort) break;
-          await crawlSlice({ country: code, categoryIds: cat.id, categoryName: cat.name });
-        }
+        jobs.push(() => crawlSlice({ country: code }));
         continue;
       }
       for (const cat of catalog) {
-        if (crawlAbort) break;
-        await crawlDeep({ country: code, categoryIds: cat.id, categoryName: cat.name }, count);
+        jobs.push(() => crawlDeep({ country: code, categoryIds: cat.id, categoryName: cat.name }));
       }
     }
+    await runPool(jobs, CRAWL_CONCURRENCY);
+  } else if ((first.totalPages || 1) > 1) {
+    const pages = Math.min(cap, first.totalPages || 1);
+    const rest = [];
+    for (let page = 2; page <= pages; page++) rest.push(() => ingestPage({ keyword, page }));
+    await runPool(rest, CRAWL_CONCURRENCY);
   }
 
   return {
