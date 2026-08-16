@@ -9,7 +9,7 @@ import { createBatchJob, getJob, listJobs } from './scheduler.js';
 import { sentToday, logActivity } from './store.js';
 import { startAgent, stopAgent, getAgentState } from './autopilot.js';
 import { ingestInbound } from './inbox.js';
-import { listSources, searchRfq, importRfqItems, ingestCommercial } from './rfq.js';
+import { listSources, searchRfq, importRfqItems, ingestCommercial, crawlAlibabaPublic, ALIBABA_PUBLIC_FIELDS, PUBLIC_SINCE_DEFAULT } from './rfq.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -64,16 +64,37 @@ app.patch('/api/customers/:id', (req, res) => {
 });
 
 app.get('/api/rfq/sources', (req, res) => res.json({ sources: listSources() }));
+app.get('/api/rfq/schema', (req, res) => {
+  res.json({
+    sinceDefault: PUBLIC_SINCE_DEFAULT,
+    alibabaPublicFields: ALIBABA_PUBLIC_FIELDS,
+    note: '公开列表页字段。无买家邮箱。emailConfirm 只表示平台标记邮箱已验证，不是地址。',
+  });
+});
 app.get('/api/rfq/search', async (req, res) => {
   try {
+    const source = req.query.source || 'all';
     const { items, reports } = await searchRfq({
-      source: req.query.source || 'all',
+      source,
       keyword: req.query.q || 'power tools',
-      limit: Number(req.query.limit || 10),
+      limit: Number(req.query.limit || (source === 'alibaba_public' || source === 'commercial' ? 40 : 10)),
+      since: req.query.since || PUBLIC_SINCE_DEFAULT,
     });
     res.json({ items, reports });
   } catch (err) {
     res.status(502).json({ error: `RFQ 数据源请求失败：${err.message}` });
+  }
+});
+app.post('/api/rfq/public/crawl', async (req, res) => {
+  try {
+    const keyword = req.body?.keyword ?? req.body?.q ?? '';
+    const since = req.body?.since || PUBLIC_SINCE_DEFAULT;
+    const maxPages = Number(req.body?.maxPages || 15);
+    const crawled = await crawlAlibabaPublic({ keyword, since, maxPages });
+    const created = req.body?.import ? importRfqItems(crawled.items) : [];
+    res.json({ ...crawled, created });
+  } catch (err) {
+    res.status(502).json({ error: `公开询盘抓取失败：${err.message}` });
   }
 });
 app.post('/api/rfq/import', (req, res) => {

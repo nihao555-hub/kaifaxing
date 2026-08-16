@@ -1,6 +1,7 @@
 import { db, save, logActivity } from './store.js';
 import { config } from './config.js';
 import { alibabaReady, searchAlibaba } from './alibaba.js';
+import { searchAlibabaPublic, crawlAlibabaPublic, ALIBABA_PUBLIC_FIELDS, PUBLIC_SINCE_DEFAULT } from './publicRfq.js';
 
 // 聚合公开 RFQ / 采购数据源：一次请求并行打多个官方接口，结果归一化后合并。
 // 只走开放 API，不爬私人邮箱。某个源失败不影响其他源。
@@ -282,7 +283,12 @@ const ADAPTERS = {
   uk: { search: searchUk, name: 'UK Contracts Finder', kind: 'government' },
   ted: { search: searchTed, name: 'TED Europa', kind: 'government' },
   samgov: { search: searchSam, name: 'SAM.gov', kind: 'government' },
-  alibaba: { search: searchAlibaba, name: '阿里国际站 RFQ', kind: 'commercial' },
+  alibaba: { search: searchAlibaba, name: '阿里国际站官方 API', kind: 'commercial' },
+  alibaba_public: {
+    search: async (opts) => (await searchAlibabaPublic(opts)).items,
+    name: '阿里国际站公开 RFQ',
+    kind: 'commercial',
+  },
 };
 
 export function listSources() {
@@ -294,7 +300,7 @@ export function listSources() {
       region: '全球',
       auth: '已就绪源并行',
       ready: true,
-      note: '并行拉取已接通的政府招标源；配了 SAM 或阿里官方凭据时一并带上。不是「全球所有 RFQ」——商业询盘要各自官方接口或 JSON 导入。',
+      note: '并行拉取已接通的政府招标源 + 阿里公开询盘列表（免登录卡片）。官方阿里 API 配了 Key 也会带上。',
     },
     {
       key: 'usaspending',
@@ -344,15 +350,24 @@ export function listSources() {
         : '到 sam.gov 申请 Public API Key，写入环境变量 SAM_API_KEY 后自动加入聚合。',
     },
     {
+      key: 'alibaba_public',
+      name: '阿里国际站公开 RFQ',
+      kind: 'commercial',
+      region: '全球买家',
+      auth: '免登录列表页',
+      ready: true,
+      note: `公开询盘卡片：标题、买家显示名、国家、数量、发布时间。无邮箱。默认从 ${PUBLIC_SINCE_DEFAULT} 起，限速翻页。`,
+    },
+    {
       key: 'alibaba',
-      name: '阿里国际站 RFQ',
+      name: '阿里国际站官方 API',
       kind: 'commercial',
       region: '全球买家',
       auth: '卖家开放平台',
       ready: alibabaReady(),
       note: alibabaReady()
-        ? '已配置官方 app_key / session，走 alibaba.icbu.rfq.search，不爬页面。'
-        : '需要国际站卖家应用：ALIBABA_APP_KEY、ALIBABA_APP_SECRET、ALIBABA_SESSION。搜索接口通常不返回个人邮箱。',
+        ? '已配置官方 app_key / session，走 alibaba.icbu.rfq.search。'
+        : '可选：卖家应用 ALIBABA_APP_KEY / SECRET / SESSION。公开列表已可先用，不必等 Key。',
     },
     {
       key: 'ingest',
@@ -367,7 +382,7 @@ export function listSources() {
 }
 
 function readyKeys(kind) {
-  const keys = ['usaspending', 'uk', 'ted', 'worldbank'];
+  const keys = ['usaspending', 'uk', 'ted', 'worldbank', 'alibaba_public'];
   if (samKey()) keys.push('samgov');
   if (alibabaReady()) keys.push('alibaba');
   if (kind === 'government') return keys.filter((k) => ADAPTERS[k]?.kind === 'government');
@@ -375,7 +390,7 @@ function readyKeys(kind) {
   return keys;
 }
 
-export async function searchRfq({ source = 'all', keyword = 'power tools', limit = 10 } = {}) {
+export async function searchRfq({ source = 'all', keyword = 'power tools', limit = 10, since = PUBLIC_SINCE_DEFAULT } = {}) {
   if (source === 'ingest') {
     return { items: [], reports: [{ key: 'ingest', name: '商业/付费聚合导入', ok: true, count: 0, error: '请用 JSON 导入，不要走搜索' }] };
   }
@@ -387,7 +402,7 @@ export async function searchRfq({ source = 'all', keyword = 'power tools', limit
     keys.map(async (key) => {
       const ad = ADAPTERS[key];
       if (!ad) throw new Error(`未知数据源 ${key}`);
-      const items = await ad.search({ keyword, limit: per });
+      const items = await ad.search({ keyword, limit: per, since });
       return { key, name: ad.name, items };
     })
   );
@@ -522,4 +537,5 @@ export function ingestCommercial(body = {}) {
   return { items, created: importRfqItems(items) };
 }
 
+export { crawlAlibabaPublic, ALIBABA_PUBLIC_FIELDS, PUBLIC_SINCE_DEFAULT };
 export const RFQ_CATALOG = listSources();

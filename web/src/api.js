@@ -25,8 +25,18 @@ export const api = {
   startAgent: () => req('/api/agent/start', { method: 'POST', body: '{}' }),
   stopAgent: () => req('/api/agent/stop', { method: 'POST', body: '{}' }),
   rfqSources: () => req('/api/rfq/sources'),
-  rfqSearch: (source, q) => req(`/api/rfq/search?source=${encodeURIComponent(source || 'all')}&q=${encodeURIComponent(q || '')}`),
+  rfqSearch: (source, q, extra = {}) => {
+    const qs = new URLSearchParams({
+      source: source || 'all',
+      q: q || '',
+      since: extra.since || '2026-07-01',
+    });
+    if (extra.limit) qs.set('limit', String(extra.limit));
+    return req(`/api/rfq/search?${qs}`);
+  },
   rfqImport: (items) => req('/api/rfq/import', { method: 'POST', body: JSON.stringify({ items }) }),
   rfqIngest: (payload) => req('/api/rfq/ingest', { method: 'POST', body: JSON.stringify(payload) }),
+  rfqCrawl: (payload) => req('/api/rfq/public/crawl', { method: 'POST', body: JSON.stringify(payload) }),
+  rfqSchema: () => req('/api/rfq/schema'),
   updateCustomer: (id, payload) => req(`/api/customers/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
 };

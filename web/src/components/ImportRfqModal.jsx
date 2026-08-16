@@ -103,7 +103,7 @@ export default function ImportRfqModal({ onClose, onImported }) {
               key={t.id}
               onClick={() => {
                 setTab(t.id);
-                setSource(t.id === 'government' ? 'all' : 'alibaba');
+                setSource(t.id === 'government' ? 'all' : 'alibaba_public');
                 setItems([]);
                 setReports([]);
                 setErr('');
@@ -125,8 +125,8 @@ export default function ImportRfqModal({ onClose, onImported }) {
             </p>
           ) : (
             <p className="mb-3 text-xs leading-relaxed text-slate-500">
-              阿里国际站、中国制造网、环球资源的询盘各自锁在卖家后台，<strong>没有</strong>一个合法免费 API 能扒全球商业 RFQ。
-              阿里只走官方 <code>alibaba.icbu.rfq.search</code>；其他付费源把 JSON 贴进来即可。不要爬页面、不要买私人邮箱包。
+              先拉<strong>免登录公开询盘卡片</strong>（标题、买家显示名、国家、数量、发布时间）。没有邮箱，入库后背调公司采购邮箱再发。
+              中国制造网询盘要登录，EC21 有 Cloudflare，先用阿里公开列表。默认从 2026-07-01 起，限速翻页。
             </p>
           )}
 
@@ -156,33 +156,51 @@ export default function ImportRfqModal({ onClose, onImported }) {
           </div>
 
           {tab === 'commercial' && (
-            <div className="mb-4 rounded-xl border border-amber-100 bg-amber-50/70 p-3 text-[11px] leading-relaxed text-amber-800">
-              <div className="mb-1 font-semibold">阿里国际站怎么接通</div>
-              1. 用国际站卖家账号到开放平台创建应用，申请 <code>alibaba.icbu.rfq.search</code> 权限<br />
-              2. 卖家授权拿到 session<br />
-              3. 环境变量写入 <code>ALIBABA_APP_KEY</code> / <code>ALIBABA_APP_SECRET</code> / <code>ALIBABA_SESSION</code> 后重启<br />
-              搜索接口通常不返回个人邮箱；优先在国际站后台报价，有公司采购邮箱再补录。Agent 没有邮箱不会发信。
+            <div className="mb-4 rounded-xl border border-sky-100 bg-sky-50/70 p-3 text-[11px] leading-relaxed text-sky-800">
+              公开表头：rfqId / subject / description / buyerName / country / quantity / quantityUnit / openTimeStr / url。
+              没有 email。平台上的 emailConfirm 只表示「邮箱已验证」，不是地址。
             </div>
           )}
 
-          {tab === 'government' || sources.find((s) => s.key === 'alibaba')?.ready ? (
-            <div className="mb-3 flex gap-2">
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="关键词，如 power tools"
-                className="h-9 flex-1 rounded-lg border border-slate-200 px-3 text-xs focus:border-primary focus:outline-none"
-              />
+          <div className="mb-3 flex gap-2">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={tab === 'commercial' ? '关键词，空则拉最新公开询盘' : '关键词，如 power tools'}
+              className="h-9 flex-1 rounded-lg border border-slate-200 px-3 text-xs focus:border-primary focus:outline-none"
+            />
+            <button
+              onClick={() => search(tab === 'commercial' ? (source === 'alibaba' && !sources.find((s) => s.key === 'alibaba')?.ready ? 'alibaba_public' : source) : source)}
+              disabled={loading || (source === 'alibaba' && !sources.find((s) => s.key === 'alibaba')?.ready)}
+              className="flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-medium text-white hover:bg-blue-600 disabled:opacity-50"
+            >
+              {loading ? <Spinner className="h-3! w-3!" /> : <Download size={13} />}
+              {source === 'all' ? '聚合拉取' : '拉取公开询盘'}
+            </button>
+            {tab === 'commercial' && (
               <button
-                onClick={() => search(tab === 'commercial' ? 'alibaba' : source)}
-                disabled={loading || (tab === 'commercial' && !sources.find((s) => s.key === 'alibaba')?.ready)}
-                className="flex h-9 items-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-medium text-white hover:bg-blue-600 disabled:opacity-50"
+                onClick={async () => {
+                  setErr('');
+                  setLoading(true);
+                  try {
+                    const data = await api.rfqCrawl({ keyword: q, since: '2026-07-01', maxPages: 15 });
+                    setItems(data.items || []);
+                    setReports([{ key: 'alibaba_public', name: '阿里公开 RFQ', ok: true, count: (data.items || []).length }]);
+                    setPicked(new Set((data.items || []).map((x) => x.id)));
+                    setIngestMsg(`翻了 ${data.pages || 0} 页，公开列表约 ${data.totalItems || 0} 条，本次留下 ${(data.items || []).length} 条（${data.since} 起）`);
+                  } catch (e) {
+                    setErr(String(e.message || e));
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+                disabled={loading}
+                className="h-9 rounded-lg border border-slate-200 px-3 text-xs text-slate-600 disabled:opacity-50"
               >
-                {loading ? <Spinner className="h-3! w-3!" /> : <Download size={13} />}
-                {source === 'all' ? '聚合拉取' : '拉取'}
+                多页抓取
               </button>
-            </div>
-          ) : null}
+            )}
+          </div>
 
           {tab === 'commercial' && (
             <div className="mb-4">

@@ -54,10 +54,12 @@ describe('commercial ingest', () => {
 });
 
 describe('source catalog', () => {
-  it('marks alibaba commercial and not ready without keys', () => {
+  it('marks official alibaba not ready and public list ready', () => {
     const ali = listSources().find((s) => s.key === 'alibaba');
+    const pub = listSources().find((s) => s.key === 'alibaba_public');
     assert.equal(ali.kind, 'commercial');
     assert.equal(ali.ready, false);
+    assert.equal(pub.ready, true);
     assert.ok(listSources().some((s) => s.kind === 'government' && s.ready));
   });
 });

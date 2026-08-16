@@ -21,7 +21,8 @@
 - **发信频率保护**：相邻两封随机间隔 45-120 秒模拟人工节奏；单日上限 50 封，保护 163 账号信誉
 - **RFQ 数据源（政府招标 + 商业询盘）**
   - **政府招标（已接通、免费官方接口）**：USASpending、英国 Contracts Finder、欧盟 TED、世界银行；配置 `SAM_API_KEY` 后带上 SAM.gov
-  - **阿里国际站**：只走官方 `alibaba.icbu.rfq.search`（TOP 签名），需 `ALIBABA_APP_KEY` / `ALIBABA_APP_SECRET` / `ALIBABA_SESSION`。不爬页面
+  - **阿里国际站公开列表**：免登录拉询盘卡片（标题 / 买家显示名 / 国家 / 数量 / 发布时间），默认从 2026-07-01 起，限速翻页。无邮箱
+  - **阿里官方 API**（可选）：`alibaba.icbu.rfq.search`，需卖家 `ALIBABA_APP_KEY` / `SECRET` / `SESSION`
   - **付费聚合 / 其他平台**：没有合法免费的「全球所有商业 RFQ」单一 API。TendersOnTime、dgMarket、中国制造网导出等用 `POST /api/rfq/ingest` 灌入
   - 无公开邮箱的线索入库后不会自动发信
 
