@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { beijingDate, beijingHour, pickAutoEmail, isForwarderName, researchPriority } from './pipeline.js';
+import { beijingDate, beijingHour, pickAutoEmail, isForwarderName, researchPriority, stampPersonLikeLeads } from './pipeline.js';
 
 describe('pipeline schedule', () => {
   it('formats Beijing calendar date', () => {
@@ -63,5 +63,9 @@ describe('auto apply rules', () => {
       < researchPriority({ source: 'USASpending.gov', company: 'THE BOEING COMPANY' }));
     assert.ok(researchPriority({ source: 'USASpending.gov', company: 'THE BOEING COMPANY' })
       < researchPriority({ source: 'World Bank', company: 'Assam: School Education' }));
+  });
+
+  it('does not stamp nickname leads with full C reports', () => {
+    assert.equal(stampPersonLikeLeads(), 0);
   });
 });

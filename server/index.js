@@ -26,7 +26,6 @@ import {
   enqueueResearch,
   enqueuePendingResearch,
   kickResearch,
-  stampPersonLikeLeads,
   applyTextCompanyHints,
   identifyLead,
   applyPublicContact,
@@ -324,12 +323,10 @@ app.get('/api/rfq/leads/:id', (req, res) => {
 app.post('/api/rfq/leads/research-queue', (req, res) => {
   const all = Boolean(req.body?.all);
   const limit = Number(req.body?.limit || (all ? 4000 : 800));
-  const promoted = applyTextCompanyHints();
-  const stamped = stampPersonLikeLeads();
   const added = enqueuePendingResearch({ limit });
   if (all && googleSearchReady()) config.pipeline.researchDelayMs = Math.min(config.pipeline.researchDelayMs, 2500);
   const state = kickResearch();
-  res.json({ promoted, stamped, added, ...state });
+  res.json({ promoted: 0, stamped: 0, added, ...state });
 });
 
 app.post('/api/rfq/leads/research-batch', async (req, res) => {

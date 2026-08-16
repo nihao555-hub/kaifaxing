@@ -114,7 +114,14 @@ let saveTimer = null;
 export function save() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
+    try {
+      const tmp = `${DB_PATH}.tmp`;
+      // Compact JSON: pretty-printing 160k+ leads overflows V8 string length.
+      fs.writeFileSync(tmp, JSON.stringify(db));
+      fs.renameSync(tmp, DB_PATH);
+    } catch (err) {
+      console.error('[store] save failed:', err);
+    }
   }, 200);
 }
 

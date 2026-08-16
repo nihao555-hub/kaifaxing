@@ -1,7 +1,7 @@
 import { config } from './config.js';
 import { db, save, getCustomer, isRfqLead, isDemoCustomer, logActivity } from './store.js';
 import { crawlAllAndImport } from './rfq.js';
-import { researchLead, isPersonLikeLead, isPlausibleEmail, skippedLeadReport, applyLeadIdentity } from './research.js';
+import { researchLead, isPersonLikeLead, isPlausibleEmail, applyLeadIdentity } from './research.js';
 import { extractCompanyHintFromText } from './rfqHints.js';
 import { extractRfqClues, rfqCorpus, classifyResearchPath } from './researchPath.js';
 import { VERIFIED_SOURCES } from './openSources.js';
@@ -133,18 +133,9 @@ export function applyTextCompanyHints() {
 }
 
 export function stampPersonLikeLeads() {
-  let stamped = 0;
-  for (const c of db.customers) {
-    if (!isRfqLead(c)) continue;
-    if (c.research?.status === 'running') c.research = { ...(c.research || {}), status: null };
-    if (!isPersonLikeLead(c)) continue;
-    if (c.researchPath === 'clues' || c.researchPath === 'crosspost') continue;
-    if (c.research?.status === 'done') continue;
-    c.research = skippedLeadReport(c);
-    stamped += 1;
-  }
-  if (stamped) save();
-  return stamped;
+  // Nickname cards stay unstamped. Writing ~140k full C reports and then
+  // JSON.stringify(db) overflows V8; enqueue already skips person-like leads.
+  return 0;
 }
 
 export function pruneResearchQueue() {
@@ -501,7 +492,7 @@ export async function promoteLeads(ids = [], { researchLimit = 6 } = {}) {
 
 export function startLeadPipeline() {
   const p = ensurePipeline();
-  applyTextCompanyHints();
+  if ((db.customers?.length || 0) < 5000) applyTextCompanyHints();
   pruneResearchQueue();
   enqueueDailyBacklog();
   pumpResearch();
