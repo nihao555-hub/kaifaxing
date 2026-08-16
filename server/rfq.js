@@ -2,6 +2,7 @@ import { db, save, logActivity } from './store.js';
 import { config } from './config.js';
 import { alibabaReady, searchAlibaba } from './alibaba.js';
 import { searchAlibabaPublic, crawlAlibabaPublic, ALIBABA_PUBLIC_FIELDS, PUBLIC_SINCE_DEFAULT } from './publicRfq.js';
+import { searchGoldSupplier, searchTradeIndia } from './b2bPublic.js';
 
 // 聚合公开 RFQ / 采购数据源：一次请求并行打多个官方接口，结果归一化后合并。
 // 只走开放 API，不爬私人邮箱。某个源失败不影响其他源。
@@ -304,6 +305,8 @@ const ADAPTERS = {
     name: '阿里国际站公开 RFQ',
     kind: 'commercial',
   },
+  goldsupplier: { search: searchGoldSupplier, name: 'GoldSupplier 公开询盘', kind: 'commercial' },
+  tradeindia: { search: searchTradeIndia, name: 'TradeIndia 公开买盘', kind: 'commercial' },
 };
 
 export function listSources() {
@@ -374,6 +377,24 @@ export function listSources() {
       note: `公开询盘卡片：标题、买家显示名、国家、数量、发布时间。无邮箱。默认从 ${PUBLIC_SINCE_DEFAULT} 起，限速翻页。`,
     },
     {
+      key: 'goldsupplier',
+      name: 'GoldSupplier 公开询盘',
+      kind: 'commercial',
+      region: '全球买家',
+      auth: '免登录列表页',
+      ready: true,
+      note: 'goldsupplier.com 公开 Buying Requests。有发布时间和国家，无邮箱。',
+    },
+    {
+      key: 'tradeindia',
+      name: 'TradeIndia 公开买盘',
+      kind: 'commercial',
+      region: '印度/全球',
+      auth: '免登录首页',
+      ready: true,
+      note: 'TradeLeads/buy 首页公开约十几条。更多要登录，不绕过。',
+    },
+    {
       key: 'alibaba',
       name: '阿里国际站官方 API',
       kind: 'commercial',
@@ -397,7 +418,7 @@ export function listSources() {
 }
 
 function readyKeys(kind) {
-  const keys = ['usaspending', 'uk', 'ted', 'worldbank', 'alibaba_public'];
+  const keys = ['usaspending', 'uk', 'ted', 'worldbank', 'alibaba_public', 'goldsupplier', 'tradeindia'];
   if (samKey()) keys.push('samgov');
   if (alibabaReady()) keys.push('alibaba');
   if (kind === 'government') return keys.filter((k) => ADAPTERS[k]?.kind === 'government');
@@ -511,20 +532,27 @@ export async function crawlAllAndImport({
   alibabaPages = 100,
   govLimit = 80,
   doImport = true,
+  sources,
 } = {}) {
+  const want = Array.isArray(sources) && sources.length ? new Set(sources) : null;
+  const add = (key, run) => (!want || want.has(key) ? run : null);
   const reports = [];
   const buckets = await Promise.allSettled([
-    crawlAlibabaPublic({ keyword: '', since, maxPages: alibabaPages, fanout: true })
-      .then((r) => ({ key: 'alibaba_public', name: '阿里国际站公开 RFQ', items: r.items, extra: { pages: r.pages, totalItems: r.totalItems } })),
-    searchUsaspending({ limit: govLimit, since, broad: true })
-      .then((items) => ({ key: 'usaspending', name: 'USASpending.gov', items })),
-    searchUk({ keyword: '', limit: govLimit, since })
-      .then((items) => ({ key: 'uk', name: 'UK Contracts Finder', items })),
-    searchTed({ keyword: '', limit: Math.min(govLimit, 100), since })
-      .then((items) => ({ key: 'ted', name: 'TED Europa', items })),
-    searchWorldBank({ keyword: '', limit: govLimit, since })
-      .then((items) => ({ key: 'worldbank', name: 'World Bank', items })),
-  ]);
+    add('alibaba_public', crawlAlibabaPublic({ keyword: '', since, maxPages: alibabaPages, fanout: true })
+      .then((r) => ({ key: 'alibaba_public', name: '阿里国际站公开 RFQ', items: r.items, extra: { pages: r.pages, totalItems: r.totalItems } }))),
+    add('usaspending', searchUsaspending({ limit: govLimit, since, broad: true })
+      .then((items) => ({ key: 'usaspending', name: 'USASpending.gov', items }))),
+    add('uk', searchUk({ keyword: '', limit: govLimit, since })
+      .then((items) => ({ key: 'uk', name: 'UK Contracts Finder', items }))),
+    add('ted', searchTed({ keyword: '', limit: Math.min(govLimit, 100), since })
+      .then((items) => ({ key: 'ted', name: 'TED Europa', items }))),
+    add('worldbank', searchWorldBank({ keyword: '', limit: govLimit, since })
+      .then((items) => ({ key: 'worldbank', name: 'World Bank', items }))),
+    add('goldsupplier', searchGoldSupplier({ since, maxPages: 12 })
+      .then((items) => ({ key: 'goldsupplier', name: 'GoldSupplier 公开询盘', items }))),
+    add('tradeindia', searchTradeIndia({ since })
+      .then((items) => ({ key: 'tradeindia', name: 'TradeIndia 公开买盘', items }))),
+  ].filter(Boolean));
 
   const items = [];
   for (const r of buckets) {

@@ -104,8 +104,9 @@ app.post('/api/rfq/crawl-all', (req, res) => {
   if (crawlAllJob.status === 'running') return res.json(crawlAllJob);
   const since = req.body?.since || PUBLIC_SINCE_DEFAULT;
   const alibabaPages = Number(req.body?.alibabaPages || 100);
+  const sources = Array.isArray(req.body?.sources) ? req.body.sources : undefined;
   crawlAllJob = { status: 'running', since, startedAt: new Date().toISOString(), createdCount: 0, reports: [] };
-  crawlAllAndImport({ since, alibabaPages, govLimit: 80, doImport: true })
+  crawlAllAndImport({ since, alibabaPages, govLimit: 80, doImport: true, sources })
     .then((r) => {
       crawlAllJob = {
         status: 'done',
