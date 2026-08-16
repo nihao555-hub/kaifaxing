@@ -16,8 +16,9 @@ const STOP = new Set([
 /** 行业通用词不能单独当制裁证据，否则 Transportation / Energy 会误中 */
 const GENERIC = new Set([
   'transportation', 'shipping', 'energy', 'pipeline', 'agency', 'freight', 'cargo',
-  'trading', 'oil', 'gas', 'services', 'industries', 'industrial', 'logistics',
+  'trading', 'oil', 'gas', 'service', 'services', 'industries', 'industrial', 'logistics',
   'marine', 'aviation', 'construction', 'engineering', 'technologies', 'technology',
+  'technical', 'commercial', 'center', 'centre',
   'solutions', 'systems', 'enterprises', 'enterprise', 'partners', 'capital',
   'investment', 'investments', 'bank', 'trust', 'united', 'national', 'general',
 ]);

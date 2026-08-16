@@ -287,7 +287,7 @@ function pageMentionsCompany(html, company, { country = '', pageUrl = '' } = {})
   const distinctive = tokens.filter((t) => !GENERIC_VERIFY.has(t));
   const place = countrySearchTerms(country).map((s) => s.replace(/"/g, '').toLowerCase());
   const countryHit = place.some((w) => w.length >= 3 && text.includes(w)) || hostFitsCountry(pageUrl, country);
-  if (country && distinctive.length <= 1 && !countryHit) return false;
+  if (country && distinctive.length <= 1 && !hostFitsCountry(pageUrl, country)) return false;
   if (!tokens.length) {
     return significantTokens(company).some((t) => text.includes(t)) && (!country || countryHit);
   }

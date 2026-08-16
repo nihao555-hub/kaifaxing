@@ -81,6 +81,7 @@ describe('research dorks', () => {
       product: 'Chiller Compressor Refrigeration Spare Parts',
     });
     assert.ok(q[0].includes('UAE') || q[0].includes('Dubai'));
+    assert.ok(q[0].startsWith('"NMG TECHNICAL SERVICE"'));
     assert.ok(q.some((s) => /site:\.ae/i.test(s)));
     assert.ok(q.some((s) => /Chiller|Compressor/i.test(s)));
     assert.deepEqual(rfqProductTerms('公开询盘：Chiller Compressor Refrigeration Spare Parts，数量 100 Piece'), ['Chiller', 'Compressor', 'Refrigeration']);

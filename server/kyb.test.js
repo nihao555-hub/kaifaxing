@@ -72,6 +72,13 @@ describe('sanctions match', () => {
       ]),
       []
     );
+    assert.deepEqual(
+      matchSanctionNames('NMG TECHNICAL SERVICE L.L.C', [
+        { name: 'LIMITED LIABILITY COMPANY TMK TECHNICAL SERVICE', list: 'OFAC SDN' },
+        { name: 'AHWAZ STEEL COMMERCIAL & TECHNICAL SERVICE GMBH ASCOTEC', list: 'OFAC SDN' },
+      ]),
+      []
+    );
   });
 });
 
