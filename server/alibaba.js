@@ -94,6 +94,7 @@ function pick(row, ...keys) {
 export function normalizeAlibabaRfq(row) {
   const id = pick(row, 'rfq_id', 'rfqId', 'id', 'open_rfq_id');
   const title = pick(row, 'subject', 'title', 'rfq_title', 'product_name');
+  // 文档未保证这些字段；有就用，没有就仍是询盘标题/显示名。
   const company = pick(row, 'buyer_company_name', 'company_name', 'buyer_name', 'company');
   const country = pick(row, 'buyer_country', 'country', 'country_name');
   const qty = pick(row, 'quantity', 'quantity_desc', 'total_quantity');
