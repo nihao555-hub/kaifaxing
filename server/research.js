@@ -130,6 +130,18 @@ export function isPlausibleEmail(email) {
   return true;
 }
 
+export function emailBelongsToCompany(email, websiteHost, company) {
+  const domain = String(email || '').toLowerCase().split('@')[1] || '';
+  if (!domain) return false;
+  if (websiteHost) {
+    const site = registrableDomain(websiteHost);
+    const mail = registrableDomain(domain);
+    if (site && (mail === site || domain.endsWith(`.${site}`))) return true;
+  }
+  const first = significantTokens(company)[0];
+  return Boolean(first && first.length >= 4 && domain.includes(first));
+}
+
 export function scoreEmail(email, websiteHost = '') {
   const e = String(email || '').toLowerCase();
   const local = e.split('@')[0] || '';
@@ -188,12 +200,15 @@ function pageTitle(html) {
 
 function pageMentionsCompany(html, company) {
   const tokens = significantTokens(company).filter((t) => t.length >= 4);
-  const text = `${pageTitle(html)} ${stripTags(html).slice(0, 4000)}`.toLowerCase();
+  const title = pageTitle(html).toLowerCase();
+  const text = `${title} ${stripTags(html).slice(0, 4000)}`.toLowerCase();
   if (!tokens.length) {
     return significantTokens(company).some((t) => text.includes(t));
   }
   const hits = tokens.filter((t) => text.includes(t));
-  return hits.length >= Math.min(2, tokens.length) || (hits.length >= 1 && tokens[0].length >= 5);
+  if (hits.length >= Math.min(2, tokens.length)) return true;
+  if (hits.length >= 1 && title.includes(hits[0])) return true;
+  return hits.length >= 1 && tokens[0].length >= 5;
 }
 
 async function fetchText(url, { timeout = 12000, accept = '*/*' } = {}) {
@@ -295,23 +310,31 @@ async function searchGleif(query, mode = 'legalName') {
   return data?.data || [];
 }
 
-function pickBestHit(hits, company, getLabel) {
+const ORG_HINT = /compan|group|college|university|corporation|limited|gmbh|agency|contractor|construction|housing|plc|inc\b|institut|authority|hospital|council|technologies|gesellschaft/i;
+
+export function pickBestHit(hits, company, getLabel) {
   let best = null;
   let bestScore = 0;
+  const companyTokens = significantTokens(company);
+  const first = companyTokens[0];
   for (const hit of hits) {
     const label = getLabel(hit);
-    const score = tokenOverlap(company, label);
+    const desc = hit.description || hit.display || '';
+    const labelTokens = significantTokens(label);
+    const inter = companyTokens.filter((t) => labelTokens.includes(t)).length;
+    const coverage = companyTokens.length ? inter / companyTokens.length : 0;
+    const orgLike = ORG_HINT.test(`${label} ${desc}`);
+    const startsWithFirst = first && String(label).toLowerCase().startsWith(first);
+    let score = 0;
+    if (coverage >= 0.8) score = 1;
+    else if (startsWithFirst && orgLike && labelTokens.length >= 2 && coverage >= 0.4) score = 0.7;
+    else if (startsWithFirst && orgLike && first?.length >= 5 && labelTokens[0] === first) score = 0.6;
     if (score > bestScore) {
       best = { hit, label, score };
       bestScore = score;
     }
   }
-  if (bestScore >= 0.5) return best;
-  const tokens = significantTokens(company);
-  if (best && bestScore > 0 && tokens.some((t) => t.length >= 4 && String(best.label).toLowerCase().includes(t))) {
-    return best;
-  }
-  return null;
+  return bestScore > 0 ? best : null;
 }
 
 function queriesFor(company) {
@@ -322,7 +345,53 @@ function queriesFor(company) {
   if (stripped && stripped.toLowerCase() !== full.toLowerCase()) q.push(stripped);
   const tokens = significantTokens(full);
   if (tokens.length >= 2) q.push(tokens.slice(0, 3).join(' '));
-  return [...new Set(q)].slice(0, 4);
+  if (tokens[0] && tokens[0].length >= 4) q.push(tokens[0]);
+  return [...new Set(q)].slice(0, 5);
+}
+
+export function websiteCandidates(url) {
+  try {
+    const raw = String(url || '').trim();
+    if (!raw) return [];
+    const u = new URL(raw.includes('://') ? raw : `https://${raw}`);
+    const host = u.hostname.toLowerCase();
+    const bare = host.replace(/^www\./, '');
+    const hosts = [...new Set([`www.${bare}`, bare, host])];
+    const path = u.pathname === '/' ? '/' : u.pathname;
+    const out = [];
+    for (const scheme of ['https', 'http']) {
+      for (const h of hosts) out.push(`${scheme}://${h}${path}`);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+const COUNTRY_TLD = {
+  德国: 'de', DE: 'de', Germany: 'de',
+  英国: 'co.uk', GB: 'co.uk', UK: 'co.uk',
+  美国: 'com', US: 'com', USA: 'com',
+  荷兰: 'nl', NL: 'nl', Netherlands: 'nl',
+  法国: 'fr', FR: 'fr',
+  波兰: 'pl', PL: 'pl',
+  芬兰: 'fi', FI: 'fi',
+  西班牙: 'es', ES: 'es',
+  意大利: 'it', IT: 'it',
+  印度: 'in', IN: 'in',
+};
+
+function guessWebsiteUrls(company, country) {
+  const tokens = significantTokens(company);
+  const first = tokens[0] || '';
+  const slugs = [...new Set([first, stripLegalSuffix(company).toLowerCase().replace(/[^a-z0-9]/g, '')])]
+    .filter((s) => s.length >= 4 && s.length <= 24 && !/^\d+$/.test(s));
+  const tlds = [...new Set([COUNTRY_TLD[country] || '', 'com', 'co.uk']).values()].filter(Boolean);
+  const urls = [];
+  for (const slug of slugs.slice(0, 2)) {
+    for (const tld of tlds.slice(0, 2)) urls.push(`https://www.${slug}.${tld}/`);
+  }
+  return [...new Set(urls)].slice(0, 4);
 }
 
 async function resolveEntity(company) {
@@ -411,23 +480,30 @@ async function resolveEntity(company) {
 
 async function harvestContacts(website, company) {
   if (!website) return { emails: [], phones: [], pages: [], verified: false };
-  const home = website.startsWith('http') ? website : `https://${website}`;
-  const homeRes = await fetchText(home, { accept: 'text/html', timeout: 14000 });
+  let homeRes = { ok: false, status: 0, url: website, text: '', error: '未请求' };
+  for (const home of websiteCandidates(website)) {
+    homeRes = await fetchText(home, { accept: 'text/html', timeout: 14000 });
+    if (homeRes.ok && homeRes.text) break;
+  }
   if (!homeRes.ok) return { emails: [], phones: [], pages: [], verified: false, error: homeRes.error || `HTTP ${homeRes.status}` };
 
   const verified = pageMentionsCompany(homeRes.text, company) || pageMentionsCompany(homeRes.text, pageTitle(homeRes.text));
   const pages = [{ url: homeRes.url, title: pageTitle(homeRes.text) || '官网首页' }];
   const htmls = [homeRes.text];
-  const extra = new Set([
+  const extra = [
+    ...discoverContactLinks(homeRes.text, homeRes.url),
     ...CONTACT_PATHS.map((p) => {
       try { return new URL(p, homeRes.url).toString(); } catch { return ''; }
     }).filter(Boolean),
-    ...discoverContactLinks(homeRes.text, homeRes.url),
-  ]);
+  ];
+  const ranked = [...new Set(extra)].sort((a, b) => {
+    const weight = (u) => (/impressum|imprint|kontakt|contact/i.test(u) ? 0 : 1);
+    return weight(a) - weight(b);
+  });
 
   let fetched = 0;
-  for (const url of extra) {
-    if (fetched >= 5) break;
+  for (const url of ranked) {
+    if (fetched >= 8) break;
     if (url === homeRes.url) continue;
     const r = await fetchText(url, { accept: 'text/html', timeout: 10000 });
     fetched += 1;
@@ -442,6 +518,7 @@ async function harvestContacts(website, company) {
   const phones = new Set();
   for (const html of htmls) {
     for (const item of extractEmails(html, { websiteHost: host })) {
+      if (!emailBelongsToCompany(item.email, host, company)) continue;
       const prev = emailMap.get(item.email);
       if (!prev || item.score > prev.score) emailMap.set(item.email, { ...item, source: '官网公开页' });
     }
@@ -537,18 +614,33 @@ export async function researchLead(customer, { useAi = true } = {}) {
       detail: resolved.facts.length ? `匹配到 ${legalName}` : 'Wikidata / GLEIF / Wikipedia 没有足够匹配',
     });
 
-    const harvested = await harvestContacts(website, legalName || company);
+    let harvested = website
+      ? await harvestContacts(website, legalName || company)
+      : { emails: [], phones: [], pages: [], verified: false };
+
+    if ((!harvested.pages || harvested.pages.length === 0) && resolved.facts.length) {
+      for (const guess of guessWebsiteUrls(legalName || company, customer.country)) {
+        const probe = await harvestContacts(guess, legalName || company);
+        if (probe.pages?.length && probe.verified) {
+          harvested = probe;
+          website = probe.website || guess;
+          notes.push('公开库没有官网字段，已用主体名+国家域名打开，并核验页面提到该公司');
+          break;
+        }
+      }
+    }
+
     if (harvested.website) website = harvested.website;
     emails = harvested.emails || [];
     phones = harvested.phones || [];
     pages = harvested.pages || [];
-    if (harvested.error) notes.push(`官网抓取：${harvested.error}`);
+    if (harvested.error && !website) notes.push(`官网抓取：${harvested.error}`);
     for (const p of pages) sources.push({ title: p.title || '官网', url: p.url });
     steps.push({
       key: 'website',
       label: '官网定位',
       ok: Boolean(website),
-      detail: website || '公开库未给出官网，未用撞库方式猜测域名发信',
+      detail: website || '公开库未给出官网，也没有核验通过的域名，未用未验证域名发信',
     });
     steps.push({
       key: 'contact',

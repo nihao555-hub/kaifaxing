@@ -10,6 +10,9 @@ import {
   extractEmails,
   extractPhones,
   registrableDomain,
+  websiteCandidates,
+  pickBestHit,
+  emailBelongsToCompany,
 } from './research.js';
 
 describe('company name helpers', () => {
@@ -23,6 +26,18 @@ describe('company name helpers', () => {
     assert.ok(tokenOverlap('KIER TRANSPORTATION LIMITED', 'Kier Group') >= 0.5);
     assert.ok(tokenOverlap('L3HARRIS TECHNOLOGIES, INC.', 'L3Harris Technologies') >= 0.8);
     assert.equal(tokenOverlap('solo beck', 'Acme Corporation'), 0);
+  });
+
+  it('accepts Kier Group and rejects DE KIER', () => {
+    const picked = pickBestHit(
+      [
+        { label: 'DE KIER', description: 'Wikimedia disambiguation page' },
+        { label: 'Kier Group', description: 'British construction, services and property group' },
+      ],
+      'KIER TRANSPORTATION LIMITED',
+      (h) => h.label
+    );
+    assert.equal(picked.label, 'Kier Group');
   });
 
   it('treats Alibaba display names as people, not companies', () => {
@@ -73,5 +88,18 @@ describe('public contact extractors', () => {
     assert.equal(registrableDomain('www.kier.co.uk'), 'kier.co.uk');
     assert.equal(registrableDomain('www.stc.ac.uk'), 'stc.ac.uk');
     assert.equal(registrableDomain('www.l3harris.com'), 'l3harris.com');
+  });
+
+  it('keeps company-domain role mail and drops broker personal mail', () => {
+    assert.equal(emailBelongsToCompany('ir@kier.co.uk', 'www.kier.co.uk', 'Kier Group'), true);
+    assert.equal(emailBelongsToCompany('uk@howoge.de', 'www.howoge.de', 'HOWOGE Wohnungsbaugesellschaft mbH'), true);
+    assert.equal(emailBelongsToCompany('info@howoge-mieterrat.com', 'www.howoge.de', 'HOWOGE Wohnungsbaugesellschaft mbH'), true);
+    assert.equal(emailBelongsToCompany('robert.chantry@berenberg.com', 'www.kier.co.uk', 'Kier Group'), false);
+  });
+
+  it('tries https www before plain http', () => {
+    const urls = websiteCandidates('http://www.stc.ac.uk');
+    assert.equal(urls[0], 'https://www.stc.ac.uk/');
+    assert.ok(urls.includes('http://www.stc.ac.uk/'));
   });
 });
