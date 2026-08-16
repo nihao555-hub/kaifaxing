@@ -62,7 +62,7 @@ export const config = {
     timezone: process.env.PIPELINE_TZ || 'Asia/Shanghai',
     dailyHour: Number(process.env.PIPELINE_DAILY_HOUR || 7),
     refreshHours: Number(process.env.PIPELINE_REFRESH_HOURS || 6),
-    researchDelayMs: Number(process.env.PIPELINE_RESEARCH_DELAY_MS || 8000),
+    researchDelayMs: Number(process.env.PIPELINE_RESEARCH_DELAY_MS || 2500),
     backlogPerDay: Number(process.env.PIPELINE_BACKLOG_PER_DAY || 30),
     alibabaPages: Number(process.env.PIPELINE_ALIBABA_PAGES || 8),
     govLimit: Number(process.env.PIPELINE_GOV_LIMIT || 40),

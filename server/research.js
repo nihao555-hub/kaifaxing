@@ -137,12 +137,47 @@ export function isPersonLikeDisplayName(name) {
     || /(?:^|[\s,])(?:b\.v\.?|n\.v\.?|s\.a\.?|l\.l\.c\.?|gmbh|ltd|llc|plc|inc)(?:$|[\s,])/i.test(s)
     || INSTITUTION_RE.test(s)
   ) return false;
+  if (/@/.test(s)) return true;
+  if (/[\u0400-\u04FF\u0600-\u06FF\u3040-\u30FF\u4E00-\u9FFF]/.test(s)) return true;
   const words = s.split(/\s+/).filter(Boolean);
-  if (s.length > 42) return false;
-  if (words.length === 1) return /^[A-Za-z][A-Za-z.'-]{2,24}$/.test(words[0]);
-  if (words.length > 4) return false;
+  if (words.some((w) => /^(company|group|trading|services|service|enterprise|industries|holdings|international|technologies|solutions|systems)$/i.test(w))) {
+    return false;
+  }
+  if (words.length === 1) return /^[\p{L}][\p{L}.'-]{2,24}$/u.test(words[0]);
+  if (words.length > 4 || s.length > 42) return true;
+  if (words.some((w) => w.replace(/\./g, '').length <= 2)) return true;
   if (words.every((w) => w.replace(/\./g, '').length <= 2)) return true;
-  return words.length >= 2 && words.every((w) => /^[A-Za-z][A-Za-z.'-]{1,20}$/.test(w));
+  return words.length >= 2 && words.every((w) => /^[\p{L}][\p{L}.'-]{0,20}$/u.test(w));
+}
+
+export function skippedLeadReport(customer) {
+  const company = String(customer.company || customer.name || '').trim();
+  const kyb = gradeKyb({ personLike: true, legalName: company });
+  return {
+    status: 'done',
+    updatedAt: new Date().toISOString(),
+    confidence: 'low',
+    legalName: company,
+    website: '',
+    emails: [],
+    phones: [],
+    address: '',
+    facts: [customer.country && { label: '国家/地区', value: customer.country, source: '入库' }].filter(Boolean),
+    sources: customer.sourceUrl ? [{ title: '原始询盘/公告', url: customer.sourceUrl }] : [],
+    steps: [
+      { key: 'entity', label: '主体核验', ok: false, detail: '只有个人显示名，公开库无法核到公司' },
+      { key: 'website', label: '官网定位', ok: false, detail: '无线索，未猜测域名' },
+      { key: 'contact', label: '公开联系方式', ok: false, detail: '不猜测私人邮箱，不从社交资料扒信' },
+      { key: 'search', label: '搜索公式', ok: false, detail: '个人昵称不拿去撞搜索结果' },
+    ],
+    brief: `${company || '该询盘'} 只有个人显示名或产品句，公开库核不到公司，未跑谷歌公式。`,
+    notes: ['阿里等公开 RFQ 卡片经常只有买家昵称。没有公司全称时，外贸公式到此结束。'],
+    kyb,
+    grade: 'C',
+    nextAction: kyb.nextAction,
+    needRegNo: true,
+    canApplyEmail: false,
+  };
 }
 
 export function isPersonLikeLead(customer) {

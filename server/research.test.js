@@ -6,6 +6,7 @@ import {
   tokenOverlap,
   isPersonLikeDisplayName,
   isPersonLikeLead,
+  skippedLeadReport,
   isPlausibleEmail,
   scoreEmail,
   extractEmails,
@@ -78,8 +79,19 @@ describe('company name helpers', () => {
     assert.equal(isPersonLikeDisplayName('KIER TRANSPORTATION LIMITED'), false);
     assert.equal(isPersonLikeDisplayName('L3HARRIS TECHNOLOGIES, INC.'), false);
     assert.equal(isPersonLikeDisplayName('A. Kroeze Beheer B.V.'), false);
+    assert.equal(isPersonLikeDisplayName('Linda N'), true);
+    assert.equal(isPersonLikeDisplayName('J Dykstra'), true);
+    assert.equal(isPersonLikeDisplayName('Sam W'), true);
+    assert.equal(isPersonLikeDisplayName('NMG TECHNICAL SERVICE L.L.C'), false);
+    assert.equal(isPersonLikeDisplayName('Денис Авдеев'), true);
+    assert.equal(isPersonLikeDisplayName('José Araya'), true);
+    assert.equal(isPersonLikeDisplayName('@gmail.com @gmail.com'), true);
+    assert.equal(isPersonLikeDisplayName('AHSN COMPANY'), false);
     assert.equal(isPersonLikeLead({ company: 'CHRIS', name: 'chris V' }), true);
     assert.equal(isPersonLikeLead({ company: 'L3HARRIS TECHNOLOGIES, INC.', name: 'John' }), false);
+    const skipped = skippedLeadReport({ company: 'Linda N', country: 'Netherlands' });
+    assert.equal(skipped.grade, 'C');
+    assert.equal(skipped.status, 'done');
   });
 
   it('keeps distinctive tokens', () => {

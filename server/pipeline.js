@@ -1,7 +1,7 @@
 import { config } from './config.js';
 import { db, save, getCustomer, isRfqLead, isDemoCustomer, logActivity } from './store.js';
 import { crawlAllAndImport } from './rfq.js';
-import { researchLead, isPersonLikeLead, isPlausibleEmail } from './research.js';
+import { researchLead, isPersonLikeLead, isPlausibleEmail, skippedLeadReport } from './research.js';
 import { VERIFIED_SOURCES } from './openSources.js';
 import { isForwarderName } from './kyb.js';
 
@@ -74,7 +74,36 @@ function ownInbox(email) {
   return String(email || '').toLowerCase() === String(config.smtp.user || '').toLowerCase();
 }
 
+export function stampPersonLikeLeads() {
+  let stamped = 0;
+  for (const c of db.customers) {
+    if (!isRfqLead(c)) continue;
+    if (c.research?.status === 'running') c.research = { ...(c.research || {}), status: null };
+    if (!isPersonLikeLead(c)) continue;
+    if (c.research?.status === 'done') continue;
+    c.research = skippedLeadReport(c);
+    stamped += 1;
+  }
+  if (stamped) save();
+  return stamped;
+}
+
+export function pruneResearchQueue() {
+  const p = ensurePipeline();
+  const before = p.queue.length;
+  p.queue = p.queue.filter((id) => {
+    const c = getCustomer(id);
+    if (!c) return false;
+    if (isPersonLikeLead(c)) return false;
+    if (c.research?.status === 'done') return false;
+    return true;
+  });
+  if (p.queue.length !== before) save();
+  return before - p.queue.length;
+}
+
 export function enqueuePendingResearch({ limit = 800 } = {}) {
+  pruneResearchQueue();
   const pending = [];
   for (const c of db.customers) {
     if (!isRfqLead(c)) continue;
