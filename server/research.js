@@ -22,6 +22,7 @@ import {
 import {
   searchCompanyPages,
   scoreResearchUrl,
+  hostFromWebsite,
 } from './searchDorks.js';
 import { gradeKyb, hasVerifiedEntity, hasProcurementTrace, isForwarderName } from './kyb.js';
 import { screenSanctions } from './sanctions.js';
@@ -86,6 +87,9 @@ const JUNK_DOMAIN = [
   'example.com', 'example.org', 'w3.org', 'schema.org', 'sentry.io', 'google.com', 'gstatic.com',
   'cloudflare.com', 'github.com', 'facebook.com', 'twitter.com', 'linkedin.com', 'youtube.com',
   'gravatar.com', 'wordpress.org', 'jquery.com', 'cloudfront.net',
+  'gmail.com', 'yahoo.com', 'ymail.com', 'hotmail.com', 'outlook.com', 'live.com', 'msn.com',
+  'icloud.com', 'me.com', 'aol.com', 'protonmail.com', 'proton.me',
+  'qq.com', '163.com', '126.com', 'yeah.net', 'sina.com', 'sohu.com',
 ];
 
 const EMAIL_RE = /[a-zA-Z0-9][a-zA-Z0-9._%+-]{0,63}@[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,24}/g;
@@ -213,6 +217,57 @@ export function extractPhones(html) {
 
 function pageTitle(html) {
   return cheerioTitle(html);
+}
+
+export function selectSearchContactUrls(urls, { max = 5 } = {}) {
+  return [...new Set((urls || []).filter(Boolean))]
+    .filter((u) => !/\.pdf(\?|$)/i.test(u))
+    .sort((a, b) => scoreResearchUrl(b) - scoreResearchUrl(a))
+    .slice(0, max);
+}
+
+export function mergeSearchSnippetEmails(snippetEmails, { websiteHost = '', company = '', source = '搜索摘要' } = {}) {
+  const extra = [];
+  const seen = new Set();
+  for (const raw of snippetEmails || []) {
+    const email = String(raw || '').toLowerCase();
+    if (seen.has(email)) continue;
+    if (!isPlausibleEmail(email) || !emailBelongsToCompany(email, websiteHost, company)) continue;
+    seen.add(email);
+    extra.push({
+      email,
+      role: email.split('@')[0],
+      score: scoreEmail(email, websiteHost),
+      source,
+    });
+  }
+  return extra;
+}
+
+export function mergeEmailLists(existing, extras) {
+  const map = new Map((existing || []).map((e) => [e.email, e]));
+  for (const item of extras || []) {
+    if (!item?.email) continue;
+    const prev = map.get(item.email);
+    if (!prev || item.score > prev.score) map.set(item.email, item);
+  }
+  return [...map.values()].sort((a, b) => b.score - a.score).slice(0, 8);
+}
+
+function sameRegistrableHost(a, b) {
+  const da = registrableDomain(a);
+  const db = registrableDomain(b);
+  return Boolean(da && db && da === db);
+}
+
+function emailSourceLabel(emails) {
+  const sources = [...new Set((emails || []).map((e) => e.source).filter(Boolean))];
+  const fromSearch = sources.some((s) => /搜索/.test(s));
+  const fromSite = sources.some((s) => /官网/.test(s));
+  const list = emails.map((e) => e.email).join('、');
+  if (fromSite && fromSearch) return `官网和搜索引擎找到 ${list}`;
+  if (fromSearch) return `搜索引擎找到 ${list}`;
+  return `官网公开页找到 ${list}`;
 }
 
 function pageMentionsCompany(html, company) {
@@ -629,6 +684,58 @@ async function harvestContacts(website, company, { extraUrls = [] } = {}) {
   };
 }
 
+async function harvestSearchContacts({ urls = [], snippetEmails = [], company, website, fetchPages = true } = {}) {
+  const host = hostFromWebsite(website);
+  const emails = mergeSearchSnippetEmails(snippetEmails, { websiteHost: host, company, source: '搜索摘要' });
+  const pages = [];
+  const phones = [];
+  if (!fetchPages) {
+    return { emails: mergeEmailLists([], emails), phones: [], pages };
+  }
+
+  for (const url of selectSearchContactUrls(urls, { max: 5 })) {
+    const r = await fetchText(url, { accept: 'text/html', timeout: 10000 });
+    if (!r.ok || !r.text) continue;
+    if (isAssetUrl(r.url) || !/<html|mailto:|contact|@/i.test(r.text.slice(0, 4000))) continue;
+    const sameHost = host ? sameRegistrableHost(r.url, host) : false;
+    if (!sameHost && !pageMentionsCompany(r.text, company)) continue;
+    pages.push({ url: r.url, title: pageTitle(r.text) || url });
+    let pageHost = host;
+    try { pageHost = host || new URL(r.url).hostname; } catch { /* ignore */ }
+    for (const item of extractEmails(r.text, { websiteHost: pageHost })) {
+      if (!emailBelongsToCompany(item.email, pageHost, company)) continue;
+      emails.push({ ...item, source: '搜索结果页' });
+    }
+    for (const p of extractPhones(r.text)) phones.push(p);
+  }
+
+  return {
+    emails: mergeEmailLists([], emails),
+    phones: [...new Set(phones)].slice(0, 8),
+    pages,
+  };
+}
+
+function mergeSearchHits(base, extra) {
+  const seen = new Set(base.urls || []);
+  const urls = [...(base.urls || [])];
+  for (const u of extra.urls || []) {
+    if (seen.has(u)) continue;
+    seen.add(u);
+    urls.push(u);
+  }
+  return {
+    ...base,
+    queries: [...new Set([...(base.queries || []), ...(extra.queries || [])])],
+    urls,
+    items: [...(base.items || []), ...(extra.items || [])],
+    snippetEmails: [...new Set([...(base.snippetEmails || []), ...(extra.snippetEmails || [])])],
+    officialGuess: base.officialGuess || extra.officialGuess || '',
+    engine: base.engine || extra.engine || '',
+    notes: [...(base.notes || []), ...(extra.notes || [])],
+  };
+}
+
 function fallbackBrief({ customer, legalName, extract, emails, website, personLike, relatedNote }) {
   const bits = [];
   bits.push(`${customer.company || customer.name} 来自 ${customer.source || '公开询盘'}，国家/地区 ${customer.country || '未知'}。`);
@@ -714,7 +821,8 @@ export async function researchLead(customer, { useAi = true } = {}) {
         : 'Wikidata / GLEIF / ROR / 各国开放登记没有足够匹配',
     });
 
-    search = await searchCompanyPages(legalName || company, { maxQueries: 2 });
+    const searchedWebsite = website;
+    search = await searchCompanyPages(legalName || company, { maxQueries: 4, website: searchedWebsite });
     notes.push(...search.notes);
     const openWebsite = website;
     if (search.officialGuess && !website) website = search.officialGuess;
@@ -758,27 +866,32 @@ export async function researchLead(customer, { useAi = true } = {}) {
       notes.push(`外贸搜索公式定位到 ${harvested.website}`);
     }
 
-    if (website && search.snippetEmails.length) {
-      let host = '';
-      try { host = new URL(website).hostname; } catch { /* ignore */ }
-      const extra = [];
-      for (const raw of search.snippetEmails) {
-        if (!isPlausibleEmail(raw) || !emailBelongsToCompany(raw, host, legalName || company)) continue;
-        extra.push({
-          email: raw,
-          role: raw.split('@')[0],
-          score: scoreEmail(raw, host),
-          source: '搜索摘要',
-        });
+    if (!(harvested.emails || []).length && website && hostFromWebsite(website) !== hostFromWebsite(searchedWebsite)) {
+      const siteSearch = await searchCompanyPages(legalName || company, { maxQueries: 2, website });
+      search = mergeSearchHits(search, siteSearch);
+      notes.push(...siteSearch.notes);
+      if (harvested.website) {
+        const again = await harvestContacts(website, legalName || company, { extraUrls: search.urls });
+        if (again.emails?.length || again.pages?.length) harvested = { ...harvested, ...again, emails: again.emails?.length ? again.emails : harvested.emails };
       }
-      if (extra.length) {
-        const map = new Map((harvested.emails || []).map((e) => [e.email, e]));
-        for (const item of extra) {
-          const prev = map.get(item.email);
-          if (!prev || item.score > prev.score) map.set(item.email, item);
-        }
-        harvested = { ...harvested, emails: [...map.values()].sort((a, b) => b.score - a.score).slice(0, 8) };
-      }
+    }
+
+    const fromSearch = await harvestSearchContacts({
+      urls: search.urls,
+      snippetEmails: search.snippetEmails,
+      company: legalName || company,
+      website,
+      fetchPages: !(harvested.emails || []).length,
+    });
+    if (fromSearch.emails.length || fromSearch.pages.length) {
+      harvested = {
+        ...harvested,
+        emails: mergeEmailLists(harvested.emails, fromSearch.emails),
+        phones: [...new Set([...(harvested.phones || []), ...fromSearch.phones])].slice(0, 8),
+        pages: [...(harvested.pages || []), ...fromSearch.pages.filter((p) => !(harvested.pages || []).some((x) => x.url === p.url))],
+        tools: { ...(harvested.tools || {}), searchDorks: true },
+      };
+      if (fromSearch.emails.length) notes.push(`搜索引擎挖到角色邮箱：${fromSearch.emails.map((e) => e.email).join('、')}`);
     }
 
     harvestedTools = { ...(harvested.tools || {}), searchDorks: Boolean(harvested.tools?.searchDorks || search.urls.length) };
@@ -810,17 +923,17 @@ export async function researchLead(customer, { useAi = true } = {}) {
       label: '公开联系方式',
       ok: emails.length > 0,
       detail: emails.length
-        ? `官网公开页找到 ${emails.map((e) => e.email).join('、')}`
+        ? emailSourceLabel(emails)
         : website
-          ? '官网可打开，联系方式多为表单，没有明文角色邮箱'
-          : '没有可核验的公开邮箱',
+          ? '官网和搜索都没有明文角色邮箱，联系方式多为表单，不能编造 purchase@ 去撞'
+          : '搜索公式没有挖到可核验的公开角色邮箱',
     });
     steps.push({
       key: 'search',
       label: '搜索公式',
-      ok: search.urls.length > 0,
-      detail: search.urls.length
-        ? `${search.engine === 'google' ? '谷歌' : '必应'}解析到 ${search.urls.length} 个公开页`
+      ok: search.urls.length > 0 || search.snippetEmails.length > 0,
+      detail: search.urls.length || search.snippetEmails.length
+        ? `${search.engine === 'google' ? '谷歌' : '必应'}解析到 ${search.urls.length} 个公开页${search.snippetEmails.length ? `，摘要里看到 ${search.snippetEmails.length} 个邮箱线索` : ''}`
         : '搜索没有可用的背调页',
     });
   }

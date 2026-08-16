@@ -15,6 +15,8 @@ import {
   pickBestHit,
   emailBelongsToCompany,
   queriesFor,
+  selectSearchContactUrls,
+  mergeSearchSnippetEmails,
 } from './research.js';
 
 describe('company name helpers', () => {
@@ -111,6 +113,29 @@ describe('public contact extractors', () => {
     assert.equal(isPlausibleEmail('info@stc.ac.uk'), true);
     assert.equal(isPlausibleEmail('5464-0uk@howoge.de'), false);
     assert.equal(isPlausibleEmail('ir@kier.co.uktelephone'), false);
+    assert.equal(isPlausibleEmail('buyer@gmail.com'), false);
+    assert.equal(isPlausibleEmail('sales@outlook.com'), false);
+    assert.equal(isPlausibleEmail('info@qq.com'), false);
+  });
+
+  it('keeps search-snippet role mail on the company domain and drops personal inboxes', () => {
+    const extra = mergeSearchSnippetEmails(
+      ['info@stc.ac.uk', 'buyer@gmail.com', 'INFO@stc.ac.uk', 'random@berenberg.com'],
+      { websiteHost: 'www.stc.ac.uk', company: 'Tyne Coast College' }
+    );
+    assert.deepEqual(extra.map((e) => e.email), ['info@stc.ac.uk']);
+    assert.equal(extra[0].source, '搜索摘要');
+  });
+
+  it('ranks search contact pages above PDFs and homepages', () => {
+    const picked = selectSearchContactUrls([
+      'https://www.stc.ac.uk/about.pdf',
+      'https://www.stc.ac.uk/',
+      'https://www.stc.ac.uk/contact-us',
+      'https://www.stc.ac.uk/impressum',
+    ], { max: 2 });
+    assert.ok(picked[0].includes('/contact-us') || picked[0].includes('/impressum'));
+    assert.ok(!picked.some((u) => /\.pdf/i.test(u)));
   });
 
   it('extracts international phones', () => {

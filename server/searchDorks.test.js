@@ -57,14 +57,21 @@ const TYNE_JUNK_RSS = `
 `;
 
 describe('research dorks', () => {
-  it('builds quoted contact / role-email / official-site formulas', () => {
+  it('builds quoted contact / role-email formulas without a known site', () => {
     const q = researchDorks('Tyne Coast College');
     assert.equal(q.length, 3);
     assert.ok(q[0].startsWith('"Tyne Coast College"'));
     assert.ok(/contact us|procurement|impressum/i.test(q[0]));
     assert.ok(/info@|procurement@/i.test(q[1]));
-    assert.ok(/official|about us/i.test(q[2]));
+    assert.ok(/intitle:contact|email us/i.test(q[2]));
     assert.deepEqual(researchDorks(''), []);
+  });
+
+  it('adds site: and @domain formulas when the official website is known', () => {
+    const q = researchDorks('Tyne Coast College', { website: 'https://www.stc.ac.uk' });
+    assert.ok(q.some((s) => /site:stc\.ac\.uk/i.test(s)));
+    assert.ok(q.some((s) => /info@stc\.ac\.uk|sales@stc\.ac\.uk/i.test(s)));
+    assert.ok(q[0].startsWith('site:stc.ac.uk'));
   });
 });
 
@@ -151,5 +158,18 @@ describe('bing rss parse', () => {
     const { urls } = parseBingRss(TYNE_JUNK_RSS, 'Tyne Coast College');
     assert.deepEqual(urls, []);
     assert.equal(pickOfficialSite(urls, 'Tyne Coast College'), '');
+  });
+
+  it('keeps a same-site Contact us title when siteHost is known', () => {
+    const rss = `
+<rss><channel>
+  <item><title>Contact us</title><link>https://www.stc.ac.uk/contact</link><description>Get in touch</description></item>
+  <item><title>Wordle</title><link>https://www.nytimes.com/games/wordle</link><description>Daily game</description></item>
+</channel></rss>`;
+    const { urls } = parseBingRss(rss, 'Tyne Coast College', { siteHost: 'stc.ac.uk' });
+    assert.ok(urls.includes('https://www.stc.ac.uk/contact'));
+    assert.ok(!urls.some((u) => /wordle/i.test(u)));
+    const dropped = parseBingRss(rss, 'Tyne Coast College');
+    assert.ok(!dropped.urls.includes('https://www.stc.ac.uk/contact'));
   });
 });

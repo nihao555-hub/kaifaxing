@@ -28,15 +28,38 @@ export function companyTokens(company) {
     .filter((t) => t.length >= 3 && !LEGAL_STOP.has(t));
 }
 
-/** 外贸背调常用公式：找官网、联系页、采购页，不是扒私人邮箱 */
-export function researchDorks(company) {
+export function hostFromWebsite(website) {
+  try {
+    const raw = String(website || '').trim();
+    if (!raw) return '';
+    const u = new URL(/^https?:/i.test(raw) ? raw : `https://${raw}`);
+    return u.hostname.replace(/^www\./i, '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function sameSiteHost(url, siteHost) {
+  const host = hostFromWebsite(url);
+  const site = String(siteHost || '').replace(/^www\./i, '').toLowerCase();
+  if (!host || !site) return false;
+  return host === site || host.endsWith(`.${site}`) || site.endsWith(`.${host}`);
+}
+
+/** 外贸找联系方式的搜索公式：site:域名 + 角色邮箱 + 联系页，不是扒私人邮箱 */
+export function researchDorks(company, { website } = {}) {
   const q = quotedName(company);
   if (q.length < 5) return [];
-  return [
-    `${q} (contact OR "contact us" OR procurement OR purchasing OR impressum)`,
-    `${q} (info@ OR procurement@ OR purchasing@ OR sales@)`,
-    `${q} (official OR website OR "about us" OR homepage)`,
-  ];
+  const host = hostFromWebsite(website);
+  const out = [];
+  if (host) {
+    out.push(`site:${host} (contact OR "contact us" OR impressum OR kontakt OR info@ OR sales@ OR procurement@)`);
+    out.push(`${q} (@${host} OR info@${host} OR sales@${host})`);
+  }
+  out.push(`${q} (contact OR "contact us" OR impressum OR kontakt OR procurement OR purchasing)`);
+  out.push(`${q} (info@ OR sales@ OR procurement@ OR purchasing@ OR enquiry@ OR inquiry@ OR contact@)`);
+  out.push(`${q} (intitle:contact OR intitle:impressum OR "email us" OR "e-mail")`);
+  return out;
 }
 
 function tryDecode(s) {
@@ -194,9 +217,10 @@ function citeToUrl(text) {
   return '';
 }
 
-function acceptItem(url, company, item) {
+function acceptItem(url, company, item, { siteHost } = {}) {
   const n = normalizeUrl(url);
   if (!n || !isUsefulResearchUrl(n, company)) return '';
+  if (siteHost && sameSiteHost(n, siteHost)) return n;
   if (item && (item.title || item.desc) && !resultRelevant({ ...item, url: n }, company)) return '';
   if (!item?.title && !item?.desc) {
     const tokens = companyTokens(company);
@@ -209,7 +233,7 @@ function acceptItem(url, company, item) {
   return n;
 }
 
-export function parseBingRss(xml, company) {
+export function parseBingRss(xml, company, { siteHost } = {}) {
   const items = [];
   const urls = [];
   const seen = new Set();
@@ -218,7 +242,7 @@ export function parseBingRss(xml, company) {
     const title = decodeEntities((block.match(/<title>([\s\S]*?)<\/title>/i) || [])[1] || '').trim();
     const link = decodeEntities((block.match(/<link>([\s\S]*?)<\/link>/i) || [])[1] || '').trim();
     const desc = decodeEntities((block.match(/<description>([\s\S]*?)<\/description>/i) || [])[1] || '').trim();
-    const n = acceptItem(link, company, { title, desc });
+    const n = acceptItem(link, company, { title, desc }, { siteHost });
     if (!n || seen.has(n)) continue;
     seen.add(n);
     urls.push(n);
@@ -228,7 +252,7 @@ export function parseBingRss(xml, company) {
   return { urls, items, snippetEmails };
 }
 
-export function parseSearchHtml(html, company) {
+export function parseSearchHtml(html, company, { siteHost } = {}) {
   const $ = cheerio.load(html || '');
   const urls = [];
   const items = [];
@@ -236,7 +260,7 @@ export function parseSearchHtml(html, company) {
 
   const push = (raw, meta = {}) => {
     const decoded = decodeBingUrl(raw) || String(raw || '').trim();
-    const n = acceptItem(decoded, company, meta);
+    const n = acceptItem(decoded, company, meta, { siteHost });
     if (!n || seen.has(n)) return;
     seen.add(n);
     urls.push(n);
@@ -332,8 +356,20 @@ export function pickOfficialSite(urls, company, items = []) {
   return ranked[0]?.s >= 8 ? ranked[0].u : '';
 }
 
-export async function searchCompanyPages(company, { maxQueries = 2 } = {}) {
-  const queries = researchDorks(company).slice(0, maxQueries);
+function mergeParsed(into, extra) {
+  const seen = new Set(into.urls);
+  for (const u of extra.urls || []) {
+    if (seen.has(u)) continue;
+    seen.add(u);
+    into.urls.push(u);
+  }
+  into.items.push(...(extra.items || []));
+  into.snippetEmails.push(...(extra.snippetEmails || []));
+}
+
+export async function searchCompanyPages(company, { maxQueries = 4, website } = {}) {
+  const queries = researchDorks(company, { website }).slice(0, maxQueries);
+  const siteHost = hostFromWebsite(website);
   const urls = [];
   const items = [];
   const snippetEmails = [];
@@ -342,28 +378,29 @@ export async function searchCompanyPages(company, { maxQueries = 2 } = {}) {
   let engine = '';
 
   for (const query of queries) {
-    let parsed = { urls: [], items: [], snippetEmails: [] };
+    const parsed = { urls: [], items: [], snippetEmails: [] };
+    const wantHtml = /@|email|intitle:contact|site:/i.test(query);
     try {
       const rss = await searchBingRss(query);
       if (rss.status === 200 && rss.html && /<item>/i.test(rss.html)) {
-        parsed = parseBingRss(rss.html, company);
+        mergeParsed(parsed, parseBingRss(rss.html, company, { siteHost }));
         if (parsed.urls.length) engine = engine || 'bing';
       }
 
-      if (!parsed.urls.length) {
+      if (wantHtml || !parsed.urls.length) {
         const bing = await searchBing(query);
         if (bing.status === 200 && bing.html && !isBlockedSearchPage(bing.html)) {
-          parsed = parseSearchHtml(bing.html, company);
+          mergeParsed(parsed, parseSearchHtml(bing.html, company, { siteHost }));
           if (parsed.urls.length) engine = engine || 'bing';
         } else if (bing.status && bing.status !== 200) {
           notes.push(`必应 ${bing.status}：${query.slice(0, 40)}`);
         }
       }
 
-      if (!parsed.urls.length) {
+      if (!parsed.urls.length && !parsed.snippetEmails.length) {
         const google = await searchGoogle(query);
         if (google.status === 200 && google.html && !isBlockedSearchPage(google.html)) {
-          parsed = parseSearchHtml(google.html, company);
+          mergeParsed(parsed, parseSearchHtml(google.html, company, { siteHost }));
           if (parsed.urls.length) engine = engine || 'google';
         } else if (google.html && isBlockedSearchPage(google.html)) {
           notes.push('谷歌结果页被 JS/验证码挡住，已改用必应公开结果');

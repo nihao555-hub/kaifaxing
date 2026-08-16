@@ -831,7 +831,7 @@ function EmailPick({ emails, pickedEmail, setPickedEmail, name }) {
           <input type="radio" name={name} checked={pickedEmail === e.email} onChange={() => setPickedEmail(e.email)} />
           <span className="text-[12px] text-[#334155]">{i + 1}. {e.email}</span>
           <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-600">
-            {e.role === 'info' || e.role === 'enquiry' || e.role === 'contact' ? '官网' : (e.role || '官网')}
+            {e.source || (e.role === 'info' || e.role === 'enquiry' || e.role === 'contact' ? '官网' : (e.role || '官网'))}
           </span>
           <span className="ml-auto text-[10px] text-emerald-600">可用</span>
         </label>
@@ -879,7 +879,7 @@ function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail }) {
         {emails.length ? (
           <EmailPick emails={emails} pickedEmail={pickedEmail} setPickedEmail={setPickedEmail} name="email" />
         ) : (
-          <p className="text-[12px] text-[#94a3b8]">还没有可核验的公开角色邮箱。入库后会自动背调；也可点底部「挖邮箱」。</p>
+          <p className="text-[12px] text-[#94a3b8]">还没有可核验的公开角色邮箱。背调会用必应/谷歌的 site:域名、info@、联系页公式去挖官网角色邮箱，不会猜私人邮箱。</p>
         )}
         {research?.phones?.length > 0 && (
           <div className="text-[12px] text-[#475569]">公开电话：{research.phones.join(' · ')}</div>
@@ -940,7 +940,7 @@ function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail }) {
         ) : (
           <p className="text-[12px] leading-relaxed text-[#64748b]">
             {research?.status === 'done'
-              ? '公开页没有明文角色邮箱。大公司常用联系表单；只有昵称的询盘核不到公司主体。'
+              ? '官网和搜索公式都没有明文角色邮箱。大公司常用联系表单；只有昵称的询盘核不到公司主体。不会猜私人邮箱。'
               : '自动背调完成后，核到的官网角色邮箱会显示在这里。'}
           </p>
         )}
