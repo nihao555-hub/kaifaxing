@@ -218,8 +218,16 @@ export async function suggestClearbit(company) {
   return { name: picked.name || '', website: withScheme(picked.domain) };
 }
 
+const COUNTRY_EN = {
+  英国: 'United Kingdom', 美国: 'United States', 法国: 'France', 德国: 'Germany',
+  荷兰: 'Netherlands', 挪威: 'Norway', 芬兰: 'Finland', 印度: 'India',
+  中国: 'China', 日本: 'Japan', 韩国: 'South Korea', 澳大利亚: 'Australia',
+  加拿大: 'Canada', 巴西: 'Brazil', 意大利: 'Italy', 西班牙: 'Spain',
+  波兰: 'Poland', 捷克: 'Czechia', 瑞典: 'Sweden', 丹麦: 'Denmark',
+};
+
 export async function searchNominatim(company, country = '') {
-  const q = [company, country].filter(Boolean).join(', ');
+  const q = [company, COUNTRY_EN[country] || country].filter(Boolean).join(', ');
   if (String(company || '').trim().length < 5) return null;
   const data = await getJson(
     `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&addressdetails=1&extratags=1&limit=5`,
@@ -277,6 +285,7 @@ const RA_KIND = {
   RA000681: 'cnpj',
   RA000585: 'ch',
   RA000196: 'ch',
+  RA000791: 'ch',
 };
 
 export function shouldQuerySirene(country, jurisdiction) {
@@ -305,7 +314,10 @@ function companyHouseUrl(number) {
 async function lookupByRegistration(facts) {
   const ra = String(factVal(facts, /登记机关|RA code/i) || '').toUpperCase();
   const raw = factVal(facts, /登记号|注册号|registeredAs/i);
-  const kind = RA_KIND[ra] || '';
+  const jurisdiction = factVal(facts, /法域/);
+  let kind = RA_KIND[ra] || '';
+  const compact = String(raw || '').replace(/\s+/g, '');
+  if (!kind && /^(GB|UK)/i.test(jurisdiction) && /^\d{6,8}$/.test(compact)) kind = 'ch';
   if (!kind || !raw) return { facts: [], sources: [], website: '' };
   const extra = [];
   const sources = [];
