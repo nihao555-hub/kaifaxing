@@ -15,16 +15,14 @@ const NAMED_ORG_RE = /(?:my\s+company\s+name\s+is|my\s+company\s+is\s+called|com
 
 const ORG_TOKEN = /\b(Ltd|Limited|LLC|Inc|GmbH|SARL|PLC|Authority|Hospital|College|University|Services|Equipment|Supplies|Department|Ministry|Council|Agency|Institute|Foundation|Clinic|School|Bureau|Commission|Association|Designs?|Healthcare|Standard|Quality)\b/i;
 
-function cleanHintName(raw) {
-  return String(raw || '')
-    .replace(/\([^)]{0,40}$/, '')
-    .replace(/[.,;:]+$/, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+function cleanHintName(raw, { cutSentence = false } = {}) {
+  let s = String(raw || '').replace(/\([^)]{0,40}$/, '');
+  if (cutSentence) s = s.replace(/\.(We|Please|I|Need|Looking|Hello)\b.*$/i, '');
+  return s.replace(/[.,;:]+$/, '').replace(/\s+/g, ' ').trim();
 }
 
 function looksLikeNamedOrg(name) {
-  const words = cleanHintName(name).split(/\s+/).filter(Boolean);
+  const words = cleanHintName(name, { cutSentence: true }).split(/\s+/).filter(Boolean);
   const kept = [];
   for (const w of words) {
     if (/^(and|&|of|the|for)$/i.test(w)) {

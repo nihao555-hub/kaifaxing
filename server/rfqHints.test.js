@@ -25,7 +25,7 @@ describe('extractCompanyHintFromText', () => {
       'Apache S.A',
     );
     assert.equal(
-      extractCompanyHintFromText('writing on behalf of Tobago Healthcare Equipment and Supplies'),
+      extractCompanyHintFromText('writing on behalf of Tobago Healthcare Equipment and Supplies.We need towels'),
       'Tobago Healthcare Equipment and Supplies',
     );
     assert.equal(
