@@ -402,8 +402,8 @@ export function listSources() {
       auth: '卖家开放平台',
       ready: alibabaReady(),
       note: alibabaReady()
-        ? '已配置官方 app_key / session，走 alibaba.icbu.rfq.search。'
-        : '可选：卖家应用 ALIBABA_APP_KEY / SECRET / SESSION。公开列表已可先用，不必等 Key。',
+        ? '已配置官方 app_key / session。搜索列表未必带公司名；详情/邮箱通常要报价权益。不会回填已入库的公开昵称卡。'
+        : '可选卖家应用。未实跑证实能返回法定公司名。公开列表已可先用；昵称卡请在抽屉补主体。',
     },
     {
       key: 'ingest',

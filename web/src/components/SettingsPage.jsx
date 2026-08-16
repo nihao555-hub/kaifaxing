@@ -174,17 +174,14 @@ export default function SettingsPage() {
         <section className="mt-5 max-w-[640px] rounded-xl border border-[#e8edf4] bg-white p-5 shadow-sm">
           <div className="text-[14px] font-medium text-[#1e293b]">阿里国际站（昵称询盘）</div>
           <p className="mt-2 text-[12px] leading-relaxed text-[#64748b]">
-            公开列表大约 96% 只有买家昵称，没有公司名和邮箱。这类不能拿去撞谷歌。
-            要背调，只能：在卖家后台报价后看到法定名，填进询盘抽屉的「补主体」；
-            或配置
-            {' '}
-            <code className="rounded bg-[#f1f5f9] px-1">ALIBABA_APP_KEY / SECRET / SESSION</code>
-            {' '}
-            走官方
+            公开列表大约 96% 只有买家昵称。官方
             {' '}
             <a className="text-primary hover:underline" href="https://open.taobao.com/" target="_blank" rel="noreferrer">alibaba.icbu.rfq.search</a>
-            ，接口若返回 buyer_company_name 会按公司名再查。
-            当前官方 API：{status?.alibabaReady ? '已配置' : '未配置'}。
+            {' '}
+            也不是「填 Key 就能拿到 4.7 万条公司名」。要先有国际站卖家、开放平台应用、ICBU RFQ 权限和会过期的 SESSION；
+            搜索列表通常仍是显示名，公司名/邮箱多半要报价或详情权益后才有。
+            即便配上，也<strong>不会</strong>自动回填已经入库的昵称卡。现成能用的是抽屉里「补主体后再背调」。
+            当前官方 API：{status?.alibabaReady ? '已配置（仍需实跑看返回字段）' : '未配置，也尚未实跑通过'}。
           </p>
         </section>
       </div>
