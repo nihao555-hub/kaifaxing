@@ -14,6 +14,7 @@ import {
   websiteCandidates,
   pickBestHit,
   emailBelongsToCompany,
+  queriesFor,
 } from './research.js';
 
 describe('company name helpers', () => {
@@ -51,6 +52,19 @@ describe('company name helpers', () => {
       (h) => h.label
     );
     assert.equal(picked.label, 'Kier Group');
+  });
+
+  it('accepts a listed parent for a subsidiary legal name', () => {
+    const picked = pickBestHit(
+      [
+        { label: 'Royal Library of Belgium', description: 'national library of Belgium' },
+        { label: 'KBR, Inc.', description: 'American engineering, procurement, and construction company' },
+      ],
+      'KBR WYLE SERVICES, LLC',
+      (h) => h.label
+    );
+    assert.equal(picked.label, 'KBR, Inc.');
+    assert.ok(queriesFor('KIER TRANSPORTATION LIMITED').some((q) => /group|plc/i.test(q)));
   });
 
   it('treats Alibaba display names as people, not companies', () => {

@@ -76,6 +76,31 @@ function ownInbox(email) {
   return String(email || '').toLowerCase() === String(config.smtp.user || '').toLowerCase();
 }
 
+export function enqueuePendingResearch({ limit = 800 } = {}) {
+  const pending = [];
+  for (const c of db.customers) {
+    if (!isRfqLead(c)) continue;
+    if (c.research?.status === 'done' || c.research?.status === 'running') continue;
+    if (isPersonLikeLead(c)) continue;
+    pending.push(c);
+  }
+  pending.sort((a, b) => {
+    const rank = (x) => {
+      if (/USASpending|Contracts Finder|TED|World Bank|SAM/.test(x.source || '')) return 0;
+      const name = `${x.company || ''} ${x.name || ''}`;
+      if (/\b(limited|ltd|inc|gmbh|plc|llc|b\.?v|sarl|pty|pvt|college|university|hospital|council)\b/i.test(name)) return 1;
+      return 2;
+    };
+    return rank(a) - rank(b);
+  });
+  return enqueueResearch(pending.slice(0, Math.min(Math.max(Number(limit) || 800, 1), 4000)));
+}
+
+export function kickResearch() {
+  pumpResearch();
+  return getPipelineState();
+}
+
 export function enqueueResearch(customers = []) {
   const p = ensurePipeline();
   const seen = new Set(p.queue);

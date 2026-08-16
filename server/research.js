@@ -322,8 +322,10 @@ export function pickBestHit(hits, company, getLabel) {
     const orgLike = ORG_HINT.test(`${label} ${desc}`);
     const startsWithFirst = first && String(label).toLowerCase().startsWith(first);
     let score = 0;
+    const parentHint = /group|plc|\binc\b|limited|gmbh|technologies|corporation|services|holdings/i.test(`${label} ${desc}`);
     if (coverage >= 0.8 && (orgLike || companyTokens.length >= 2)) score = 1;
     else if (startsWithFirst && orgLike && labelTokens.length >= 2 && coverage >= 0.5) score = 0.7;
+    else if (startsWithFirst && orgLike && parentHint && first.length >= 3 && coverage >= 0.25) score = 0.62;
     if (score > bestScore) {
       best = { hit, label, score };
       bestScore = score;
@@ -336,7 +338,7 @@ export function pickBestHit(hits, company, getLabel) {
   return best;
 }
 
-function queriesFor(company) {
+export function queriesFor(company) {
   const full = String(company || '').trim();
   const stripped = stripLegalSuffix(full);
   const q = [];
@@ -344,7 +346,13 @@ function queriesFor(company) {
   if (stripped && stripped.toLowerCase() !== full.toLowerCase()) q.push(stripped);
   const tokens = significantTokens(full);
   if (tokens.length >= 2) q.push(tokens.slice(0, 3).join(' '));
-  return [...new Set(q)].slice(0, 4);
+  const hasLegal = new RegExp(LEGAL_SUFFIX_RE.source, 'i').test(full) || INSTITUTION_RE.test(full);
+  if (hasLegal && tokens[0] && tokens[0].length >= 3) {
+    q.push(`${tokens[0]} Group`);
+    q.push(`${tokens[0]} PLC`);
+    q.push(`${tokens[0]} Inc`);
+  }
+  return [...new Set(q)].slice(0, 7);
 }
 
 export function websiteCandidates(url) {

@@ -19,6 +19,8 @@ import {
   runDailySync,
   runLeadResearch,
   enqueueResearch,
+  enqueuePendingResearch,
+  kickResearch,
   applyPublicContact,
   promoteLeads,
 } from './pipeline.js';
@@ -196,6 +198,13 @@ app.get('/api/rfq/leads/:id', (req, res) => {
   const customer = getCustomer(req.params.id);
   if (!customer) return res.status(404).json({ error: '线索不存在' });
   res.json({ customer, research: customer.research || null });
+});
+
+app.post('/api/rfq/leads/research-queue', (req, res) => {
+  const limit = Number(req.body?.limit || 800);
+  const added = enqueuePendingResearch({ limit });
+  const state = kickResearch();
+  res.json({ added, ...state });
 });
 
 app.post('/api/rfq/leads/research-batch', async (req, res) => {
