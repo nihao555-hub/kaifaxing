@@ -1,6 +1,15 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { leadFacets, listCustomers } from './store.js';
+import { leadFacets, listCustomers, isDemoCustomer } from './store.js';
+
+describe('demo customers', () => {
+  it('flags seed example.com rows', () => {
+    assert.equal(isDemoCustomer({ id: 'c1', email: 'a@acme-corp.example.com' }), true);
+    assert.equal(isDemoCustomer({ id: 'rfq1', email: 'info@stc.ac.uk' }), false);
+    assert.equal(isDemoCustomer({ id: 'x', email: 'procurement@acme.example' }), true);
+    assert.equal(isDemoCustomer({ id: 'x', email: '15571870062@163.com' }), true);
+  });
+});
 
 describe('leadFacets', () => {
   it('returns country counts for RFQ leads', () => {

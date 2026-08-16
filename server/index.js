@@ -19,6 +19,7 @@ import {
   runLeadResearch,
   enqueueResearch,
   applyPublicContact,
+  promoteLeads,
 } from './pipeline.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -48,6 +49,7 @@ app.post('/api/customers', (req, res) => {
     country: country || '', timezone: timezone || 'America/New_York',
     industry: industry || '', painPoints: painPoints || '',
     status: 'uncontacted',
+    inOutreach: true,
     lastActivity: new Date().toISOString().slice(0, 10),
   };
   db.customers.unshift(customer);
@@ -221,6 +223,17 @@ app.post('/api/rfq/leads/:id/research', async (req, res) => {
     res.json({ customer, research });
   } catch (err) {
     res.status(err.status || 502).json({ error: `背调失败：${err.message}`, research: customer.research || null });
+  }
+});
+
+app.post('/api/rfq/leads/promote', async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.slice(0, 50) : [];
+  try {
+    const result = await promoteLeads(ids);
+    if (result.promoted.length) startAgent();
+    res.json({ ...result, agent: getAgentState() });
+  } catch (err) {
+    res.status(502).json({ error: `录入开发信失败：${err.message}` });
   }
 });
 

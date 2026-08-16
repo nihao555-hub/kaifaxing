@@ -35,6 +35,11 @@ describe('auto apply rules', () => {
       facts: [],
       emails: [{ email: 'info@chrisvoorkom.nl', role: 'info', score: 96 }],
     }), null);
+    assert.equal(pickAutoEmail({
+      confidence: 'high',
+      facts: [{ source: 'ROR', label: 'ROR 机构库', value: 'Tyne Coast College' }],
+      emails: [{ email: 'info@stc.ac.uk', role: 'info', score: 96 }],
+    })?.email, 'info@stc.ac.uk');
   });
 
   it('flags freight forwarders', () => {

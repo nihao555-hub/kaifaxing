@@ -16,7 +16,7 @@ function formatDate(d) {
 }
 
 // 中间客户名单栏
-export default function CustomerList({ customers, total, selectedId, onSelect, onAdd, onImportRfq }) {
+export default function CustomerList({ customers, total, selectedId, onSelect, onAdd, onImportRfq, onGoLeads }) {
   const [tab, setTab] = useState('all');
   const [keyword, setKeyword] = useState('');
 
@@ -125,7 +125,20 @@ export default function CustomerList({ customers, total, selectedId, onSelect, o
           );
         })}
         {filtered.length === 0 && (
-          <div className="py-10 text-center text-xs text-slate-400">没有符合条件的客户</div>
+          <div className="px-3 py-10 text-center text-xs leading-relaxed text-slate-400">
+            {customers.length === 0 ? (
+              <>
+                开发信名单是空的。到「询盘获客」勾选买家，点「录入开发信」，Agent 会自动研究、写信并按时区发送。
+                {onGoLeads && (
+                  <button type="button" onClick={onGoLeads} className="mt-3 block w-full text-primary hover:underline">
+                    去询盘获客
+                  </button>
+                )}
+              </>
+            ) : (
+              '没有符合条件的客户'
+            )}
+          </div>
         )}
       </div>
 

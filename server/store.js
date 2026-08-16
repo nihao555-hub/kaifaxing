@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { seedCustomers, seedThreads, seedAiPanel } from './data/seed.js';
 import { isPersonLikeDisplayName } from './research.js';
+import { config } from './config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.join(__dirname, 'data', 'db.json');
@@ -23,6 +24,33 @@ function load() {
 
 export const db = load();
 
+export function isDemoCustomer(c) {
+  const email = String(c?.email || '').toLowerCase();
+  const id = String(c?.id || '');
+  const own = String(config.smtp?.user || '').toLowerCase();
+  if (own && email === own) return true;
+  if (/\.example(\.com)?$/.test(email) || email.endsWith('@example.com') || email.endsWith('@example')) return true;
+  if (/^c\d{1,2}$/.test(id)) return true;
+  return false;
+}
+
+export function purgeDemoCustomers() {
+  const keep = [];
+  const removed = new Set();
+  for (const c of db.customers) {
+    if (isDemoCustomer(c)) removed.add(c.id);
+    else keep.push(c);
+  }
+  if (!removed.size) return 0;
+  db.customers = keep;
+  for (const id of removed) {
+    if (db.threads) delete db.threads[id];
+    if (db.aiPanel) delete db.aiPanel[id];
+  }
+  save();
+  return removed.size;
+}
+
 let saveTimer = null;
 export function save() {
   clearTimeout(saveTimer);
@@ -31,12 +59,36 @@ export function save() {
   }, 200);
 }
 
+purgeDemoCustomers();
+backfillOutreachFlag();
+
 export function getCustomer(id) {
   return db.customers.find((c) => c.id === id);
 }
 
 function hasUsableEmail(c) {
   return Boolean(c?.email) && c.agentPhase !== 'need_email';
+}
+
+export function backfillOutreachFlag() {
+  const sentIds = new Set((db.sentLog || []).map((s) => s.customerId));
+  let changed = 0;
+  for (const c of db.customers) {
+    const sent = sentIds.has(c.id) || (db.threads?.[c.id] || []).length > 0;
+    const human = ['following', 'replied'].includes(c.status);
+    if (c.inOutreach && !sent && !human) {
+      c.inOutreach = false;
+      if (['working', 'scheduled', 'paused'].includes(c.agentPhase)) c.agentPhase = null;
+      changed += 1;
+      continue;
+    }
+    if (c.inOutreach || isDemoCustomer(c) || !hasUsableEmail(c)) continue;
+    if (!sent && !human) continue;
+    c.inOutreach = true;
+    changed += 1;
+  }
+  if (changed) save();
+  return changed;
 }
 
 export function isRfqLead(c) {
@@ -76,7 +128,7 @@ export function listCustomers({
   const ctryList = splitCsv(country);
   const items = [];
   for (const c of db.customers) {
-    if (view === 'inbox' && !hasUsableEmail(c)) continue;
+    if (view === 'inbox' && !(hasUsableEmail(c) && c.inOutreach)) continue;
     if (view === 'leads' && !isRfqLead(c)) continue;
     if (srcList.length && !srcList.includes(c.source || '')) continue;
     if (ctryList.length) {

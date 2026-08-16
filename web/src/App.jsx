@@ -83,9 +83,11 @@ export default function App() {
       <Sidebar page={page} onNavigate={setPage} />
       {page === 'leads' ? (
         <LeadsPage
-          onGoOutreach={() => {
+          onGoOutreach={async () => {
             setPage('outreach');
-            refreshCustomers();
+            const list = await refreshCustomers();
+            try { setAgent(await api.startAgent()); } catch { /* ignore */ }
+            if (list?.[0]) setSelectedId(list[0].id);
           }}
         />
       ) : (
@@ -97,6 +99,7 @@ export default function App() {
         onSelect={setSelectedId}
         onAdd={() => setAddOpen(true)}
         onImportRfq={() => setRfqOpen(true)}
+        onGoLeads={() => setPage('leads')}
       />
       <MainPanel
         customer={selected}

@@ -1,4 +1,5 @@
 import { chat, parseJson } from './ai.js';
+import { enrichOpenSources } from './openSources.js';
 
 const UA = 'OutreachAI/1.0 (public due-diligence; +https://github.com/nihao555-hub/kaifaxing)';
 
@@ -423,7 +424,7 @@ async function wikidataLabels(ids) {
   return map;
 }
 
-async function resolveEntity(company) {
+async function resolveEntity(company, country = '') {
   const sources = [];
   const facts = [];
   let website = '';
@@ -528,8 +529,15 @@ async function resolveEntity(company) {
       source: 'GLEIF',
     });
     if (ent.jurisdiction) facts.push({ label: '法域', value: ent.jurisdiction, source: 'GLEIF' });
+    if (ent.registeredAs) facts.push({ label: '登记号', value: String(ent.registeredAs).trim(), source: 'GLEIF' });
+    if (ent.registeredAt?.id) facts.push({ label: '登记机关', value: ent.registeredAt.id, source: 'GLEIF' });
     sources.push({ title: `GLEIF ${attrs.lei}`, url: `https://search.gleif.org/#/record/${attrs.lei}` });
   }
+
+  const open = await enrichOpenSources({ company, country, facts, website });
+  facts.push(...open.facts);
+  sources.push(...open.sources);
+  if (!website && open.website) website = open.website;
 
   return { website, legalName, extract, facts: facts.filter((f) => f.value), sources, relatedNote };
 }
@@ -654,7 +662,7 @@ export async function researchLead(customer, { useAi = true } = {}) {
     steps.push({ key: 'contact', label: '公开联系方式', ok: false, detail: '不猜测私人邮箱，不从社交资料扒信' });
     notes.push('阿里等公开 RFQ 卡片经常只有买家昵称。没有公司全称时，外贸公式到此结束。');
   } else {
-    const resolved = await resolveEntity(company);
+    const resolved = await resolveEntity(company, customer.country);
     website = resolved.website;
     legalName = resolved.legalName || company;
     extract = resolved.extract;
@@ -666,7 +674,9 @@ export async function researchLead(customer, { useAi = true } = {}) {
       key: 'entity',
       label: '主体核验',
       ok: Boolean(resolved.facts.length),
-      detail: resolved.facts.length ? `匹配到 ${legalName}` : 'Wikidata / GLEIF / Wikipedia 没有足够匹配',
+      detail: resolved.facts.length
+        ? `匹配到 ${legalName}`
+        : 'Wikidata / GLEIF / ROR / 各国开放登记没有足够匹配',
     });
 
     let harvested = website
@@ -762,7 +772,7 @@ export async function researchLead(customer, { useAi = true } = {}) {
     ? 'none'
     : emails.length && website
       ? 'high'
-      : website || facts.some((f) => f.source === 'GLEIF' || f.source === 'Wikidata')
+      : website || facts.some((f) => f.source === 'GLEIF' || f.source === 'Wikidata' || f.source === 'ROR' || f.source === 'Sirene' || f.source === 'Brreg')
         ? 'medium'
         : 'low';
 
@@ -806,5 +816,5 @@ function dedupeSources(list) {
     seen.add(url);
     out.push(s);
   }
-  return out.slice(0, 16);
+  return out.slice(0, 24);
 }

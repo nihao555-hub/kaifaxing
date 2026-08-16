@@ -253,25 +253,42 @@ export default function LeadsPage({ onGoOutreach }) {
     }
   };
 
-  const applyContact = async () => {
-    if (!customer || !pickedEmail) return;
-    if (!window.confirm(`把 ${pickedEmail} 写入该线索？若 Agent 正在运行，可能自动给这个公开角色邮箱写开发信。`)) return;
+  const promoteToOutreach = async (ids, { applyEmail } = {}) => {
+    if (!ids.length) return;
     setBusy(true);
     setErr('');
+    setOkMsg('');
     try {
-      const data = await api.rfqApplyContact(customer.id, {
-        email: pickedEmail,
-        website: research?.website || customer.website,
-        company: research?.legalName || customer.company,
-      });
-      setDetail({ customer: data.customer, research });
-      setOkMsg('已录入开发信名单，可到开发信页监控 Agent');
+      if (applyEmail && ids[0]) {
+        await api.rfqApplyContact(ids[0], {
+          email: applyEmail,
+          website: research?.website || customer?.website,
+          company: research?.legalName || customer?.company,
+        });
+      }
+      const promo = await api.rfqPromote(ids);
+      const n = promo.promoted?.length || 0;
+      const skip = promo.skipped?.length || 0;
+      if (!n) {
+        setErr(promo.skipped?.[0]?.reason || '选中的询盘还没有可发信的公开角色邮箱');
+        await load();
+        return;
+      }
+      setOkMsg(`已录入开发信 ${n} 家${skip ? `，跳过 ${skip} 家` : ''}，Agent 已开始自动研究、写信并按时区排期`);
+      setChecked([]);
       await load();
+      onGoOutreach?.();
     } catch (e) {
       setErr(String(e.message || e));
     } finally {
       setBusy(false);
     }
+  };
+
+  const applyContact = async () => {
+    if (!customer) return;
+    if (pickedEmail && !window.confirm(`把 ${pickedEmail} 写入该线索并录入开发信？Agent 会自动给这个公开角色邮箱写信。`)) return;
+    await promoteToOutreach([customer.id], { applyEmail: pickedEmail || undefined });
   };
 
   const syncToday = async () => {
@@ -503,6 +520,14 @@ export default function LeadsPage({ onGoOutreach }) {
               <button type="button" onClick={batchResearch} disabled={busy} className="text-primary hover:underline disabled:opacity-50">
                 批量挖邮箱
               </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => promoteToOutreach(checked)}
+                className="text-primary hover:underline disabled:opacity-50"
+              >
+                {busy ? '正在背调并录入…' : '录入开发信'}
+              </button>
               <button type="button" onClick={() => setChecked([])} className="text-[#94a3b8] hover:text-[#475569]">
                 取消选择
               </button>
@@ -718,7 +743,7 @@ export default function LeadsPage({ onGoOutreach }) {
               <button
                 type="button"
                 onClick={applyContact}
-                disabled={busy || !pickedEmail}
+                disabled={busy || !customer}
                 className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded bg-primary text-[13px] font-medium text-white hover:bg-blue-600 disabled:opacity-40"
               >
                 <ShieldCheck size={13} />
@@ -758,7 +783,9 @@ function researchChecks(customer, research) {
   const website = Boolean(research?.website || customer.website);
   const social = (research?.socials || []).length > 0
     || (research?.facts || []).some((f) => /LinkedIn|Facebook|^X$|Twitter|社媒/i.test(f.label));
-  const registry = (research?.facts || []).some((f) => /GLEIF|Wikidata|LEI|注册|工商/i.test(`${f.source} ${f.label}`));
+  const registry = (research?.facts || []).some((f) =>
+    /GLEIF|Wikidata|LEI|注册|工商|Sirene|Brreg|ROR|PRH|ARES|Receita|Companies House/i.test(`${f.source} ${f.label}`)
+  );
   const procurement = Boolean(customer.sourceUrl || customer.awardId || customer.rfq || customer.painPoints);
   return [
     { label: '公司官网', ok: website },
@@ -884,6 +911,9 @@ function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail }) {
           <InfoRow label="地址" value={address} />
           <InfoRow label="行业" value={industry} />
           <InfoRow label="员工规模" value={size} />
+          <InfoRow label="母公司" value={factValue(research, /最终母公司/)} />
+          <InfoRow label="登记号" value={factValue(research, /登记号|SIREN|Org\.nr|IČO|CNPJ/)} />
+          <InfoRow label="LEI" value={factValue(research, /^LEI$/)} />
         </dl>
         {!website && !address && !industry && !size && !research?.phones?.length && (
           <p className="text-[12px] text-[#94a3b8]">还没有核到补充信息。</p>

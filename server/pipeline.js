@@ -1,7 +1,8 @@
 import { config } from './config.js';
-import { db, save, getCustomer, isRfqLead, logActivity } from './store.js';
+import { db, save, getCustomer, isRfqLead, isDemoCustomer, logActivity } from './store.js';
 import { crawlAllAndImport } from './rfq.js';
 import { researchLead, isPersonLikeDisplayName, isPlausibleEmail } from './research.js';
+import { VERIFIED_SOURCES } from './openSources.js';
 
 const AUTO_ROLES = new Set([
   'info', 'enquiry', 'inquiry', 'enquiries', 'inquiries', 'contact', 'office',
@@ -59,7 +60,7 @@ export function ensurePipeline() {
 export function pickAutoEmail(research) {
   if (!research?.emails?.length) return null;
   if (!['high', 'medium'].includes(research.confidence)) return null;
-  const verified = (research.facts || []).some((f) => f.source === 'GLEIF' || f.source === 'Wikidata');
+  const verified = (research.facts || []).some((f) => VERIFIED_SOURCES.has(f.source));
   if (!verified) return null;
   return (
     research.emails.find((e) => AUTO_ROLES.has(e.role) && !SKIP_ROLES.has(e.role) && (e.score || 0) >= 70) ||
@@ -307,6 +308,61 @@ export function getPipelineState() {
     appliedToday: p.appliedDate === today ? p.appliedToday || 0 : 0,
     nextDaily: p.lastDailyDate === today ? `明天 ${String(config.pipeline.dailyHour).padStart(2, '0')}:00` : `今天 ${String(config.pipeline.dailyHour).padStart(2, '0')}:00 后`,
   };
+}
+
+export async function promoteLeads(ids = [], { researchLimit = 6 } = {}) {
+  const promoted = [];
+  const skipped = [];
+  let researched = 0;
+  for (const id of ids.slice(0, 50)) {
+    const customer = getCustomer(id);
+    if (!customer) {
+      skipped.push({ id, reason: '线索不存在' });
+      continue;
+    }
+    const personLike = isPersonLikeDisplayName(customer.company || customer.name)
+      && (!customer.company || customer.company === customer.name);
+    if (!customer.email && !customer.research?.emails?.[0]?.email && researched < researchLimit && !personLike) {
+      try {
+        await runLeadResearch(customer, { useAi: false, autoApply: false });
+        researched += 1;
+      } catch (err) {
+        skipped.push({ id, company: customer.company || customer.name, reason: `背调失败：${err.message || err}` });
+        continue;
+      }
+    }
+    if (!customer.email && customer.research?.emails?.[0]?.email) {
+      applyPublicContact(customer, customer.research.emails[0].email, {
+        website: customer.research.website,
+        company: customer.research.legalName || customer.company,
+        contactSource: 'public_research',
+      });
+    }
+    const email = String(customer.email || '').toLowerCase();
+    if (!email || customer.agentPhase === 'need_email' || isDemoCustomer(customer)) {
+      skipped.push({
+        id,
+        company: customer.company || customer.name,
+        reason: personLike ? '只有个人昵称，公开库核不到公司，不能录入开发信' : '还没有可发信的公开角色邮箱',
+      });
+      continue;
+    }
+    if (email === String(config.smtp.user || '').toLowerCase()) {
+      skipped.push({ id, company: customer.company || customer.name, reason: '不能用自己的发件箱当客户' });
+      continue;
+    }
+    customer.inOutreach = true;
+    customer.status = customer.status === 'replied' ? customer.status : 'uncontacted';
+    customer.agentPhase = null;
+    promoted.push({ id, company: customer.company || customer.name, email: customer.email });
+    logActivity({
+      customerId: customer.id,
+      action: '录入开发信',
+      detail: `${customer.company || customer.name} 已进入开发信名单，Agent 将自动研究、写信并按时区发送。`,
+    });
+  }
+  save();
+  return { promoted, skipped };
 }
 
 export function startLeadPipeline() {
