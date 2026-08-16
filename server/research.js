@@ -49,7 +49,10 @@ const LEGAL_SUFFIX_RE =
   /\b(limited|ltd\.?|inc\.?|incorporated|llc|l\.l\.c\.|gmbh|mbh|sarl|s\.a\.r\.l\.|plc|p\.l\.c\.|corp\.?|corporation|co\.|company|ag|s\.a\.|n\.v\.|b\.v\.|oy|ab|a\/s|s\.p\.a\.|s\.r\.l\.|pty|pvt|private|public|lp|llp|llc\.|m\.b\.h\.)\b/gi;
 
 const INSTITUTION_RE =
-  /\b(college|university|hospital|council|ministry|department|authority|agency|municipality|borough|county|city|trust|consortium|society|foundation|institute|school|police|nhs|government|kommune|gemeinde|stadt|amt)\b/i;
+  /\b(college|university|universities|hospital|hospitals|council|ministry|department|authority|agency|municipality|borough|county|city|trust|consortium|society|foundation|institute|school|police|nhs|government|kommune|gemeinde|stadt|amt|politechnika|polytechnic|universitet|universit[aä]t|universit[eé]|universiteit|universidad|universidade|hochschule|akademia|academy|nemocnice|krankenhaus|h[oô]pital|ospedale|szpital|ziekenhuis|fakultn[ií]|fakultet|facult[eé]|faculty)\b/i;
+
+/** Official procurement buyer/awardee names are legal entities, not Alibaba nicknames. */
+const OFFICIAL_ENTITY_SOURCE_RE = /TED Europa|UK Contracts Finder|USASpending|SAM\.gov/i;
 
 const CONTACT_PATHS = [
   '/contact', '/contact-us', '/contactus', '/contacts', '/contact.html',
@@ -193,6 +196,7 @@ export function skippedLeadReport(customer) {
 
 export function isPersonLikeLead(customer) {
   if (customer?.forceCompany || customer?.regNo) return false;
+  if (OFFICIAL_ENTITY_SOURCE_RE.test(customer?.source || '')) return false;
   const company = String(customer?.company || '').trim();
   const name = String(customer?.name || '').trim();
   if (company) return isPersonLikeDisplayName(company);

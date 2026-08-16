@@ -77,6 +77,10 @@ describe('company name helpers', () => {
     assert.equal(isPersonLikeDisplayName('CHRIS'), true);
     assert.equal(isPersonLikeDisplayName('H C'), true);
     assert.equal(isPersonLikeDisplayName('Tyne Coast College'), false);
+    assert.equal(isPersonLikeDisplayName('Politechnika Warszawska'), false);
+    assert.equal(isPersonLikeDisplayName('Fakultní nemocnice Olomouc'), false);
+    assert.equal(isPersonLikeLead({ company: 'Politechnika Warszawska', source: 'TED Europa' }), false);
+    assert.equal(isPersonLikeLead({ company: 'Fakultní nemocnice Olomouc', source: 'TED Europa' }), false);
     assert.equal(isPersonLikeDisplayName('KIER TRANSPORTATION LIMITED'), false);
     assert.equal(isPersonLikeDisplayName('L3HARRIS TECHNOLOGIES, INC.'), false);
     assert.equal(isPersonLikeDisplayName('A. Kroeze Beheer B.V.'), false);
