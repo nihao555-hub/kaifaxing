@@ -498,6 +498,7 @@ export function importRfqItems(items = [], { quiet = false } = {}) {
       painPoints: it.painPoints || it.title || '',
       status: 'uncontacted',
       lastActivity: new Date().toISOString().slice(0, 10),
+      ingestedAt: new Date().toISOString(),
       source: it.source,
       sourceUrl: it.url,
       awardId: it.awardId || '',
@@ -533,12 +534,13 @@ export async function crawlAllAndImport({
   govLimit = 80,
   doImport = true,
   sources,
+  fanout = true,
 } = {}) {
   const want = Array.isArray(sources) && sources.length ? new Set(sources) : null;
   const add = (key, run) => (!want || want.has(key) ? run : null);
   const reports = [];
   const buckets = await Promise.allSettled([
-    add('alibaba_public', crawlAlibabaPublic({ keyword: '', since, maxPages: alibabaPages, fanout: true })
+    add('alibaba_public', crawlAlibabaPublic({ keyword: '', since, maxPages: alibabaPages, fanout })
       .then((r) => ({ key: 'alibaba_public', name: '阿里国际站公开 RFQ', items: r.items, extra: { pages: r.pages, totalItems: r.totalItems } }))),
     add('usaspending', searchUsaspending({ limit: govLimit, since, broad: true })
       .then((items) => ({ key: 'usaspending', name: 'USASpending.gov', items }))),

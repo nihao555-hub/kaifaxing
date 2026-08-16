@@ -9,6 +9,7 @@ import {
   Globe,
   ShieldCheck,
   AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { api } from '../api.js';
 import { Avatar, Spinner } from './common.jsx';
@@ -51,6 +52,8 @@ export default function LeadsPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [pickedEmail, setPickedEmail] = useState('');
+  const [pipeline, setPipeline] = useState(null);
+  const [syncing, setSyncing] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -60,6 +63,7 @@ export default function LeadsPage() {
       setRows(data.items || []);
       setTotal(data.total || 0);
       if (data.facets) setFacets(data.facets);
+      if (data.pipeline) setPipeline(data.pipeline);
       setSelectedId((cur) => cur || data.items?.[0]?.id || null);
     } catch (e) {
       setErr(String(e.message || e));
@@ -70,6 +74,17 @@ export default function LeadsPage() {
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  useEffect(() => {
+    const timer = setInterval(async () => {
+      try {
+        const st = await api.rfqPipeline();
+        setPipeline(st);
+        if (st.syncStatus === 'running' || st.queue > 0 || st.researchingId) load();
+      } catch { /* ignore */ }
+    }, 5000);
+    return () => clearInterval(timer);
   }, [load]);
 
   useEffect(() => {
@@ -135,17 +150,49 @@ export default function LeadsPage() {
               询盘获客
             </h1>
             <p className="mt-1 max-w-3xl text-[12px] leading-relaxed text-slate-500">
-              入库后按外贸公式做公开背调：主体核验 → 官网 → 联系页/法律声明上的角色邮箱。
-              只用 Wikidata、GLEIF、Wikipedia 和对方官网，不扒私人邮箱、不绕登录墙、不猜测 purchase@ 域名群发。
+              按网易外贸通的节奏：每天定时拉当天新询盘，入库后自动公开背调（主体 / 官网 / 角色邮箱）。
+              高置信度的 info、procurement 等公开角色邮箱会自动写入；不扒私人邮箱、不绕登录墙。
             </p>
           </div>
-          <div className="flex shrink-0 gap-2 text-[11px]">
-            <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-slate-600">线索 {facets.total || 0}</span>
-            <span className="rounded-lg bg-amber-50 px-2.5 py-1 text-amber-600">待补邮箱 {facets.needEmail || 0}</span>
-            <span className="rounded-lg bg-emerald-50 px-2.5 py-1 text-emerald-600">已有邮箱 {facets.hasEmail || 0}</span>
-            <span className="rounded-lg bg-primary-light px-2.5 py-1 text-primary">已背调 {facets.researched || 0}</span>
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            <div className="flex gap-2 text-[11px]">
+              <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-slate-600">库内 {facets.total || 0}</span>
+              <span className="rounded-lg bg-sky-50 px-2.5 py-1 text-sky-700">今日新增 {pipeline?.todayNew ?? facets.todayNew ?? 0}</span>
+              <span className="rounded-lg bg-amber-50 px-2.5 py-1 text-amber-600">待补邮箱 {facets.needEmail || 0}</span>
+              <span className="rounded-lg bg-emerald-50 px-2.5 py-1 text-emerald-600">已有邮箱 {facets.hasEmail || 0}</span>
+              <span className="rounded-lg bg-primary-light px-2.5 py-1 text-primary">已背调 {facets.researched || 0}</span>
+            </div>
+            <button
+              onClick={async () => {
+                setSyncing(true);
+                setErr('');
+                try {
+                  setPipeline(await api.rfqPipelineSync());
+                  await load();
+                } catch (e) {
+                  setErr(String(e.message || e));
+                } finally {
+                  setSyncing(false);
+                }
+              }}
+              disabled={syncing || pipeline?.syncStatus === 'running'}
+              className="flex h-8 items-center gap-1.5 rounded-lg bg-slate-800 px-3 text-[12px] font-medium text-white disabled:opacity-50"
+            >
+              {syncing || pipeline?.syncStatus === 'running' ? <Spinner className="h-3! w-3!" /> : <RefreshCw size={12} />}
+              立即同步今天
+            </button>
           </div>
         </div>
+        {pipeline && (
+          <div className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-500">
+            北京时间 {pipeline.today} · 每天 {String(pipeline.dailyHour).padStart(2, '0')}:00 拉当天新询盘，随后自动背调。
+            上次同步 {pipeline.lastDailyAt ? pipeline.lastDailyAt.replace('T', ' ').slice(0, 16) : '尚未执行'}
+            {pipeline.lastSync ? `，抓到 ${pipeline.lastSync.fetched} / 新入库 ${pipeline.lastSync.createdCount}` : ''}
+            。队列 {pipeline.queue} · 今日已背调 {pipeline.researchedToday} · 自动写入邮箱 {pipeline.appliedToday}
+            {pipeline.researchingId ? ' · 正在背调…' : ''}
+            {pipeline.lastError ? ` · ${pipeline.lastError}` : ''}
+          </div>
+        )}
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <div className="flex h-9 w-[280px] items-center gap-1.5 rounded-lg bg-slate-100 px-2.5">

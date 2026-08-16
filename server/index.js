@@ -11,7 +11,15 @@ import { startAgent, stopAgent, getAgentState } from './autopilot.js';
 import { ingestInbound } from './inbox.js';
 import { listSources, searchRfq, importRfqItems, ingestCommercial, crawlAlibabaPublic, crawlAllAndImport, ALIBABA_PUBLIC_FIELDS, PUBLIC_SINCE_DEFAULT } from './rfq.js';
 import { alibabaCrawlProgress } from './publicRfq.js';
-import { researchLead, isPlausibleEmail } from './research.js';
+import { isPlausibleEmail } from './research.js';
+import {
+  startLeadPipeline,
+  getPipelineState,
+  runDailySync,
+  runLeadResearch,
+  enqueueResearch,
+  applyPublicContact,
+} from './pipeline.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -100,6 +108,7 @@ app.post('/api/rfq/public/crawl', async (req, res) => {
     const maxPages = Number(req.body?.maxPages || 15);
     const crawled = await crawlAlibabaPublic({ keyword, since, maxPages, fanout: false });
     const created = req.body?.import ? importRfqItems(crawled.items, { quiet: true }) : [];
+    if (created.length) enqueueResearch(created);
     res.json({ ...crawled, created });
   } catch (err) {
     res.status(502).json({ error: `公开询盘抓取失败：${err.message}` });
@@ -116,6 +125,7 @@ app.post('/api/rfq/crawl-all', (req, res) => {
   crawlAllJob = { status: 'running', since, startedAt: new Date().toISOString(), createdCount: 0, reports: [] };
   crawlAllAndImport({ since, alibabaPages, govLimit: 80, doImport: true, sources })
     .then((r) => {
+      if (r.created?.length) enqueueResearch(r.created);
       crawlAllJob = {
         status: 'done',
         since: r.since,
@@ -134,18 +144,28 @@ app.post('/api/rfq/crawl-all', (req, res) => {
 app.post('/api/rfq/import', (req, res) => {
   const items = Array.isArray(req.body?.items) ? req.body.items : [];
   const created = importRfqItems(items);
+  if (created.length) enqueueResearch(created);
   res.json({ created });
 });
 app.post('/api/rfq/ingest', (req, res) => {
   try {
     const { items, created } = ingestCommercial(req.body || {});
+    if (created.length) enqueueResearch(created);
     res.json({ accepted: items.length, created });
   } catch (err) {
     res.status(400).json({ error: `导入失败：${err.message}` });
   }
 });
 
-const researching = new Set();
+app.get('/api/rfq/pipeline', (req, res) => res.json(getPipelineState()));
+app.post('/api/rfq/pipeline/sync', async (req, res) => {
+  try {
+    const state = await runDailySync({ reason: 'manual' });
+    res.json(state);
+  } catch (err) {
+    res.status(502).json({ error: `同步失败：${err.message}`, ...getPipelineState() });
+  }
+});
 
 app.get('/api/rfq/leads', (req, res) => {
   const result = listCustomers({
@@ -158,9 +178,11 @@ app.get('/api/rfq/leads', (req, res) => {
     limit: Number(req.query.limit || 30),
     offset: Number(req.query.offset || 0),
   });
+  const pipe = getPipelineState();
   res.json({
     ...result,
-    facets: leadFacets(),
+    facets: { ...leadFacets(), todayNew: pipe.todayNew },
+    pipeline: pipe,
   });
 });
 
@@ -169,38 +191,6 @@ app.get('/api/rfq/leads/:id', (req, res) => {
   if (!customer) return res.status(404).json({ error: '线索不存在' });
   res.json({ customer, research: customer.research || null });
 });
-
-async function runLeadResearch(customer) {
-  if (researching.has(customer.id)) {
-    const err = new Error('正在背调中');
-    err.status = 409;
-    throw err;
-  }
-  researching.add(customer.id);
-  customer.research = { ...(customer.research || {}), status: 'running', updatedAt: new Date().toISOString() };
-  save();
-  try {
-    const report = await researchLead(customer);
-    customer.research = report;
-    if (report.website && !customer.website) customer.website = report.website;
-    if (report.legalName && report.legalName !== customer.company) customer.legalName = report.legalName;
-    save();
-    logActivity({
-      customerId: customer.id,
-      action: '公开背调',
-      detail: report.emails?.length
-        ? `${customer.company || customer.name}：核到官网公开邮箱 ${report.emails.map((e) => e.email).join('、')}`
-        : `${customer.company || customer.name}：${report.steps?.find((s) => s.key === 'contact')?.detail || '未找到公开邮箱'}`,
-    });
-    return report;
-  } catch (err) {
-    customer.research = { status: 'failed', error: String(err.message || err), updatedAt: new Date().toISOString() };
-    save();
-    throw err;
-  } finally {
-    researching.delete(customer.id);
-  }
-}
 
 app.post('/api/rfq/leads/research-batch', async (req, res) => {
   const ids = Array.isArray(req.body?.ids) ? req.body.ids.slice(0, 5) : [];
@@ -238,15 +228,9 @@ app.post('/api/rfq/leads/:id/apply-contact', (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
   const website = req.body?.website != null ? String(req.body.website).trim() : '';
   const company = req.body?.company != null ? String(req.body.company).trim() : '';
-  if (!isPlausibleEmail(email)) return res.status(400).json({ error: '请提供从公开页核到的有效邮箱' });
-  if (email === String(config.smtp.user).toLowerCase()) {
-    return res.status(400).json({ error: '请填写真实客户邮箱，不要用自己的发件箱' });
+  if (!applyPublicContact(customer, email, { website, company, contactSource: 'public_research' })) {
+    return res.status(400).json({ error: '请提供从公开页核到的有效邮箱，不要用自己的发件箱' });
   }
-  customer.email = email;
-  if (website) customer.website = website;
-  if (company) customer.company = company;
-  customer.contactSource = 'public_research';
-  if (customer.agentPhase === 'need_email') customer.agentPhase = null;
   save();
   logActivity({
     customerId: customer.id,
@@ -385,4 +369,5 @@ app.get(/^\/(?!api\/).*/, (req, res, next) => {
 
 app.listen(config.port, () => {
   console.log(`[OutreachAI] server listening on http://localhost:${config.port}`);
+  startLeadPipeline();
 });
