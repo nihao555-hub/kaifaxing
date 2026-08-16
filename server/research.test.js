@@ -110,6 +110,7 @@ describe('public contact extractors', () => {
     assert.equal(isPlausibleEmail('noreply@stc.ac.uk'), false);
     assert.equal(isPlausibleEmail('info@stc.ac.uk'), true);
     assert.equal(isPlausibleEmail('5464-0uk@howoge.de'), false);
+    assert.equal(isPlausibleEmail('ir@kier.co.uktelephone'), false);
   });
 
   it('extracts international phones', () => {

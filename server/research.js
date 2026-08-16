@@ -1,3 +1,4 @@
+import { parse as parseDomain } from 'tldts';
 import { chat, parseJson } from './ai.js';
 import { enrichOpenSources } from './openSources.js';
 import {
@@ -149,6 +150,9 @@ export function isPlausibleEmail(email) {
   if (/\d{3,}/.test(local)) return false;
   if (!/^[a-z0-9][a-z0-9._+-]*$/.test(local)) return false;
   if (!/^[a-z0-9.-]+\.[a-z]{2,24}$/.test(domain)) return false;
+  const parsed = parseDomain(domain, { allowPrivateDomains: true });
+  if (!parsed?.domain || !parsed.publicSuffix || parsed.isIcann === false) return false;
+  if (parsed.hostname && parsed.hostname !== domain) return false;
   return true;
 }
 
