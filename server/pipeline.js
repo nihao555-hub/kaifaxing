@@ -5,16 +5,20 @@ import { researchLead, isPersonLikeLead, isPlausibleEmail, skippedLeadReport, ap
 import { extractCompanyHintFromText } from './rfqHints.js';
 import { extractRfqClues, rfqCorpus, classifyResearchPath } from './researchPath.js';
 import { VERIFIED_SOURCES } from './openSources.js';
-import { isForwarderName } from './kyb.js';
+import { isForwarderName, isOutreachEmail } from './kyb.js';
 
-const AUTO_ROLES = new Set([
-  'info', 'enquiry', 'inquiry', 'enquiries', 'inquiries', 'contact', 'office',
-  'procurement', 'purchasing', 'purchase', 'buying', 'buyer', 'sourcing',
-  'sales', 'sale', 'export', 'import', 'trade', 'trading',
-]);
-const SKIP_ROLES = new Set([
-  'ir', 'cosec', 'press', 'media', 'careers', 'careersteam', 'jobs', 'privacy', 'legal', 'uk',
-]);
+export function researchPriority(customer = {}) {
+  const src = String(customer.source || '');
+  if (/World Bank/i.test(src)) return 90;
+  if (/TED|Contracts Finder/i.test(src)) return 0;
+  if (/USASpending|SAM/i.test(src)) return 1;
+  const name = `${customer.company || ''} ${customer.name || ''}`;
+  if (/\b(limited|ltd|inc|gmbh|plc|llc|b\.?v|sarl|pty|pvt|college|university|hospital|council|politechnika|nemocnice)\b/i.test(name)) {
+    return 2;
+  }
+  return 8;
+}
+
 let tickTimer = null;
 let researchingId = null;
 let researchLoop = false;
@@ -65,7 +69,7 @@ export function pickAutoEmail(research) {
   const verified = (research.facts || []).some((f) => VERIFIED_SOURCES.has(f.source));
   if (!verified) return null;
   return (
-    research.emails.find((e) => AUTO_ROLES.has(e.role) && !SKIP_ROLES.has(e.role) && (e.score || 0) >= 70) ||
+    research.emails.find((e) => isOutreachEmail(e) && (e.score || 0) >= 70) ||
     null
   );
 }
@@ -157,17 +161,10 @@ export function enqueuePendingResearch({ limit = 800 } = {}) {
     if (!isRfqLead(c)) continue;
     if (c.research?.status === 'done' || c.research?.status === 'running') continue;
     if (isPersonLikeLead(c) && c.researchPath !== 'clues' && c.researchPath !== 'crosspost') continue;
+    if (/World Bank/i.test(c.source || '')) continue;
     pending.push(c);
   }
-  pending.sort((a, b) => {
-    const rank = (x) => {
-      if (/USASpending|Contracts Finder|TED|World Bank|SAM/.test(x.source || '')) return 0;
-      const name = `${x.company || ''} ${x.name || ''}`;
-      if (/\b(limited|ltd|inc|gmbh|plc|llc|b\.?v|sarl|pty|pvt|college|university|hospital|council)\b/i.test(name)) return 1;
-      return 2;
-    };
-    return rank(a) - rank(b);
-  });
+  pending.sort((a, b) => researchPriority(a) - researchPriority(b));
   return enqueueResearch(pending.slice(0, Math.min(Math.max(Number(limit) || 800, 1), 4000)));
 }
 
@@ -203,14 +200,11 @@ function enqueueDailyBacklog() {
     if (!isRfqLead(c)) continue;
     if (c.research?.status === 'done' || c.research?.status === 'running') continue;
     if (isPersonLikeLead(c) && c.researchPath !== 'clues' && c.researchPath !== 'crosspost') continue;
+    if (/World Bank/i.test(c.source || '')) continue;
     pending.push(c);
     if (pending.length >= config.pipeline.backlogPerDay * 3) break;
   }
-  pending.sort((a, b) => {
-    const ag = /USASpending|Contracts Finder|TED|World Bank|SAM/.test(a.source || '') ? 0 : 1;
-    const bg = /USASpending|Contracts Finder|TED|World Bank|SAM/.test(b.source || '') ? 0 : 1;
-    return ag - bg;
-  });
+  pending.sort((a, b) => researchPriority(a) - researchPriority(b));
   const added = enqueueResearch(pending.slice(0, config.pipeline.backlogPerDay));
   p.backlogDate = today;
   p.backlogEnqueued = added;
@@ -255,7 +249,6 @@ export async function runLeadResearch(customer, { useAi = true, autoApply = fals
   }
   researchingId = customer.id;
   customer.research = { ...(customer.research || {}), status: 'running', updatedAt: new Date().toISOString() };
-  save();
   try {
     const personLike = isPersonLikeLead(customer);
     const report = await researchLead(customer, { useAi: useAi && !personLike });
@@ -447,12 +440,17 @@ export async function promoteLeads(ids = [], { researchLimit = 6 } = {}) {
         continue;
       }
     }
-    if (!customer.email && customer.research?.emails?.[0]?.email) {
-      applyPublicContact(customer, customer.research.emails[0].email, {
-        website: customer.research.website,
-        company: customer.research.legalName || customer.company,
-        contactSource: 'public_research',
-      });
+    if (!customer.email) {
+      const picked = pickAutoEmail(customer.research) || (customer.research?.outreach?.email
+        ? { email: customer.research.outreach.email }
+        : null);
+      if (picked?.email) {
+        applyPublicContact(customer, picked.email, {
+          website: customer.research.website,
+          company: customer.research.legalName || customer.company,
+          contactSource: 'public_research',
+        });
+      }
     }
     if (customer.research?.kyb?.grade === 'C' || (customer.research?.kyb?.sanctions || []).length) {
       skipped.push({

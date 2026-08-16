@@ -16,6 +16,7 @@ import {
   websiteCandidates,
   pickBestHit,
   emailBelongsToCompany,
+  hostLooksLikeCompany,
   queriesFor,
   selectSearchContactUrls,
   mergeSearchSnippetEmails,
@@ -183,8 +184,25 @@ describe('public contact extractors', () => {
   it('keeps company-domain role mail and drops broker personal mail', () => {
     assert.equal(emailBelongsToCompany('ir@kier.co.uk', 'www.kier.co.uk', 'Kier Group'), true);
     assert.equal(emailBelongsToCompany('uk@howoge.de', 'www.howoge.de', 'HOWOGE Wohnungsbaugesellschaft mbH'), true);
-    assert.equal(emailBelongsToCompany('info@howoge-mieterrat.com', 'www.howoge.de', 'HOWOGE Wohnungsbaugesellschaft mbH'), true);
+    assert.equal(emailBelongsToCompany('info@howoge-mieterrat.com', 'www.howoge.de', 'HOWOGE Wohnungsbaugesellschaft mbH'), false);
     assert.equal(emailBelongsToCompany('robert.chantry@berenberg.com', 'www.kier.co.uk', 'Kier Group'), false);
+    assert.equal(hostLooksLikeCompany('https://londonwebcam.co.uk/', 'London Universities Purchasing Consortium'), false);
+    assert.equal(hostLooksLikeCompany('https://www.crescenttool.com/', 'Crescent Purchasing Consortium Limited'), false);
+    assert.equal(hostLooksLikeCompany('https://www.kier.co.uk/', 'KIER TRANSPORTATION LIMITED'), true);
+    assert.ok(!queriesFor('London Universities Purchasing Consortium').some((q) => /London Group/i.test(q)));
+    assert.ok(queriesFor('KIER TRANSPORTATION LIMITED').some((q) => /group|plc/i.test(q)));
+    const lupc = pickBestHit(
+      [{ label: 'LONDON CARDIOLOGY GROUP LIMITED', description: 'company' }],
+      'London Universities Purchasing Consortium',
+      (h) => h.label,
+    );
+    assert.equal(lupc, null);
+    const glider = pickBestHit(
+      [{ label: 'Politechnika Warszawska PW-5', description: 'World Class glider' }],
+      'Politechnika Warszawska',
+      (h) => h.label,
+    );
+    assert.equal(glider, null);
   });
 
   it('tries https www before plain http', () => {

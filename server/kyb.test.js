@@ -38,6 +38,14 @@ describe('kyb grade', () => {
     });
     assert.equal(b.grade, 'B');
     assert.match(b.nextAction, /表单/);
+    const irOnly = gradeKyb({
+      verified: true,
+      website: 'https://www.kier.co.uk',
+      emails: [{ email: 'ir@kier.co.uk', role: 'ir' }],
+      procurement: true,
+    });
+    assert.equal(irOnly.grade, 'B');
+    assert.match(irOnly.nextAction, /表单/);
   });
 
   it('asks for a registry number when the legal entity is missing', () => {

@@ -1,5 +1,40 @@
 const FORWARDER_RE = /freight|forwarder|logistics|货代|shipping agency|customs broker/i;
 
+/** 开发信只收采购/总机角色箱，不收 IR、招聘、媒体、社区中心、人名箱。 */
+export const OUTREACH_ROLES = new Set([
+  'info', 'enquiry', 'inquiry', 'enquiries', 'inquiries', 'contact', 'office',
+  'procurement', 'purchasing', 'purchase', 'buying', 'buyer', 'sourcing',
+  'sales', 'sale', 'export', 'import', 'trade', 'trading',
+  'tenders', 'tender', 'suppliers', 'supplier', 'vendor',
+]);
+
+export const SKIP_OUTREACH_ROLES = new Set([
+  'ir', 'cosec', 'press', 'media', 'careers', 'careersteam', 'jobs', 'privacy', 'legal',
+  'uk', 'investor', 'investors', 'investorrelations',
+  'accommodations', 'adverse', 'warehouse', 'warehouseoperations',
+  'marketing', 'comms', 'ecruiting', 'recruiting', 'admin',
+]);
+
+export function emailLocalPart(email) {
+  return String(email || '').toLowerCase().split('@')[0] || '';
+}
+
+export function isOutreachEmail(item = {}) {
+  const email = typeof item === 'string' ? item : String(item.email || '');
+  const role = String(item.role || emailLocalPart(email)).toLowerCase();
+  if (!email || !role) return false;
+  if (SKIP_OUTREACH_ROLES.has(role)) return false;
+  if (/^(ir|investor|careers?|jobs|press|media|legal|privacy|admin|community|sekretariat|rekrutacja|ewidencja)\b/i.test(role)) {
+    return false;
+  }
+  if (role.includes('.')) return false;
+  return OUTREACH_ROLES.has(role);
+}
+
+export function filterOutreachEmails(emails = []) {
+  return (emails || []).filter((e) => isOutreachEmail(e));
+}
+
 export function isForwarderName(name) {
   return FORWARDER_RE.test(String(name || ''));
 }
@@ -63,20 +98,23 @@ export function gradeKyb({
     };
   }
 
-  const hasMail = emails.length > 0;
-  if (verified && website && hasMail) {
+  const outreach = filterOutreachEmails(emails);
+  if (verified && website && outreach.length) {
     if (!procurement) risks.push('还没有海关/招标采购痕迹，报价前先确认品类是否匹配');
     risks.push('公开角色邮箱不一定是采购决策人');
     return {
       grade: 'A',
       label: '可写开发信',
-      nextAction: `可向 ${emails[0].email} 写开发信。大额、寄样或账期再补中国信保/D&B 信用报告。`,
+      nextAction: `可向 ${outreach[0].email} 写开发信。大额、寄样或账期再补中国信保/D&B 信用报告。`,
       needRegNo: false,
       risks,
     };
   }
 
   if (verified && website) {
+    if (emails.length && !outreach.length) {
+      risks.push('公开页只有 IR/招聘/媒体/人名邮箱，不能当开发信入口');
+    }
     risks.push('官网可打开，联系方式多为表单');
     return {
       grade: 'B',

@@ -15,8 +15,6 @@ import {
   wikidataEntitiesUrl,
   simplifyEntity,
   fuseRank,
-  waybackContactUrls,
-  crtshHosts,
   whoisFacts,
 } from './githubTools.js';
 import {
@@ -32,7 +30,7 @@ import {
   hoursFromSnippets,
   countryTld,
 } from './searchDorks.js';
-import { gradeKyb, hasVerifiedEntity, hasProcurementTrace, isForwarderName } from './kyb.js';
+import { gradeKyb, hasVerifiedEntity, hasProcurementTrace, isForwarderName, filterOutreachEmails, isOutreachEmail } from './kyb.js';
 import {
   rfqCorpus,
   extractRfqClues,
@@ -250,13 +248,25 @@ export function isPlausibleEmail(email) {
 export function emailBelongsToCompany(email, websiteHost, company) {
   const domain = String(email || '').toLowerCase().split('@')[1] || '';
   if (!domain) return false;
+  if (COLLISION_HOST_RE.test(domain)) return false;
   if (websiteHost) {
     const site = registrableDomain(websiteHost);
     const mail = registrableDomain(domain);
-    if (site && (mail === site || domain.endsWith(`.${site}`))) return true;
+    return Boolean(site && mail && (mail === site || domain.endsWith(`.${site}`)));
   }
-  const first = significantTokens(company)[0];
-  return Boolean(first && first.length >= 4 && domain.includes(first));
+  const first = significantTokens(company).find((t) => t.length >= 4 && !WEAK_NAME_TOKENS.has(t));
+  return Boolean(first && domain.includes(first));
+}
+
+export function hostLooksLikeCompany(urlOrHost, company) {
+  const host = hostFromWebsite(urlOrHost) || String(urlOrHost || '').replace(/^https?:\/\//, '').split('/')[0].toLowerCase();
+  if (!host || COLLISION_HOST_RE.test(host)) return false;
+  const tokens = significantTokens(company).filter((t) => t.length >= 4 && !WEAK_NAME_TOKENS.has(t));
+  if (tokens.some((t) => host.includes(t))) return true;
+  if (/\.(gov|edu|mil)(\.|$)|(\.ac\.|\.go\.)/i.test(host)) {
+    return significantTokens(company).some((t) => t.length >= 4 && host.includes(t));
+  }
+  return false;
 }
 
 export function scoreEmail(email, websiteHost = '') {
@@ -367,22 +377,42 @@ const GENERIC_VERIFY = new Set([
   'industrial', 'industries', 'global', 'general', 'limited', 'private',
 ]);
 
+/** 单独出现时不能当官网/母公司证据：地名、弱品牌、通用机构词 */
+const WEAK_NAME_TOKENS = new Set([
+  ...GENERIC_VERIFY,
+  'london', 'washington', 'crescent', 'federal', 'security', 'prime', 'webcam',
+  'band', 'lawrence', 'fermi', 'magellan', 'national', 'united', 'american',
+  'tyne', 'coast', 'city', 'county', 'college', 'university', 'hospital',
+  'council', 'trust', 'consortium', 'association', 'first', 'new',
+]);
+
+const PARENT_QUERY_BLOCK = new Set([
+  'london', 'crescent', 'national', 'washington', 'blue', 'prime', 'security',
+  'federal', 'association', 'united', 'american', 'general', 'international',
+  'global', 'first', 'new', 'city', 'county', 'lawrence', 'fermi', 'magellan',
+]);
+
+const COLLISION_HOST_RE = /webcam|theband|wordle|magellantv|voilanorbert|gohansel|grimmstories|merriam-webster/i;
+
 function pageMentionsCompany(html, company, { country = '', pageUrl = '' } = {}) {
   const tokens = significantTokens(company).filter((t) => t.length >= 4);
   const title = pageTitle(html).toLowerCase();
   const text = `${title} ${pageText(html).slice(0, 4000)}`.toLowerCase();
-  const distinctive = tokens.filter((t) => !GENERIC_VERIFY.has(t));
+  const distinctive = tokens.filter((t) => !WEAK_NAME_TOKENS.has(t));
   const place = countrySearchTerms(country).map((s) => s.replace(/"/g, '').toLowerCase());
   const countryHit = place.some((w) => w.length >= 3 && text.includes(w)) || hostFitsCountry(pageUrl, country);
   if (country && distinctive.length <= 1 && !hostFitsCountry(pageUrl, country)) return false;
   if (!tokens.length) {
     return significantTokens(company).some((t) => text.includes(t)) && (!country || countryHit);
   }
-  const hits = (distinctive.length ? distinctive : tokens).filter((t) => text.includes(t));
-  if (!hits.length) return false;
-  if (hits.length >= Math.min(2, (distinctive.length || tokens.length))) return true;
-  if (hits.length >= 1 && title.includes(hits[0])) return true;
-  return hits.length >= 1 && hits[0].length >= 5;
+  if (!distinctive.length) {
+    const weakHits = tokens.filter((t) => text.includes(t));
+    return weakHits.length >= 2 && (weakHits.filter((t) => title.includes(t)).length >= 2 || countryHit);
+  }
+  const hits = distinctive.filter((t) => text.includes(t));
+  if (hits.length >= 2) return true;
+  if (hits.length === 1 && hits[0].length >= 6 && title.includes(hits[0]) && (!country || countryHit)) return true;
+  return false;
 }
 
 async function fetchText(url, { timeout = 12000, accept = '*/*' } = {}) {
@@ -473,7 +503,7 @@ async function searchGleif(query, mode = 'legalName') {
 
 const ORG_HINT = /compan|group|college|university|corporation|limited|gmbh|agency|contractor|construction|housing|plc|inc\b|institut|authority|hospital|council|technologies|gesellschaft/i;
 
-const JUNK_ENTITY_RE = /family name|given name|surname|disambiguation|hamlet|researcher|footballer|singer|illustrator|writer|poet|actor|musician|politician/i;
+const JUNK_ENTITY_RE = /family name|given name|surname|disambiguation|hamlet|researcher|footballer|singer|illustrator|writer|poet|actor|musician|politician|\bband\b|television|webcam|glider|sailplane|aircraft model|video game|\balbum\b|\bfilm\b|\bsong\b|dictionary|fairy tale|wordle/i;
 
 export function pickBestHit(hits, company, getLabel) {
   let best = null;
@@ -491,9 +521,10 @@ export function pickBestHit(hits, company, getLabel) {
     const startsWithFirst = first && String(label).toLowerCase().startsWith(first);
     let score = 0;
     const parentHint = /group|plc|\binc\b|limited|gmbh|technologies|corporation|services|holdings/i.test(`${label} ${desc}`);
+    const firstOk = first && first.length >= 3 && !PARENT_QUERY_BLOCK.has(first);
     if (coverage >= 0.8 && (orgLike || companyTokens.length >= 2)) score = 1;
-    else if (startsWithFirst && orgLike && labelTokens.length >= 2 && coverage >= 0.5) score = 0.7;
-    else if (startsWithFirst && orgLike && parentHint && first.length >= 3 && coverage >= 0.25) score = 0.62;
+    else if (startsWithFirst && orgLike && labelTokens.length >= 2 && coverage >= 0.5 && firstOk) score = 0.7;
+    else if (startsWithFirst && orgLike && parentHint && firstOk && (coverage >= 0.4 || (first.length <= 4 && coverage >= 0.25))) score = 0.62;
     if (score > bestScore) {
       best = { hit, label, score };
       bestScore = score;
@@ -515,12 +546,12 @@ export function queriesFor(company) {
   const tokens = significantTokens(full);
   if (tokens.length >= 2) q.push(tokens.slice(0, 3).join(' '));
   const hasLegal = new RegExp(LEGAL_SUFFIX_RE.source, 'i').test(full) || INSTITUTION_RE.test(full);
-  if (hasLegal && tokens[0] && tokens[0].length >= 3) {
+  if (hasLegal && tokens[0] && tokens[0].length >= 3 && !PARENT_QUERY_BLOCK.has(tokens[0])) {
     q.push(`${tokens[0]} Group`);
     q.push(`${tokens[0]} PLC`);
     q.push(`${tokens[0]} Inc`);
   }
-  return [...new Set(q)].slice(0, 7);
+  return [...new Set(q)].slice(0, 5);
 }
 
 export function websiteCandidates(url) {
@@ -596,8 +627,16 @@ async function resolveEntity(company, country = '') {
   let wikiTitle = '';
   let relatedNote = '';
 
-  for (const q of queriesFor(company)) {
-    const wdHits = await searchWikidata(q);
+  const queryList = queriesFor(company).slice(0, 3);
+  const gleifQueries = queryList.filter((q) => significantTokens(q).length >= 2);
+  const [firstWd, firstGleif] = await Promise.all([
+    queryList[0] ? searchWikidata(queryList[0]) : Promise.resolve([]),
+    gleifQueries[0] ? searchGleif(gleifQueries[0], 'legalName') : Promise.resolve([]),
+  ]);
+  let gleif = firstGleif || [];
+
+  for (const [i, q] of queryList.entries()) {
+    const wdHits = i === 0 ? firstWd : await searchWikidata(q);
     const picked = pickBestHit(wdHits, company, (h) => h.label || '');
     if (picked) {
       const ent = await loadWikidataEntity(picked.hit.id);
@@ -644,8 +683,8 @@ async function resolveEntity(company, country = '') {
     }
   }
 
-  if (!wikiTitle) {
-    for (const q of queriesFor(company)) {
+  if (!wikiTitle && !website) {
+    for (const q of queryList.slice(0, 2)) {
       const hits = await searchWikipedia(q);
       const picked = pickBestHit(hits, company, (h) => h.title);
       if (picked) {
@@ -655,7 +694,7 @@ async function resolveEntity(company, country = '') {
     }
   }
 
-  if (wikiTitle) {
+  if (wikiTitle && !website) {
     const sum = await wikipediaSummary(wikiTitle);
     if (sum?.extract) extract = sum.extract;
     const wikiUrl = sum?.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(wikiTitle)}`;
@@ -666,17 +705,14 @@ async function resolveEntity(company, country = '') {
     }
   }
 
-  let gleif = [];
-  const gleifQueries = queriesFor(company).filter((q) => significantTokens(q).length >= 2);
-  for (const q of gleifQueries) {
-    gleif = await searchGleif(q, 'legalName');
-    if (gleif.length) break;
-  }
-  if (!gleif.length && gleifQueries.length) {
-    for (const q of gleifQueries) {
-      gleif = await searchGleif(q, 'fulltext');
+  if (!gleif.length) {
+    for (const q of gleifQueries.slice(0, 2)) {
+      gleif = await searchGleif(q, 'legalName');
       if (gleif.length) break;
     }
+  }
+  if (!gleif.length && gleifQueries[0]) {
+    gleif = await searchGleif(gleifQueries[0], 'fulltext');
   }
   const gleifPick = pickBestHit(gleif, company, (h) => h?.attributes?.entity?.legalName?.name || '');
   if (gleifPick) {
@@ -718,10 +754,6 @@ async function harvestContacts(website, company, { extraUrls = [], country = '' 
     || (!country && pageMentionsCompany(homeRes.text, pageTitle(homeRes.text)));
   const pages = [{ url: homeRes.url, title: pageTitle(homeRes.text) || '官网首页' }];
   const htmls = [homeRes.text];
-  const [wayback, crtHosts] = await Promise.all([
-    waybackContactUrls(homeRes.url),
-    crtshHosts(homeRes.url),
-  ]);
   let siteHost = '';
   try { siteHost = new URL(homeRes.url).hostname; } catch { /* ignore */ }
   const searchSameDomain = extraUrls.filter((u) => {
@@ -730,30 +762,26 @@ async function harvestContacts(website, company, { extraUrls = [], country = '' 
     } catch {
       return false;
     }
-  }).sort((a, b) => scoreResearchUrl(b) - scoreResearchUrl(a)).slice(0, 6);
+  }).sort((a, b) => scoreResearchUrl(b) - scoreResearchUrl(a)).slice(0, 3);
+  const discovered = discoverContactLinks(homeRes.text, homeRes.url);
+  const commonPaths = ['/contact', '/contact-us', '/impressum', '/kontakt', '/procurement'].map((p) => {
+    try { return new URL(p, homeRes.url).toString(); } catch { return ''; }
+  }).filter(Boolean);
   const extra = [
-    ...discoverContactLinks(homeRes.text, homeRes.url),
-    ...CONTACT_PATHS.map((p) => {
-      try { return new URL(p, homeRes.url).toString(); } catch { return ''; }
-    }).filter(Boolean),
+    ...discovered,
+    ...commonPaths,
     ...searchSameDomain,
-    ...wayback,
-    ...crtHosts.map((h) => `https://${h}/`),
-  ].filter((u) => u && !isAssetUrl(u));
+  ].filter((u) => u && !isAssetUrl(u) && u !== homeRes.url);
   const ranked = [...new Set(extra)].sort((a, b) => {
     const weight = (u) => (/impressum|imprint|kontakt|contact|procurement|purchasing/i.test(u) ? 0 : 1);
     return weight(a) - weight(b);
-  });
+  }).slice(0, 4);
 
-  let fetched = 0;
-  for (const url of ranked) {
-    if (fetched >= 8) break;
-    if (url === homeRes.url) continue;
-    const r = await fetchText(url, { accept: 'text/html', timeout: 10000 });
-    fetched += 1;
+  const extras = await Promise.all(ranked.map((url) => fetchText(url, { accept: 'text/html', timeout: 8000 })));
+  for (const r of extras) {
     if (!r.ok || !r.text) continue;
     if (isAssetUrl(r.url) || !/<html|mailto:|contact|@/i.test(r.text.slice(0, 4000))) continue;
-    pages.push({ url: r.url, title: pageTitle(r.text) || url });
+    pages.push({ url: r.url, title: pageTitle(r.text) || r.url });
     htmls.push(r.text);
   }
 
@@ -771,9 +799,10 @@ async function harvestContacts(website, company, { extraUrls = [], country = '' 
   }
 
   const meta = pageMeta(homeRes.text);
-  const whois = await whoisFacts(homeRes.url);
+  const emails = [...emailMap.values()].sort((a, b) => b.score - a.score).slice(0, 8);
+  const whois = emails.some((e) => isOutreachEmail(e)) ? null : await whoisFacts(homeRes.url);
   return {
-    emails: [...emailMap.values()].sort((a, b) => b.score - a.score).slice(0, 8),
+    emails,
     phones: [...phones].slice(0, 8),
     pages,
     verified,
@@ -784,8 +813,8 @@ async function harvestContacts(website, company, { extraUrls = [], country = '' 
       cheerio: true,
       tldts: true,
       libphonenumber: phones.size > 0,
-      wayback: wayback.length > 0,
-      crtsh: crtHosts.length > 0,
+      wayback: false,
+      crtsh: false,
       whoiser: Boolean(whois?.domain),
       searchDorks: searchSameDomain.length > 0,
     },
@@ -984,15 +1013,17 @@ export async function researchLead(customer, { useAi = true } = {}) {
 
     const searchedWebsite = website;
     const productTerms = rfqProductTerms(`${customer.title || ''} ${customer.painPoints || ''}`);
+    const openWebsite = website;
     search = await searchCompanyPages(legalName || company, {
-      maxQueries: 5,
+      maxQueries: openWebsite ? 1 : 3,
       website: searchedWebsite,
       country: customer.country,
       product: productTerms,
     });
     notes.push(...search.notes);
-    const openWebsite = website;
-    if (search.officialGuess && !website) website = search.officialGuess;
+    if (search.officialGuess && !website && hostLooksLikeCompany(search.officialGuess, legalName || company)) {
+      website = search.officialGuess;
+    }
     for (const it of (search.items || []).slice(0, 8)) {
       sources.push({ title: it.title || '搜索结果', url: it.url });
     }
@@ -1018,6 +1049,9 @@ export async function researchLead(customer, { useAi = true } = {}) {
       ];
       for (const guess of guesses) {
         if (openWebsite && guess === openWebsite) continue;
+        if (COLLISION_HOST_RE.test(guess) || (!hostLooksLikeCompany(guess, legalName || company) && !/\.(gov|edu|mil)(\.|$)|(\.ac\.|\.go\.)/i.test(guess))) {
+          continue;
+        }
         const probe = await harvestContacts(guess, legalName || company, { extraUrls: search.urls, country: customer.country });
         if (probe.pages?.length && probe.verified) {
           harvested = probe;
@@ -1034,7 +1068,8 @@ export async function researchLead(customer, { useAi = true } = {}) {
       notes.push(`外贸搜索公式定位到 ${harvested.website}`);
     }
 
-    if (!(harvested.emails || []).length && website && hostFromWebsite(website) !== hostFromWebsite(searchedWebsite)) {
+    const haveOutreach = filterOutreachEmails(harvested.emails || []).length > 0;
+    if (!haveOutreach && !(harvested.emails || []).length && website && hostFromWebsite(website) !== hostFromWebsite(searchedWebsite)) {
       const siteSearch = await searchCompanyPages(legalName || company, {
         maxQueries: 3,
         website,
@@ -1060,7 +1095,7 @@ export async function researchLead(customer, { useAi = true } = {}) {
       snippetEmails: search.snippetEmails,
       company: legalName || company,
       website,
-      fetchPages: !(snippetAddress && snippetPhones.length && (harvested.emails?.length || search.snippetEmails?.length)),
+      fetchPages: !haveOutreach && !(snippetAddress && snippetPhones.length && (harvested.emails?.length || search.snippetEmails?.length)),
     });
     if (fromSearch.emails.length || fromSearch.pages.length) {
       harvested = {
@@ -1075,7 +1110,7 @@ export async function researchLead(customer, { useAi = true } = {}) {
 
     harvestedTools = { ...(harvested.tools || {}), searchDorks: Boolean(harvested.tools?.searchDorks || search.urls.length) };
     if (harvested.website && (harvested.verified || openWebsite)) website = harvested.website;
-    emails = harvested.emails || [];
+    emails = [...(harvested.emails || [])].sort((a, b) => Number(isOutreachEmail(b)) - Number(isOutreachEmail(a)) || (b.score || 0) - (a.score || 0));
     const wikiPhones = facts.filter((f) => f.label === '公开电话').map((f) => f.value);
     phones = [...new Set([...(harvested.phones || []), ...snippetPhones, ...wikiPhones])].slice(0, 8);
     if (phones.length && !facts.some((f) => f.label === '公开电话')) {
@@ -1278,7 +1313,13 @@ export async function researchLead(customer, { useAi = true } = {}) {
     grade: kyb.grade,
     nextAction: kyb.nextAction,
     needRegNo: kyb.needRegNo,
-    canApplyEmail: emails.length > 0 && kyb.grade === 'A',
+    canApplyEmail: filterOutreachEmails(emails).length > 0 && kyb.grade === 'A',
+    outreach: {
+      ready: kyb.grade === 'A' && filterOutreachEmails(emails).length > 0,
+      email: filterOutreachEmails(emails)[0]?.email || '',
+      website: website || '',
+      reason: kyb.nextAction,
+    },
     tools: GITHUB_TOOLS.map((t) => ({
       ...t,
       used: t.id === 'cheerio' || t.id === 'tldts' || t.id === 'fuse'

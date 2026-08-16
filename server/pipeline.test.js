@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { beijingDate, beijingHour, pickAutoEmail, isForwarderName } from './pipeline.js';
+import { beijingDate, beijingHour, pickAutoEmail, isForwarderName, researchPriority } from './pipeline.js';
 
 describe('pipeline schedule', () => {
   it('formats Beijing calendar date', () => {
@@ -51,5 +51,12 @@ describe('auto apply rules', () => {
   it('flags freight forwarders', () => {
     assert.equal(isForwarderName('ABC Freight Forwarding Ltd'), true);
     assert.equal(isForwarderName('Tyne Coast College'), false);
+  });
+
+  it('queues TED and UK buyers ahead of World Bank project titles', () => {
+    assert.ok(researchPriority({ source: 'TED Europa', company: 'HOWOGE Wohnungsbaugesellschaft mbH' })
+      < researchPriority({ source: 'USASpending.gov', company: 'THE BOEING COMPANY' }));
+    assert.ok(researchPriority({ source: 'USASpending.gov', company: 'THE BOEING COMPANY' })
+      < researchPriority({ source: 'World Bank', company: 'Assam: School Education' }));
   });
 });

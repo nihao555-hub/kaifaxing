@@ -239,6 +239,19 @@ describe('bing / google html parse', () => {
     );
     assert.equal(guess, 'https://nmguae.com/');
   });
+
+  it('does not pick a webcam collision for a purchasing consortium', () => {
+    const guess = pickOfficialSite(
+      ['https://londonwebcam.co.uk/', 'https://en.wikipedia.org/wiki/London'],
+      'London Universities Purchasing Consortium',
+      [
+        { url: 'https://londonwebcam.co.uk/', title: 'London Webcam' },
+        { url: 'https://en.wikipedia.org/wiki/London', title: 'London - Wikipedia' },
+      ],
+      { country: 'UK' },
+    );
+    assert.equal(guess, '');
+  });
 });
 
 describe('bing rss parse', () => {

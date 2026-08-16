@@ -16,6 +16,8 @@ const WEAK_TOKENS = new Set([
   'tyne', 'wear', 'coast', 'city', 'county', 'group', 'services', 'international', 'national',
   'united', 'general', 'first', 'east', 'west', 'north', 'south', 'river', 'trust', 'college',
   'university', 'school', 'hospital', 'council', 'department', 'ministry', 'authority',
+  'london', 'washington', 'crescent', 'federal', 'security', 'prime', 'webcam',
+  'lawrence', 'fermi', 'magellan', 'consortium', 'association',
 ]);
 
 export function quotedName(company) {
