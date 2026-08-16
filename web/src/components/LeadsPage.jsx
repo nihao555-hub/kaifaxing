@@ -135,7 +135,7 @@ export default function LeadsPage({ onGoOutreach }) {
   const [countryKeys, setCountryKeys] = useState([]);
   const [countryQ, setCountryQ] = useState('');
   const [quality, setQuality] = useState('');
-  const [research, setResearch] = useState('');
+  const [researchFilter, setResearchFilter] = useState('');
   const [page, setPage] = useState(0);
   const [limit, setLimit] = useState(20);
   const [rows, setRows] = useState([]);
@@ -180,11 +180,11 @@ export default function LeadsPage({ onGoOutreach }) {
     country: selectedNames.join(','),
     contact: tab === 'need_email' ? 'missing' : tab === 'has_email' ? 'found' : '',
     quality,
-    research,
+    research: researchFilter,
     today: tab === 'today',
     limit,
     offset: page * limit,
-  }), [q, tab, selectedNames, quality, research, limit, page]);
+  }), [q, tab, selectedNames, quality, researchFilter, limit, page]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -293,7 +293,7 @@ export default function LeadsPage({ onGoOutreach }) {
     setCountryKeys([]);
     setCountryQ('');
     setQuality('');
-    setResearch('');
+    setResearchFilter('');
     setPage(0);
   };
 
@@ -303,8 +303,8 @@ export default function LeadsPage({ onGoOutreach }) {
     return countryKeys.length === 1 ? first : `${first} 等${countryKeys.length}国`;
   }, [countryKeys, countryGroups]);
   const qualityLabel = quality === 'company' ? '公司名' : quality === 'person' ? '个人昵称' : '';
-  const researchLabel = research === 'done' ? '已背调' : research === 'none' ? '未背调' : '';
-  const hasFilters = countryKeys.length > 0 || quality || research;
+  const researchLabel = researchFilter === 'done' ? '已背调' : researchFilter === 'none' ? '未背调' : '';
+  const hasFilters = countryKeys.length > 0 || quality || researchFilter;
 
   const allChecked = rows.length > 0 && rows.every((r) => checked.includes(r.id));
   const batchResearch = async () => {
@@ -433,14 +433,14 @@ export default function LeadsPage({ onGoOutreach }) {
             <MenuOption active={quality === 'person'} label="个人昵称" onClick={() => { setQuality('person'); setPage(0); }} />
           </FilterMenu>
 
-          <FilterMenu label="背调状态" summary={researchLabel} active={Boolean(research)}>
-            <MenuOption active={!research} label="全部" onClick={() => { setResearch(''); setPage(0); }} />
-            <MenuOption active={research === 'none'} label="未背调" onClick={() => { setResearch('none'); setPage(0); }} />
+          <FilterMenu label="背调状态" summary={researchLabel} active={Boolean(researchFilter)}>
+            <MenuOption active={!researchFilter} label="全部" onClick={() => { setResearchFilter(''); setPage(0); }} />
+            <MenuOption active={researchFilter === 'none'} label="未背调" onClick={() => { setResearchFilter('none'); setPage(0); }} />
             <MenuOption
-              active={research === 'done'}
+              active={researchFilter === 'done'}
               label="已背调"
               count={facets.researched}
-              onClick={() => { setResearch('done'); setPage(0); }}
+              onClick={() => { setResearchFilter('done'); setPage(0); }}
             />
           </FilterMenu>
 
