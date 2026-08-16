@@ -225,6 +225,22 @@ export function researchDorks(company, { website, country, product } = {}) {
   return out;
 }
 
+export function searchPageUrl(engine, query) {
+  const q = encodeURIComponent(query);
+  if (engine === 'bing') return `https://www.bing.com/search?q=${q}&setlang=en-US`;
+  if (engine === 'ddg') return `https://duckduckgo.com/?q=${q}`;
+  return `https://www.google.com/search?q=${q}`;
+}
+
+/** 给抽屉「用谷歌打开」：服务器抓不了谷歌时，人在浏览器里跑同一套公式 */
+export function buildSearchLinks({ company, country, website, product } = {}) {
+  return researchDorks(company, { country, website, product }).slice(0, 5).map((query) => ({
+    query,
+    google: searchPageUrl('google', query),
+    bing: searchPageUrl('bing', query),
+  }));
+}
+
 function tryDecode(s) {
   try {
     return decodeURIComponent(s);
@@ -277,7 +293,11 @@ export function decodeBingUrl(raw) {
     if (fromB64) return fromB64;
   }
 
-  if (/^https?:\/\//i.test(s) && !/bing\.com\/ck\//i.test(s) && !/google\.[^/]+\/url\?/i.test(s)) {
+  if (s.startsWith('//') && !/bing\.com\/ck\//i.test(s)) {
+    s = `https:${s}`;
+  }
+
+  if (/^https?:\/\//i.test(s) && !/bing\.com\/ck\//i.test(s) && !/google\.[^/]+\/url\?/i.test(s) && !/duckduckgo\.com\/l\/\?/i.test(s)) {
     return s;
   }
 
@@ -456,6 +476,13 @@ export function parseSearchHtml(html, company, { siteHost, query, country } = {}
     items.push({ url: n, title: meta.title || '', desc: meta.desc || '' });
   };
 
+  $('.result, .web-result, .links_main').each((_, el) => {
+    const title = $(el).find('a.result__a, a.result-link').first().text().replace(/\s+/g, ' ').trim();
+    const desc = $(el).find('.result__snippet, .result-snippet').first().text().replace(/\s+/g, ' ').trim();
+    snippetTexts.push(title, desc);
+    push($(el).find('a.result__a, a.result-link').attr('href') || '', { title, desc });
+  });
+
   $('li.b_algo').each((_, el) => {
     const title = $(el).find('h2').first().text().replace(/\s+/g, ' ').trim();
     const desc = $(el).find('.b_caption p, p').first().text().replace(/\s+/g, ' ').trim();
@@ -510,6 +537,11 @@ export async function searchBingRss(query) {
 
 export async function searchGoogle(query) {
   const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&gbv=1&hl=en&num=10`;
+  return fetchSearch(url);
+}
+
+export async function searchDuckDuckGo(query) {
+  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
   return fetchSearch(url);
 }
 
@@ -583,15 +615,26 @@ export async function searchCompanyPages(company, { maxQueries = 4, website, cou
   for (const query of queries) {
     const parsed = { urls: [], items: [], snippetEmails: [] };
     const wantHtml = /@|email|intitle:contact|site:/i.test(query);
-    const preferGoogle = Boolean(country) && !siteHost && /UAE|Dubai|site:\.|official OR website/i.test(query);
+    const preferGoogle = Boolean(country) && !siteHost && /UAE|Dubai|website OR contact|site:\./i.test(query);
+    let triedDdg = false;
+    const tryDdg = async () => {
+      if (triedDdg) return;
+      triedDdg = true;
+      const ddg = await searchDuckDuckGo(query);
+      if (ddg.status === 200 && ddg.html && !isBlockedSearchPage(ddg.html)) {
+        mergeParsed(parsed, parseSearchHtml(ddg.html, company, { siteHost, query, country }));
+        if (parsed.urls.length) engine = engine || 'ddg';
+      }
+    };
     try {
       if (preferGoogle) {
         const google = await searchGoogle(query);
         if (google.status === 200 && google.html && !isBlockedSearchPage(google.html)) {
           mergeParsed(parsed, parseSearchHtml(google.html, company, { siteHost, query, country }));
           if (parsed.urls.length) engine = engine || 'google';
-        } else if (google.html && isBlockedSearchPage(google.html)) {
-          notes.push('谷歌结果页被 JS/验证码挡住，已改用必应公开结果');
+        } else {
+          notes.push('谷歌结果页被 JS/验证码挡住，已改用 DuckDuckGo / 必应公开结果');
+          await tryDdg();
         }
       }
 
@@ -616,10 +659,13 @@ export async function searchCompanyPages(company, { maxQueries = 4, website, cou
         if (google.status === 200 && google.html && !isBlockedSearchPage(google.html)) {
           mergeParsed(parsed, parseSearchHtml(google.html, company, { siteHost, query, country }));
           if (parsed.urls.length) engine = engine || 'google';
-        } else if (google.html && isBlockedSearchPage(google.html)) {
-          notes.push('谷歌结果页被 JS/验证码挡住，已改用必应公开结果');
+        } else {
+          notes.push('谷歌结果页被 JS/验证码挡住，已改用 DuckDuckGo / 必应公开结果');
+          await tryDdg();
         }
       }
+
+      if (!parsed.urls.length) await tryDdg();
 
       for (const u of parsed.urls) {
         if (seen.has(u)) continue;
@@ -629,7 +675,7 @@ export async function searchCompanyPages(company, { maxQueries = 4, website, cou
       items.push(...(parsed.items || []));
       snippetEmails.push(...parsed.snippetEmails);
       if (parsed.urls.length) {
-        notes.push(`${engine === 'google' ? '谷歌' : '必应'}公式命中 ${parsed.urls.length} 页：${query.slice(0, 52)}`);
+        notes.push(`${engine === 'google' ? '谷歌' : engine === 'ddg' ? 'DuckDuckGo' : '必应'}公式命中 ${parsed.urls.length} 页：${query.slice(0, 52)}`);
       } else {
         notes.push(`公式无相关页：${query.slice(0, 48)}`);
       }
@@ -644,6 +690,7 @@ export async function searchCompanyPages(company, { maxQueries = 4, website, cou
 
   return {
     queries,
+    links: buildSearchLinks({ company, country, website, product }),
     urls: urls.slice(0, 20),
     items: items.slice(0, 20),
     snippetEmails: [...new Set(snippetEmails)],

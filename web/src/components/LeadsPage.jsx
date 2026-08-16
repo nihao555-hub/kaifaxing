@@ -738,6 +738,7 @@ export default function LeadsPage({ onGoOutreach }) {
                   tab={drawerTab}
                   customer={customer}
                   research={research}
+                  searchLinks={detail?.searchLinks || research?.searchLinks || []}
                   pickedEmail={pickedEmail}
                   setPickedEmail={setPickedEmail}
                 />
@@ -840,7 +841,30 @@ function EmailPick({ emails, pickedEmail, setPickedEmail, name }) {
   );
 }
 
-function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail }) {
+function GoogleSearchLinks({ links }) {
+  if (!links?.length) return null;
+  return (
+    <div className="space-y-2">
+      <div className="text-[12px] font-medium text-[#334155]">用谷歌搜（浏览器打开）</div>
+      <p className="text-[11px] leading-relaxed text-[#94a3b8]">
+        服务器抓谷歌会被验证码挡住。同一套公式请在浏览器里打开，核到官网角色邮箱后再点「挖邮箱」或手工填入。
+      </p>
+      <ul className="space-y-1.5">
+        {links.map((item) => (
+          <li key={item.query} className="rounded border border-[#e2e8f0] px-2.5 py-2">
+            <div className="truncate text-[11px] text-[#475569]">{item.query}</div>
+            <div className="mt-1 flex gap-3 text-[11px]">
+              <a href={item.google} target="_blank" rel="noreferrer" className="text-primary hover:underline">谷歌</a>
+              <a href={item.bing} target="_blank" rel="noreferrer" className="text-primary hover:underline">必应</a>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function DrawerBody({ tab, customer, research, searchLinks = [], pickedEmail, setPickedEmail }) {
   const address = research?.address || factValue(research, /注册地址|总部|地址/);
   const industry = research?.industry || factValue(research, /行业/) || customer.industry;
   const size = research?.employees || factValue(research, /员工规模/);
@@ -884,6 +908,7 @@ function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail }) {
         {research?.phones?.length > 0 && (
           <div className="text-[12px] text-[#475569]">公开电话：{research.phones.join(' · ')}</div>
         )}
+        <GoogleSearchLinks links={searchLinks} />
       </div>
     );
   }
@@ -973,6 +998,9 @@ function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail }) {
             </ul>
           </div>
         )}
+        <div className="mt-3">
+          <GoogleSearchLinks links={searchLinks} />
+        </div>
         {(research?.searchPages || []).length > 0 && (
           <div className="mt-2">
             <div className="mb-1 text-[12px] text-[#94a3b8]">搜索解析到的公开页</div>

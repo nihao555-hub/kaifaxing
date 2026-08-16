@@ -11,7 +11,8 @@ import { startAgent, stopAgent, getAgentState } from './autopilot.js';
 import { ingestInbound } from './inbox.js';
 import { listSources, searchRfq, importRfqItems, ingestCommercial, crawlAlibabaPublic, crawlAllAndImport, ALIBABA_PUBLIC_FIELDS, PUBLIC_SINCE_DEFAULT } from './rfq.js';
 import { alibabaCrawlProgress } from './publicRfq.js';
-import { isPlausibleEmail } from './research.js';
+import { isPlausibleEmail, isPersonLikeLead } from './research.js';
+import { buildSearchLinks, rfqProductTerms } from './searchDorks.js';
 import { GITHUB_TOOLS } from './githubTools.js';
 import {
   startLeadPipeline,
@@ -197,7 +198,17 @@ app.get('/api/rfq/leads', (req, res) => {
 app.get('/api/rfq/leads/:id', (req, res) => {
   const customer = getCustomer(req.params.id);
   if (!customer) return res.status(404).json({ error: '线索不存在' });
-  res.json({ customer, research: customer.research || null });
+  const searchLinks = isPersonLikeLead(customer)
+    ? []
+    : (customer.research?.searchLinks?.length
+      ? customer.research.searchLinks
+      : buildSearchLinks({
+        company: customer.legalName || customer.company || customer.name,
+        country: customer.country,
+        website: customer.website || customer.research?.website,
+        product: rfqProductTerms(`${customer.title || ''} ${customer.painPoints || ''}`),
+      }));
+  res.json({ customer, research: customer.research || null, searchLinks });
 });
 
 app.post('/api/rfq/leads/research-queue', (req, res) => {

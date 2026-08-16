@@ -26,6 +26,7 @@ import {
   hostFitsCountry,
   countrySearchTerms,
   rfqProductTerms,
+  buildSearchLinks,
 } from './searchDorks.js';
 import { gradeKyb, hasVerifiedEntity, hasProcurementTrace, isForwarderName } from './kyb.js';
 import { screenSanctions } from './sanctions.js';
@@ -1112,6 +1113,12 @@ export async function researchLead(customer, { useAi = true } = {}) {
     risks,
     notes,
     searchQueries: search.queries || [],
+    searchLinks: search.links || buildSearchLinks({
+      company: legalName || company,
+      country: customer.country,
+      website,
+      product: rfqProductTerms(`${customer.title || ''} ${customer.painPoints || ''}`),
+    }),
     searchPages: (search.urls || []).slice(0, 8),
     kyb,
     grade: kyb.grade,

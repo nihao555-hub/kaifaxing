@@ -14,6 +14,7 @@ import {
   countrySearchTerms,
   rfqProductTerms,
   hostFitsCountry,
+  buildSearchLinks,
 } from './searchDorks.js';
 
 const BING_FIXTURE = `
@@ -97,6 +98,17 @@ describe('research dorks', () => {
     assert.ok(q[0].startsWith('site:stc.ac.uk'));
     assert.ok(q.some((s) => /filetype:pdf/i.test(s)));
   });
+
+  it('builds clickable Google links for the same formulas', () => {
+    const links = buildSearchLinks({
+      company: 'NMG TECHNICAL SERVICE L.L.C',
+      country: 'United Arab Emirates',
+      product: 'Chiller',
+    });
+    assert.ok(links.length >= 2);
+    assert.ok(links[0].google.startsWith('https://www.google.com/search?q='));
+    assert.ok(links[0].query.includes('UAE') || links[0].query.includes('Dubai'));
+  });
 });
 
 describe('search result URL filters', () => {
@@ -134,6 +146,23 @@ describe('bing / google html parse', () => {
       decodeBingUrl('/url?q=https://www.quazartech.com/contact&sa=U'),
       'https://www.quazartech.com/contact'
     );
+    assert.equal(
+      decodeBingUrl('//duckduckgo.com/l/?uddg=https%3A%2F%2Fnmguae.com%2Fcontact'),
+      'https://nmguae.com/contact'
+    );
+  });
+
+  it('parses DuckDuckGo html results', () => {
+    const html = `
+      <div class="result">
+        <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fnmguae.com%2F">NMG Technical Services Dubai</a>
+        <a class="result__snippet">HVAC in UAE. Email info@nmguae.com</a>
+      </div>`;
+    const { urls, snippetEmails } = parseSearchHtml(html, 'NMG TECHNICAL SERVICE L.L.C', {
+      country: 'United Arab Emirates',
+    });
+    assert.ok(urls.includes('https://nmguae.com/'));
+    assert.ok(snippetEmails.includes('info@nmguae.com'));
   });
 
   it('parses bing cites and keeps role emails from snippets', () => {
