@@ -1,5 +1,23 @@
 import { chat, parseJson } from './ai.js';
 import { enrichOpenSources } from './openSources.js';
+import {
+  GITHUB_TOOLS,
+  registrableDomain as tldtsDomain,
+  isAssetUrl,
+  pageTitle as cheerioTitle,
+  pageText,
+  pageMeta,
+  mailtoFromHtml,
+  contactHrefs,
+  parsePhones,
+  wikidataSearchUrl,
+  wikidataEntitiesUrl,
+  simplifyEntity,
+  fuseRank,
+  waybackContactUrls,
+  crtshHosts,
+  whoisFacts,
+} from './githubTools.js';
 
 const UA = 'OutreachAI/1.0 (public due-diligence; +https://github.com/nihao555-hub/kaifaxing)';
 
@@ -8,10 +26,6 @@ const LEGAL_SUFFIX_RE =
 
 const INSTITUTION_RE =
   /\b(college|university|hospital|council|ministry|department|authority|agency|municipality|borough|county|city|trust|consortium|society|foundation|institute|school|police|nhs|government|kommune|gemeinde|stadt|amt)\b/i;
-
-const MULTI_TLD = new Set([
-  'co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'co.jp', 'com.cn', 'co.in', 'com.sg', 'com.hk', 'co.nz', 'com.br',
-]);
 
 const CONTACT_PATHS = [
   '/contact', '/contact-us', '/contactus', '/contacts', '/contact.html',
@@ -67,7 +81,6 @@ const JUNK_DOMAIN = [
 ];
 
 const EMAIL_RE = /[a-zA-Z0-9][a-zA-Z0-9._%+-]{0,63}@[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,24}/g;
-const PHONE_RE = /(?:\+|00)[1-9][\d\s().-]{7,16}\d/g;
 
 export function stripLegalSuffix(name) {
   return String(name || '')
@@ -113,15 +126,7 @@ export function isPersonLikeDisplayName(name) {
 }
 
 export function registrableDomain(host) {
-  const h = String(host || '').replace(/^www\./i, '').toLowerCase();
-  const parts = h.split('.').filter(Boolean);
-  if (parts.length <= 2) return h;
-  const last3 = parts.slice(-3).join('.');
-  const last2plus = parts.slice(-2).join('.');
-  if (MULTI_TLD.has(last2plus) || MULTI_TLD.has(parts.slice(-2).join('.'))) return last3;
-  const maybe = `${parts[parts.length - 2]}.${parts[parts.length - 1]}`;
-  if (MULTI_TLD.has(maybe)) return parts.slice(-3).join('.');
-  return maybe;
+  return tldtsDomain(host);
 }
 
 export function isPlausibleEmail(email) {
@@ -165,11 +170,11 @@ export function scoreEmail(email, websiteHost = '') {
 }
 
 export function extractEmails(html, { websiteHost = '' } = {}) {
-  const text = stripTags(html);
+  const text = pageText(html);
   const found = new Map();
-  for (const raw of text.match(EMAIL_RE) || []) {
-    const email = raw.toLowerCase();
-    if (!isPlausibleEmail(email)) continue;
+  const add = (raw) => {
+    const email = String(raw || '').toLowerCase();
+    if (!isPlausibleEmail(email)) return;
     const prev = found.get(email);
     const item = {
       email,
@@ -177,46 +182,24 @@ export function extractEmails(html, { websiteHost = '' } = {}) {
       score: scoreEmail(email, websiteHost),
     };
     if (!prev || item.score > prev.score) found.set(email, item);
-  }
+  };
+  for (const email of mailtoFromHtml(html)) add(email);
+  for (const raw of text.match(EMAIL_RE) || []) add(raw);
   return [...found.values()].sort((a, b) => b.score - a.score);
 }
 
 export function extractPhones(html) {
-  const rawHtml = String(html || '');
-  const text = stripTags(rawHtml);
-  const set = new Set();
-  const add = (raw) => {
-    const cleaned = String(raw || '').replace(/[()\s.-]+/g, ' ').trim();
-    const compact = cleaned.replace(/[^\d+]/g, '');
-    if (compact.replace(/\D/g, '').length < 8) return;
-    set.add(cleaned);
-  };
-  for (const m of rawHtml.matchAll(/href=["']tel:([^"']+)["']/gi)) {
-    try { add(decodeURIComponent(m[1]).replace(/^tel:/i, '')); } catch { add(m[1]); }
-  }
-  for (const raw of text.match(PHONE_RE) || []) add(raw);
-  return [...set].slice(0, 8);
-}
-
-function stripTags(html) {
-  return String(html || '')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/\s+/g, ' ');
+  return parsePhones(pageText(html), html);
 }
 
 function pageTitle(html) {
-  const m = String(html || '').match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  return m ? stripTags(m[1]).trim().slice(0, 160) : '';
+  return cheerioTitle(html);
 }
 
 function pageMentionsCompany(html, company) {
   const tokens = significantTokens(company).filter((t) => t.length >= 4);
   const title = pageTitle(html).toLowerCase();
-  const text = `${title} ${stripTags(html).slice(0, 4000)}`.toLowerCase();
+  const text = `${title} ${pageText(html).slice(0, 4000)}`.toLowerCase();
   if (!tokens.length) {
     return significantTokens(company).some((t) => text.includes(t));
   }
@@ -254,33 +237,21 @@ async function fetchJson(url, accept = 'application/json') {
   }
 }
 
-function sameSite(fromUrl, href) {
-  try {
-    const base = new URL(fromUrl);
-    const next = new URL(href, fromUrl);
-    if (!/^https?:$/.test(next.protocol)) return false;
-    return registrableDomain(base.hostname) === registrableDomain(next.hostname);
-  } catch {
-    return false;
-  }
-}
-
 function discoverContactLinks(html, pageUrl) {
-  const hrefs = [];
-  const re = /href=["']([^"']+)["']/gi;
-  let m;
-  while ((m = re.exec(html))) {
-    const href = m[1];
-    if (!/contact|kontakt|impressum|imprint|about|legal|enquiry|privacy/i.test(href)) continue;
-    if (!sameSite(pageUrl, href)) continue;
-    try {
-      hrefs.push(new URL(href, pageUrl).toString());
-    } catch { /* skip */ }
-  }
-  return [...new Set(hrefs)].slice(0, 8);
+  return contactHrefs(html, pageUrl);
 }
 
 function claimValues(entity, pid) {
+  const simple = entity?._simple || simplifyEntity(entity);
+  if (simple?.claims?.[pid]) {
+    return [].concat(simple.claims[pid]).map((v) => {
+      if (v == null) return '';
+      if (typeof v === 'string' || typeof v === 'number') return String(v);
+      if (v.id) return v.id;
+      if (v.value) return String(v.value);
+      return '';
+    }).filter(Boolean);
+  }
   const out = [];
   for (const c of entity?.claims?.[pid] || []) {
     const val = c?.mainsnak?.datavalue?.value;
@@ -295,13 +266,12 @@ function claimValues(entity, pid) {
 }
 
 async function searchWikidata(query) {
-  const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&language=en&format=json&limit=5&search=${encodeURIComponent(query)}`;
-  const data = await fetchJson(url);
+  const data = await fetchJson(wikidataSearchUrl(query));
   return data?.search || [];
 }
 
 async function loadWikidataEntity(id) {
-  const data = await fetchJson(`https://www.wikidata.org/wiki/Special:EntityData/${id}.json`);
+  const data = await fetchJson(wikidataEntitiesUrl([id]));
   return data?.entities?.[id] || null;
 }
 
@@ -351,7 +321,11 @@ export function pickBestHit(hits, company, getLabel) {
       bestScore = score;
     }
   }
-  return bestScore > 0 ? best : null;
+  if (bestScore <= 0) return null;
+  const ranked = fuseRank(company, hits.filter((h) => !JUNK_ENTITY_RE.test(`${getLabel(h)} ${h.description || ''}`)), getLabel);
+  const top = ranked[0];
+  if (top && top.label === best.label) best.score += 0.05;
+  return best;
 }
 
 function queriesFor(company) {
@@ -554,12 +528,18 @@ async function harvestContacts(website, company) {
   const verified = pageMentionsCompany(homeRes.text, company) || pageMentionsCompany(homeRes.text, pageTitle(homeRes.text));
   const pages = [{ url: homeRes.url, title: pageTitle(homeRes.text) || '官网首页' }];
   const htmls = [homeRes.text];
+  const [wayback, crtHosts] = await Promise.all([
+    waybackContactUrls(homeRes.url),
+    crtshHosts(homeRes.url),
+  ]);
   const extra = [
     ...discoverContactLinks(homeRes.text, homeRes.url),
     ...CONTACT_PATHS.map((p) => {
       try { return new URL(p, homeRes.url).toString(); } catch { return ''; }
     }).filter(Boolean),
-  ];
+    ...wayback,
+    ...crtHosts.map((h) => `https://${h}/`),
+  ].filter((u) => u && !isAssetUrl(u));
   const ranked = [...new Set(extra)].sort((a, b) => {
     const weight = (u) => (/impressum|imprint|kontakt|contact/i.test(u) ? 0 : 1);
     return weight(a) - weight(b);
@@ -572,6 +552,7 @@ async function harvestContacts(website, company) {
     const r = await fetchText(url, { accept: 'text/html', timeout: 10000 });
     fetched += 1;
     if (!r.ok || !r.text) continue;
+    if (isAssetUrl(r.url) || !/<html|mailto:|contact|@/i.test(r.text.slice(0, 4000))) continue;
     pages.push({ url: r.url, title: pageTitle(r.text) || url });
     htmls.push(r.text);
   }
@@ -589,12 +570,24 @@ async function harvestContacts(website, company) {
     for (const p of extractPhones(html)) phones.add(p);
   }
 
+  const meta = pageMeta(homeRes.text);
+  const whois = await whoisFacts(homeRes.url);
   return {
     emails: [...emailMap.values()].sort((a, b) => b.score - a.score).slice(0, 8),
     phones: [...phones].slice(0, 8),
     pages,
     verified,
     website: homeRes.url,
+    meta,
+    whois,
+    tools: {
+      cheerio: true,
+      tldts: true,
+      libphonenumber: phones.size > 0,
+      wayback: wayback.length > 0,
+      crtsh: crtHosts.length > 0,
+      whoiser: Boolean(whois?.domain),
+    },
   };
 }
 
@@ -655,6 +648,7 @@ export async function researchLead(customer, { useAi = true } = {}) {
   let emails = [];
   let phones = [];
   let pages = [];
+  let harvestedTools = {};
 
   if (personLike) {
     steps.push({ key: 'entity', label: '主体核验', ok: false, detail: '只有个人显示名，公开库无法核到公司' });
@@ -695,12 +689,23 @@ export async function researchLead(customer, { useAi = true } = {}) {
       }
     }
 
+    harvestedTools = harvested.tools || {};
     if (harvested.website) website = harvested.website;
     emails = harvested.emails || [];
     const wikiPhones = facts.filter((f) => f.label === '公开电话').map((f) => f.value);
     phones = [...new Set([...(harvested.phones || []), ...wikiPhones])].slice(0, 8);
     pages = harvested.pages || [];
     if (harvested.error && !website) notes.push(`官网抓取：${harvested.error}`);
+    if (harvested.whois?.created) {
+      facts.push({
+        label: '域名登记',
+        value: [harvested.whois.domain, harvested.whois.created && `注册于 ${harvested.whois.created}`, harvested.whois.registrar].filter(Boolean).join(' · '),
+        source: 'whoiser',
+      });
+    }
+    if (harvested.meta?.description) {
+      facts.push({ label: '官网简介', value: String(harvested.meta.description).slice(0, 240), source: 'cheerio' });
+    }
     for (const p of pages) sources.push({ title: p.title || '官网', url: p.url });
     steps.push({
       key: 'website',
@@ -804,6 +809,15 @@ export async function researchLead(customer, { useAi = true } = {}) {
     risks,
     notes,
     canApplyEmail: emails.length > 0,
+    tools: GITHUB_TOOLS.map((t) => ({
+      ...t,
+      used: t.id === 'cheerio' || t.id === 'tldts' || t.id === 'fuse'
+        || (t.id === 'wikibase-sdk' && facts.some((f) => f.source === 'Wikidata'))
+        || (t.id === 'libphonenumber-js' && phones.length > 0)
+        || (t.id === 'whoiser' && Boolean(harvestedTools.whoiser))
+        || (t.id === 'waybackurls' && Boolean(harvestedTools.wayback))
+        || (t.id === 'subfinder' && Boolean(harvestedTools.crtsh)),
+    })),
   };
 }
 

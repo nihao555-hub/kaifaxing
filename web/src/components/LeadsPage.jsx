@@ -919,6 +919,20 @@ function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail }) {
           <p className="text-[12px] text-[#94a3b8]">还没有核到补充信息。</p>
         )}
       </div>
+
+      {(research?.tools || []).some((t) => t.used) && (
+        <div>
+          <div className="mb-2 text-[12px] font-medium text-[#334155]">本轮用到的 GitHub 项目</div>
+          <ul className="space-y-1.5">
+            {research.tools.filter((t) => t.used).map((t) => (
+              <li key={t.id} className="text-[12px] leading-relaxed text-[#475569]">
+                <a href={t.repo} target="_blank" rel="noreferrer" className="text-primary hover:underline">{t.name}</a>
+                <span className="text-[#94a3b8]"> · {t.use}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

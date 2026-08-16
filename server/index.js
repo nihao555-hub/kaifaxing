@@ -12,6 +12,7 @@ import { ingestInbound } from './inbox.js';
 import { listSources, searchRfq, importRfqItems, ingestCommercial, crawlAlibabaPublic, crawlAllAndImport, ALIBABA_PUBLIC_FIELDS, PUBLIC_SINCE_DEFAULT } from './rfq.js';
 import { alibabaCrawlProgress } from './publicRfq.js';
 import { isPlausibleEmail } from './research.js';
+import { GITHUB_TOOLS } from './githubTools.js';
 import {
   startLeadPipeline,
   getPipelineState,
@@ -159,6 +160,7 @@ app.post('/api/rfq/ingest', (req, res) => {
   }
 });
 
+app.get('/api/research/tools', (req, res) => res.json({ tools: GITHUB_TOOLS }));
 app.get('/api/rfq/pipeline', (req, res) => res.json(getPipelineState()));
 app.post('/api/rfq/pipeline/sync', async (req, res) => {
   try {

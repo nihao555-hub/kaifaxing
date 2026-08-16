@@ -69,6 +69,7 @@ export const api = {
   rfqApplyContact: (id, payload) =>
     req(`/api/rfq/leads/${id}/apply-contact`, { method: 'POST', body: JSON.stringify(payload) }),
   rfqPromote: (ids) => req('/api/rfq/leads/promote', { method: 'POST', body: JSON.stringify({ ids }) }),
+  researchTools: () => req('/api/research/tools'),
   rfqPipeline: () => req('/api/rfq/pipeline'),
   rfqPipelineSync: () => req('/api/rfq/pipeline/sync', { method: 'POST', body: '{}' }),
 };
