@@ -297,8 +297,9 @@ function enqueueDraft(customer) {
 export function startAgent() {
   state.enabled = true;
   resumeSending();
+  recoverScheduled();
   for (const c of db.customers) {
-    if (c.agentPhase === 'paused') enqueueDraft(c);
+    if (c.agentPhase === 'paused' && c.inOutreach && !isBlockedOutreachEmail(c.email)) enqueueDraft(c);
   }
   logActivity({
     customerId: null,
