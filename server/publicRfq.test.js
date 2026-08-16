@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseAlibabaPublicHtml, parseOpenTime, extractAlibabaPublicBlocks } from './publicRfq.js';
+import { parseAlibabaPublicHtml, parseOpenTime, extractAlibabaPublicBlocks, toLead } from './publicRfq.js';
 
 const SAMPLE = `
 window.PAGE_DATA["index"].data.push({
@@ -8,7 +8,6 @@ window.PAGE_DATA["index"].data.push({
   id: "1684056292",
   rfqId: "1684056292",
   subject: "20v\\x20Cordless\\x20Drill",
-  description: "Need\\x20drills",
   country: "Burkina Faso",
   countrySimple: "BF",
   quantity:  '20' ,
@@ -17,6 +16,8 @@ window.PAGE_DATA["index"].data.push({
   haveAnnexes: true,
   rfqStarLevel: parseInt("3" || 0),
   buyerName: 'Wilfried\\x20Kiendrebeogo',
+  imageUrl: "https://sc04.alicdn.com/kf/demo.jpg",
+  description: "I work for Sahel Tools Ltd and need drills",
 });
 pageView.totalPages = '100';
 pageView.currentPage = '1';
@@ -37,6 +38,18 @@ describe('alibaba public parser', () => {
     assert.equal(totalItems, 2228);
     assert.equal(currentPage, 1);
     assert.equal(items[0].email, undefined);
+    assert.equal(items[0].imageUrl, 'https://sc04.alicdn.com/kf/demo.jpg');
+    assert.equal(items[0].haveAnnexes, true);
+  });
+
+  it('uses an attributed company in the public description', () => {
+    const { items } = parseAlibabaPublicHtml(SAMPLE);
+    const lead = toLead(items[0]);
+    assert.equal(lead.company, 'Sahel Tools Ltd');
+    assert.equal(lead.name, 'Wilfried Kiendrebeogo');
+    assert.equal(lead.identitySource, 'rfq_text');
+    assert.equal(lead.imageUrl, 'https://sc04.alicdn.com/kf/demo.jpg');
+    assert.equal(lead.haveAnnexes, true);
   });
 
   it('reads country filter counts', () => {

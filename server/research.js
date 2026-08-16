@@ -171,7 +171,10 @@ export function skippedLeadReport(customer) {
       { key: 'search', label: '搜索公式', ok: false, detail: '个人昵称不拿去撞搜索结果' },
     ],
     brief: `${company || '该询盘'} 只有个人显示名或产品句，公开库核不到公司，未跑谷歌公式。`,
-    notes: ['阿里等公开 RFQ 卡片经常只有买家昵称。没有公司全称时，外贸公式到此结束。'],
+    notes: [
+      '阿里等公开 RFQ 卡片经常只有买家昵称。没有公司全称时，外贸公式到此结束。',
+      '不走领英对人、不猜 Gmail、不爬 Buyer profile。正文若写出 Ltd/LLC 会自动抽；公开缩略图只给人眼/浏览器以图搜图。',
+    ],
     kyb,
     grade: 'C',
     nextAction: kyb.nextAction,
@@ -902,6 +905,7 @@ export async function researchLead(customer, { useAi = true } = {}) {
     steps.push({ key: 'contact', label: '公开联系方式', ok: false, detail: '不猜测私人邮箱，不从社交资料扒信' });
     steps.push({ key: 'search', label: '搜索公式', ok: false, detail: '个人昵称不拿去撞搜索结果' });
     notes.push('阿里等公开 RFQ 卡片经常只有买家昵称。没有公司全称时，外贸公式到此结束。');
+    notes.push('不走领英对人、不猜 Gmail、不爬 Buyer profile。正文若写出 Ltd/LLC 会自动抽；公开缩略图只给人眼/浏览器以图搜图。');
   } else {
     const resolved = await resolveEntity(company, customer.country);
     website = resolved.website;

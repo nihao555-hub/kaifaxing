@@ -13,6 +13,7 @@ import { ingestInbound } from './inbox.js';
 import { listSources, searchRfq, importRfqItems, ingestCommercial, crawlAlibabaPublic, crawlAllAndImport, ALIBABA_PUBLIC_FIELDS, PUBLIC_SINCE_DEFAULT } from './rfq.js';
 import { alibabaCrawlProgress } from './publicRfq.js';
 import { isPlausibleEmail, isPersonLikeLead } from './research.js';
+import { imageSearchLinks } from './rfqHints.js';
 import { buildSearchLinks, rfqProductTerms, searchGoogleCse, searchSerper, parseGoogleCse, parseSerper } from './searchDorks.js';
 import { GITHUB_TOOLS } from './githubTools.js';
 import {
@@ -24,6 +25,7 @@ import {
   enqueuePendingResearch,
   kickResearch,
   stampPersonLikeLeads,
+  applyTextCompanyHints,
   identifyLead,
   applyPublicContact,
   promoteLeads,
@@ -282,17 +284,24 @@ app.get('/api/rfq/leads/:id', (req, res) => {
         website: customer.website || customer.research?.website,
         product: rfqProductTerms(`${customer.title || ''} ${customer.painPoints || ''}`),
       }));
-  res.json({ customer, research: customer.research || null, searchLinks, searchStatus: googleSearchStatus() });
+  res.json({
+    customer,
+    research: customer.research || null,
+    searchLinks,
+    imageSearchLinks: imageSearchLinks(customer.imageUrl),
+    searchStatus: googleSearchStatus(),
+  });
 });
 
 app.post('/api/rfq/leads/research-queue', (req, res) => {
   const all = Boolean(req.body?.all);
   const limit = Number(req.body?.limit || (all ? 4000 : 800));
+  const promoted = applyTextCompanyHints();
   const stamped = stampPersonLikeLeads();
   const added = enqueuePendingResearch({ limit });
   if (all && googleSearchReady()) config.pipeline.researchDelayMs = Math.min(config.pipeline.researchDelayMs, 2500);
   const state = kickResearch();
-  res.json({ stamped, added, ...state });
+  res.json({ promoted, stamped, added, ...state });
 });
 
 app.post('/api/rfq/leads/research-batch', async (req, res) => {

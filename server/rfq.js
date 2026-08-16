@@ -503,6 +503,9 @@ export function importRfqItems(items = [], { quiet = false } = {}) {
       sourceUrl: it.url,
       awardId: it.awardId || '',
       agentPhase: it.email ? null : 'need_email',
+      imageUrl: it.imageUrl || '',
+      haveAnnexes: Boolean(it.haveAnnexes),
+      identitySource: it.identitySource || '',
     };
     db.customers.unshift(customer);
     created.push(customer);

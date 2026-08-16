@@ -1,4 +1,5 @@
 // 只拉免登录就能看到的公开询盘列表，不登录、不绕验证码、不收集隐藏邮箱。
+import { extractCompanyHintFromText } from './rfqHints.js';
 
 export const PUBLIC_SINCE_DEFAULT = '2026-07-01';
 
@@ -103,16 +104,22 @@ export function parseAlibabaPublicHtml(html) {
   return { items, totalItems, currentPage, totalPages, categoryIds, countries };
 }
 
-function toLead(row) {
+export function toLead(row) {
   const qty = [row.quantity, row.quantityUnit].filter(Boolean).join(' ');
   const when = row.openTimeStr || row.postedAt || '';
+  const hint = extractCompanyHintFromText(row.description);
+  const extras = [
+    row.haveAnnexes ? '列表标记有附件（附件在登录墙后，不下载）' : '',
+    row.imageUrl ? '列表有公开缩略图' : '',
+    hint ? `正文写到公司 ${hint}` : '',
+  ].filter(Boolean).join('；');
   return {
     id: `alipub_${row.rfqId || row.subject}`,
     source: '阿里国际站公开 RFQ',
     sourceType: 'alibaba_public_list',
     kind: 'commercial',
     title: row.subject,
-    company: row.buyerName || row.subject || 'Alibaba buyer',
+    company: hint || row.buyerName || row.subject || 'Alibaba buyer',
     name: row.buyerName || 'Alibaba buyer',
     titleRole: 'Buyer',
     email: '',
@@ -123,7 +130,10 @@ function toLead(row) {
     awardId: String(row.rfqId || ''),
     amount: Number(row.quantity) || 0,
     postedAt: row.postedAt,
-    painPoints: `公开询盘：${row.subject || ''}${qty ? `，数量 ${qty}` : ''}${row.country ? `，${row.country}` : ''}${when ? `，发布 ${when}` : ''}。${(row.description || '').slice(0, 180)} 列表页无邮箱，入库后补公司采购邮箱再发信。`,
+    imageUrl: row.imageUrl || '',
+    haveAnnexes: Boolean(row.haveAnnexes),
+    identitySource: hint ? 'rfq_text' : '',
+    painPoints: `公开询盘：${row.subject || ''}${qty ? `，数量 ${qty}` : ''}${row.country ? `，${row.country}` : ''}${when ? `，发布 ${when}` : ''}。${(row.description || '').slice(0, 180)} 列表页无邮箱。${extras}`,
   };
 }
 

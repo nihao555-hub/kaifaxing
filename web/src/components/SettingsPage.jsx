@@ -172,16 +172,19 @@ export default function SettingsPage() {
         </section>
 
         <section className="mt-5 max-w-[640px] rounded-xl border border-[#e8edf4] bg-white p-5 shadow-sm">
-          <div className="text-[14px] font-medium text-[#1e293b]">阿里国际站（昵称询盘）</div>
+          <div className="text-[14px] font-medium text-[#1e293b]">4.7 万条昵称询盘跑不通的原因</div>
           <p className="mt-2 text-[12px] leading-relaxed text-[#64748b]">
-            公开列表大约 96% 只有买家昵称。官方
+            公开列表字段就是买家显示名、国家、标题、一段需求。没有邮箱，详情页不登录是空壳，附件在登录墙后。
+            邦阅/米课/脉脉里「不报价找联系方式」的主流是：付费看 Buyer profile、领英对人、Lusha/RocketReach/ContactOut 挖私人邮箱、猜 Gmail/Yahoo。
+            这些这里都不做。
+          </p>
+          <p className="mt-2 text-[12px] leading-relaxed text-[#64748b]">
+            不走官方联系时，公开源还能用的只有三件事：正文里写出的 Ltd/LLC 全称（入库和批量背调会抽）、列表缩略图里的 logo（抽屉里用浏览器以图搜图，产品图没用）、你从别处核到的法定名填进「补主体」。
+            官方
             {' '}
             <a className="text-primary hover:underline" href="https://open.taobao.com/" target="_blank" rel="noreferrer">alibaba.icbu.rfq.search</a>
             {' '}
-            也不是「填 Key 就能拿到 4.7 万条公司名」。要先有国际站卖家、开放平台应用、ICBU RFQ 权限和会过期的 SESSION；
-            搜索列表通常仍是显示名，公司名/邮箱多半要报价或详情权益后才有。
-            即便配上，也<strong>不会</strong>自动回填已经入库的昵称卡。现成能用的是抽屉里「补主体后再背调」。
-            当前官方 API：{status?.alibabaReady ? '已配置（仍需实跑看返回字段）' : '未配置，也尚未实跑通过'}。
+            也不是填 Key 就回填 4.7 万条公司名。当前官方 API：{status?.alibabaReady ? '已配置（仍需实跑看返回字段）' : '未配置，也尚未实跑通过'}。
           </p>
         </section>
       </div>

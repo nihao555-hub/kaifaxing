@@ -758,6 +758,7 @@ export default function LeadsPage({ onGoOutreach }) {
                   customer={customer}
                   research={research}
                   searchLinks={detail?.searchLinks || research?.searchLinks || []}
+                  imageSearchLinks={detail?.imageSearchLinks || []}
                   googleReady={Boolean(detail?.searchStatus?.ready)}
                   pickedEmail={pickedEmail}
                   setPickedEmail={setPickedEmail}
@@ -877,12 +878,13 @@ function IdentifyForm({ customer, onSubmit, busy = false }) {
     >
       <div className="text-[12px] font-medium text-[#334155]">补主体后再背调</div>
       <p className="text-[11px] leading-relaxed text-[#64748b]">
-        阿里公开列表只有「{customer?.company || customer?.name || '昵称'}」，没有公司名和邮箱。谷歌对不上主体。
-        请在国际站后台报价后把看到的法定全称填进来，或让对方回登记号。不要猜私人邮箱。
+        公开列表只有「{customer?.buyerAlias || customer?.company || customer?.name || '昵称'}」，没有公司名和邮箱。
+        邦阅/米课那套「领英对人、Lusha 挖私人邮箱、猜 Gmail」这里不做。
+        能用的只有：正文里的法定名、公开缩略图里的 logo、你从别处核到的 Ltd/LLC 全称。
       </p>
       {customer?.sourceUrl && (
         <a href={customer.sourceUrl} target="_blank" rel="noreferrer" className="inline-block text-[11px] text-primary hover:underline">
-          打开这条阿里询盘去报价
+          打开公开询盘页（详情附件在登录墙后，不爬）
         </a>
       )}
       <input
@@ -939,7 +941,32 @@ function GoogleSearchLinks({ links, googleReady = false }) {
   );
 }
 
-function DrawerBody({ tab, customer, research, searchLinks = [], googleReady = false, pickedEmail, setPickedEmail, onIdentify, identifying = false }) {
+function ImageSearchLinks({ links, haveAnnexes = false }) {
+  if (!links?.length && !haveAnnexes) return null;
+  return (
+    <div className="space-y-2">
+      <div className="text-[12px] font-medium text-[#334155]">公开缩略图</div>
+      <p className="text-[11px] leading-relaxed text-[#94a3b8]">
+        列表页大约四分之一有缩略图，多半是产品图，反查到的是同类商品不是买家公司。
+        只有图上有 logo / 铭牌时才有用。附件标记在登录墙后，不下载。
+      </p>
+      {haveAnnexes && (
+        <p className="text-[11px] text-amber-700">这条列表标记有附件，但附件不在公开列表里。</p>
+      )}
+      {links?.length > 0 && (
+        <div className="flex flex-wrap gap-3 text-[11px]">
+          {links.map((item) => (
+            <a key={item.key || item.url} href={item.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+              {item.label}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DrawerBody({ tab, customer, research, searchLinks = [], imageSearchLinks = [], googleReady = false, pickedEmail, setPickedEmail, onIdentify, identifying = false }) {
   const address = research?.address || factValue(research, /注册地址|总部|地址/);
   const industry = research?.industry || factValue(research, /行业/) || customer.industry;
   const size = research?.employees || factValue(research, /员工规模/);
@@ -968,6 +995,10 @@ function DrawerBody({ tab, customer, research, searchLinks = [], googleReady = f
           <p>{snippetOf(customer)}</p>
         </div>
         {customer.ingestedAt && <div className="text-[#94a3b8]">入库时间 {formatTime(customer.ingestedAt)}</div>}
+        {customer.imageUrl && (
+          <img src={customer.imageUrl} alt="" className="mt-2 max-h-36 rounded border border-[#e8edf4] object-contain" />
+        )}
+        <ImageSearchLinks links={imageSearchLinks} haveAnnexes={Boolean(customer.haveAnnexes)} />
       </div>
     );
   }
@@ -983,6 +1014,7 @@ function DrawerBody({ tab, customer, research, searchLinks = [], googleReady = f
         {research?.phones?.length > 0 && (
           <div className="text-[12px] text-[#475569]">公开电话：{research.phones.join(' · ')}</div>
         )}
+        <ImageSearchLinks links={imageSearchLinks} haveAnnexes={Boolean(customer.haveAnnexes)} />
         <GoogleSearchLinks links={searchLinks} googleReady={googleReady} />
       </div>
     );
@@ -1016,6 +1048,7 @@ function DrawerBody({ tab, customer, research, searchLinks = [], googleReady = f
       {research?.kyb?.grade === 'C' && research?.kyb?.needRegNo && (
         <IdentifyForm customer={customer} onSubmit={onIdentify} busy={identifying} />
       )}
+      <ImageSearchLinks links={imageSearchLinks} haveAnnexes={Boolean(customer.haveAnnexes)} />
 
       {(research?.kyb?.sanctions || []).length > 0 && (
         <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700">

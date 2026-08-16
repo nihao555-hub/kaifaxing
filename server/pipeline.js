@@ -2,6 +2,7 @@ import { config } from './config.js';
 import { db, save, getCustomer, isRfqLead, isDemoCustomer, logActivity } from './store.js';
 import { crawlAllAndImport } from './rfq.js';
 import { researchLead, isPersonLikeLead, isPlausibleEmail, skippedLeadReport, applyLeadIdentity } from './research.js';
+import { extractCompanyHintFromText } from './rfqHints.js';
 import { VERIFIED_SOURCES } from './openSources.js';
 import { isForwarderName } from './kyb.js';
 
@@ -72,6 +73,27 @@ export { isForwarderName };
 
 function ownInbox(email) {
   return String(email || '').toLowerCase() === String(config.smtp.user || '').toLowerCase();
+}
+
+export function applyTextCompanyHints() {
+  let promoted = 0;
+  for (const c of db.customers) {
+    if (!isRfqLead(c)) continue;
+    if (c.forceCompany) continue;
+    if (!isPersonLikeLead(c)) continue;
+    const hint = extractCompanyHintFromText(`${c.painPoints || ''} ${c.title || ''}`);
+    if (!hint) continue;
+    try {
+      applyLeadIdentity(c, { company: hint });
+      c.identitySource = c.identitySource || 'rfq_text';
+      c.research = null;
+      promoted += 1;
+    } catch {
+      // 抽到的仍不像法定名，保持昵称卡
+    }
+  }
+  if (promoted) save();
+  return promoted;
 }
 
 export function stampPersonLikeLeads() {
@@ -305,6 +327,7 @@ export async function runDailySync({ reason = 'scheduled' } = {}) {
       fanout: false,
     });
     const created = result.created || [];
+    applyTextCompanyHints();
     enqueueResearch(created);
     enqueueDailyBacklog();
     p.syncStatus = 'done';
@@ -443,6 +466,7 @@ export async function promoteLeads(ids = [], { researchLimit = 6 } = {}) {
 
 export function startLeadPipeline() {
   const p = ensurePipeline();
+  applyTextCompanyHints();
   enqueueDailyBacklog();
   pumpResearch();
   if (tickTimer) clearInterval(tickTimer);
