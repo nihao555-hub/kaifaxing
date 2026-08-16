@@ -11,7 +11,7 @@ import { sentToday, logActivity } from './store.js';
 import { startAgent, stopAgent, getAgentState } from './autopilot.js';
 import { ingestInbound } from './inbox.js';
 import { listSources, searchRfq, importRfqItems, ingestCommercial, crawlAlibabaPublic, crawlAllAndImport, ALIBABA_PUBLIC_FIELDS, PUBLIC_SINCE_DEFAULT } from './rfq.js';
-import { alibabaCrawlProgress } from './publicRfq.js';
+import { alibabaCrawlProgress, requestCrawlAbort } from './publicRfq.js';
 import { isPlausibleEmail, isPersonLikeLead } from './research.js';
 import { imageSearchLinks } from './rfqHints.js';
 import { buildSearchLinks, rfqProductTerms, searchGoogleCse, searchSerper, parseGoogleCse, parseSerper } from './searchDorks.js';
@@ -131,8 +131,13 @@ app.post('/api/rfq/public/crawl', async (req, res) => {
 let crawlAllJob = { status: 'idle' };
 app.get('/api/rfq/crawl-all', (req, res) => res.json({ ...crawlAllJob, progress: alibabaCrawlProgress }));
 app.post('/api/rfq/crawl-all', (req, res) => {
-  if (crawlAllJob.status === 'running') return res.json(crawlAllJob);
-  const since = req.body?.since || PUBLIC_SINCE_DEFAULT;
+  if (req.body?.cancel) {
+    requestCrawlAbort();
+    crawlAllJob = { ...crawlAllJob, status: crawlAllJob.status === 'running' ? 'cancelling' : 'idle' };
+    return res.json({ ...crawlAllJob, progress: alibabaCrawlProgress });
+  }
+  if (crawlAllJob.status === 'running' || crawlAllJob.status === 'cancelling') return res.json(crawlAllJob);
+  const since = req.body?.full || req.body?.since === 'all' ? 'all' : (req.body?.since || PUBLIC_SINCE_DEFAULT);
   const alibabaPages = Number(req.body?.alibabaPages || 100);
   const sources = Array.isArray(req.body?.sources) ? req.body.sources : undefined;
   alibabaCrawlProgress.created = 0;
@@ -142,12 +147,13 @@ app.post('/api/rfq/crawl-all', (req, res) => {
       applyTextCompanyHints();
       enqueuePendingResearch({ limit: 80 });
       kickResearch();
+      const ali = (r.reports || []).find((x) => x.key === 'alibaba_public') || {};
       crawlAllJob = {
-        status: 'done',
+        status: r.aborted ? 'cancelled' : 'done',
         since: r.since,
         startedAt: crawlAllJob.startedAt,
         finishedAt: new Date().toISOString(),
-        fetched: r.items.length,
+        fetched: ali.kept || r.createdCount,
         createdCount: r.createdCount,
         reports: r.reports,
       };
@@ -280,6 +286,8 @@ app.get('/api/rfq/leads', (req, res) => {
     quality: String(req.query.quality || ''),
     research: String(req.query.research || ''),
     ingestedOn: req.query.today === '1' ? pipe.today : '',
+    postedOn: String(req.query.postedOn || ''),
+    category: String(req.query.category || ''),
     limit: Number(req.query.limit || 20),
     offset: Number(req.query.offset || 0),
   });

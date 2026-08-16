@@ -509,6 +509,10 @@ export function importRfqItems(items = [], { quiet = false, silent = false, pers
       haveAnnexes: Boolean(it.haveAnnexes),
       identitySource: it.identitySource || '',
       postedAt: it.postedAt || it.publicCard?.postedAt || '',
+      postedDate: it.postedDate || (it.postedAt || it.publicCard?.postedAt || '').slice(0, 10),
+      categoryId: it.categoryId || it.publicCard?.categoryId || '',
+      categoryName: it.categoryName || it.publicCard?.categoryName || '',
+      product: it.product || it.title || it.publicCard?.subject || '',
       publicCard: it.publicCard || null,
     };
     db.customers.unshift(customer);
@@ -552,6 +556,7 @@ export async function crawlAllAndImport({
       since,
       maxPages: alibabaPages,
       fanout,
+      seedIds: db.customers.map((c) => c.awardId).filter(Boolean),
       onBatch: async (batch) => {
         if (!doImport) return;
         const added = importRfqItems(batch, { quiet: true, silent: true, persist: false });
@@ -568,7 +573,7 @@ export async function crawlAllAndImport({
       key: 'alibaba_public',
       name: '阿里国际站公开 RFQ',
       items: doImport ? [] : r.items,
-      extra: { pages: r.pages, totalItems: r.totalItems, kept: r.items.length, created: alibabaCrawlProgress.created || 0 },
+      extra: { pages: r.pages, totalItems: r.totalItems, kept: r.kept || r.items.length, created: alibabaCrawlProgress.created || 0, aborted: r.aborted },
     }))),
     add('usaspending', searchUsaspending({ limit: govLimit, since, broad: true })
       .then((items) => ({ key: 'usaspending', name: 'USASpending.gov', items }))),
@@ -610,12 +615,14 @@ export async function crawlAllAndImport({
   }
   const created = doImport ? importRfqItems(unique, { quiet: true }) : [];
   const aliCreated = Number(alibabaCrawlProgress.created || 0);
+  const ali = reports.find((x) => x.key === 'alibaba_public') || {};
   return {
     since,
     items: unique,
     reports,
     createdCount: created.length + aliCreated,
     created,
+    aborted: Boolean(ali.aborted),
   };
 }
 

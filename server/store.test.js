@@ -18,6 +18,8 @@ describe('leadFacets', () => {
     assert.equal(typeof facets.sources, 'object');
     const countryTotal = Object.values(facets.countries).reduce((n, c) => n + c, 0);
     assert.equal(countryTotal, facets.total);
+    assert.equal(typeof facets.dates, 'object');
+    assert.equal(typeof facets.categories, 'object');
   });
 });
 

@@ -204,14 +204,14 @@ export default function ImportRfqModal({ onClose, onImported }) {
                 setErr('');
                 setLoading(true);
                 try {
-                  await api.rfqCrawlAll({ since: '2026-07-01', alibabaPages: 100 });
-                  setIngestMsg('已开始：2026-07-01 起多源全量抓取并入库，请稍候…');
-                  for (let i = 0; i < 80; i++) {
+                  await api.rfqCrawlAll({ since: 'all', full: true, alibabaPages: 100, sources: ['alibaba_public'] });
+                  setIngestMsg('已开始：按国家 × 品类抓全部公开询盘，边爬边入库…');
+                  for (let i = 0; i < 900; i++) {
                     await new Promise((r) => setTimeout(r, 4000));
                     const st = await api.rfqCrawlAllStatus();
-                    if (st.status === 'done') {
+                    if (st.status === 'done' || st.status === 'cancelled') {
                       setReports(st.reports || []);
-                      setIngestMsg(`完成：抓到 ${st.fetched} 条，新入库 ${st.createdCount} 条`);
+                      setIngestMsg(`完成：公开卡 ${st.progress?.kept || st.fetched || 0} 条，新入库 ${st.createdCount || st.progress?.created || 0} 条`);
                       onImported([]);
                       break;
                     }
@@ -219,7 +219,8 @@ export default function ImportRfqModal({ onClose, onImported }) {
                       setErr(st.error || '全量抓取失败');
                       break;
                     }
-                    setIngestMsg(`抓取中…已运行 ${i * 4}s`);
+                    const p = st.progress || {};
+                    setIngestMsg(`抓取中 ${p.slice || ''} 第 ${p.page || 0} 页 · 已见 ${p.kept || 0} · 入库 ${p.created || 0}`);
                   }
                 } catch (e) {
                   setErr(String(e.message || e));
@@ -230,7 +231,7 @@ export default function ImportRfqModal({ onClose, onImported }) {
               disabled={loading}
               className="h-9 rounded-lg bg-slate-800 px-3 text-xs font-medium text-white disabled:opacity-50"
             >
-              7月至今全量入库
+              全部公开询盘入库
             </button>
           </div>
 

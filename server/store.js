@@ -179,6 +179,8 @@ export function listCustomers({
   quality = '',
   research = '',
   ingestedOn = '',
+  postedOn = '',
+  category = '',
   limit = 200,
   offset = 0,
 } = {}) {
@@ -201,6 +203,16 @@ export function listCustomers({
     if (research === 'done' && c.research?.status !== 'done') continue;
     if (research === 'none' && c.research?.status === 'done') continue;
     if (ingestedOn && !String(c.ingestedAt || '').startsWith(ingestedOn)) continue;
+    if (postedOn) {
+      const days = splitCsv(postedOn);
+      const day = String(c.postedDate || c.postedAt || '').slice(0, 10);
+      if (!days.some((d) => day === d || day.startsWith(d))) continue;
+    }
+    if (category) {
+      const cats = splitCsv(category);
+      const name = String(c.categoryName || '').trim();
+      if (!cats.some((x) => name === x || name.toLowerCase() === x.toLowerCase())) continue;
+    }
     if (quality === 'company' || quality === 'person' || quality === 'auto' || quality === 'import') {
       const person = isPersonLikeLead(c);
       const path = c.researchPath || (person ? 'import' : 'auto');
@@ -237,6 +249,8 @@ export function listCustomers({
 export function leadFacets() {
   const sources = {};
   const countries = {};
+  const dates = {};
+  const categories = {};
   let total = 0;
   let needEmail = 0;
   let hasEmail = 0;
@@ -248,11 +262,15 @@ export function leadFacets() {
     sources[key] = (sources[key] || 0) + 1;
     const country = String(c.country || '').trim() || '未标注';
     countries[country] = (countries[country] || 0) + 1;
+    const day = String(c.postedDate || c.postedAt || '').slice(0, 10) || '未标注';
+    dates[day] = (dates[day] || 0) + 1;
+    const cat = String(c.categoryName || '').trim() || '未标注';
+    categories[cat] = (categories[cat] || 0) + 1;
     if (c.email) hasEmail += 1;
     else needEmail += 1;
     if (c.research?.status === 'done') researched += 1;
   }
-  return { total, needEmail, hasEmail, researched, sources, countries };
+  return { total, needEmail, hasEmail, researched, sources, countries, dates, categories };
 }
 
 export function appendThread(customerId, entry) {

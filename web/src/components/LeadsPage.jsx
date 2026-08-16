@@ -144,11 +144,14 @@ export default function LeadsPage({ onGoOutreach }) {
   const [countryQ, setCountryQ] = useState('');
   const [quality, setQuality] = useState('');
   const [researchFilter, setResearchFilter] = useState('');
+  const [postedOn, setPostedOn] = useState('');
+  const [category, setCategory] = useState('');
+  const [categoryQ, setCategoryQ] = useState('');
   const [page, setPage] = useState(0);
   const [limit, setLimit] = useState(20);
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
-  const [facets, setFacets] = useState({ countries: {}, total: 0, needEmail: 0, hasEmail: 0, researched: 0 });
+  const [facets, setFacets] = useState({ countries: {}, dates: {}, categories: {}, total: 0, needEmail: 0, hasEmail: 0, researched: 0 });
   const [loading, setLoading] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -189,10 +192,12 @@ export default function LeadsPage({ onGoOutreach }) {
     contact: tab === 'need_email' ? 'missing' : tab === 'has_email' ? 'found' : '',
     quality,
     research: researchFilter,
+    postedOn,
+    category,
     today: tab === 'today',
     limit,
     offset: page * limit,
-  }), [q, tab, selectedNames, quality, researchFilter, limit, page]);
+  }), [q, tab, selectedNames, quality, researchFilter, postedOn, category, limit, page]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -342,6 +347,9 @@ export default function LeadsPage({ onGoOutreach }) {
     setCountryQ('');
     setQuality('');
     setResearchFilter('');
+    setPostedOn('');
+    setCategory('');
+    setCategoryQ('');
     setPage(0);
   };
 
@@ -355,7 +363,16 @@ export default function LeadsPage({ onGoOutreach }) {
       : quality === 'auto' ? '可自动背调'
         : quality === 'import' ? '需补主体' : '';
   const researchLabel = researchFilter === 'done' ? '已背调' : researchFilter === 'none' ? '未背调' : '';
-  const hasFilters = countryKeys.length > 0 || quality || researchFilter;
+  const dateEntries = useMemo(
+    () => Object.entries(facets.dates || {}).sort((a, b) => String(b[0]).localeCompare(String(a[0]))),
+    [facets.dates]
+  );
+  const categoryEntries = useMemo(() => {
+    const rows = Object.entries(facets.categories || {}).sort((a, b) => b[1] - a[1]);
+    const kw = categoryQ.trim().toLowerCase();
+    return kw ? rows.filter(([name]) => name.toLowerCase().includes(kw)) : rows;
+  }, [facets.categories, categoryQ]);
+  const hasFilters = countryKeys.length > 0 || quality || researchFilter || postedOn || category;
 
   const allChecked = rows.length > 0 && rows.every((r) => checked.includes(r.id));
   const batchResearch = async () => {
@@ -512,6 +529,47 @@ export default function LeadsPage({ onGoOutreach }) {
             <MenuOption active={quality === 'person'} label="个人昵称" onClick={() => { setQuality('person'); setPage(0); }} />
           </FilterMenu>
 
+          <FilterMenu label="发布日期" summary={postedOn} active={Boolean(postedOn)} width={240}>
+            <MenuOption active={!postedOn} label="全部日期" onClick={() => { setPostedOn(''); setPage(0); }} />
+            <div className="thin-scroll max-h-64 overflow-y-auto">
+              {dateEntries.slice(0, 40).map(([day, count]) => (
+                <MenuOption
+                  key={day}
+                  active={postedOn === day}
+                  label={day}
+                  count={count}
+                  onClick={() => { setPostedOn(day); setPage(0); }}
+                />
+              ))}
+            </div>
+          </FilterMenu>
+
+          <FilterMenu label="采购品类" summary={category} active={Boolean(category)} width={280}>
+            <div className="px-2 py-1.5">
+              <div className="flex h-8 items-center gap-1.5 rounded border border-[#e2e8f0] bg-[#f8fafc] px-2">
+                <Search size={12} className="text-[#94a3b8]" />
+                <input
+                  value={categoryQ}
+                  onChange={(e) => setCategoryQ(e.target.value)}
+                  placeholder="搜索品类，如 Electronics"
+                  className="h-full w-full bg-transparent text-[12px] text-[#334155] placeholder:text-[#94a3b8] focus:outline-none"
+                />
+              </div>
+            </div>
+            <MenuOption active={!category} label="全部品类" onClick={() => { setCategory(''); setPage(0); }} />
+            <div className="thin-scroll max-h-64 overflow-y-auto">
+              {categoryEntries.slice(0, 40).map(([name, count]) => (
+                <MenuOption
+                  key={name}
+                  active={category === name}
+                  label={name}
+                  count={count}
+                  onClick={() => { setCategory(name); setPage(0); }}
+                />
+              ))}
+            </div>
+          </FilterMenu>
+
           <FilterMenu label="背调状态" summary={researchLabel} active={Boolean(researchFilter)}>
             <MenuOption active={!researchFilter} label="全部" onClick={() => { setResearchFilter(''); setPage(0); }} />
             <MenuOption active={researchFilter === 'none'} label="未背调" onClick={() => { setResearchFilter('none'); setPage(0); }} />
@@ -605,8 +663,10 @@ export default function LeadsPage({ onGoOutreach }) {
                     />
                   </th>
                   <th className="w-[20%] px-3 py-2.5">公司/买家</th>
-                  <th className="w-[12%] px-3 py-2.5">国家</th>
-                  <th className="px-3 py-2.5">询盘摘要</th>
+                  <th className="w-[10%] px-3 py-2.5">国家</th>
+                  <th className="w-[9%] px-3 py-2.5">日期</th>
+                  <th className="w-[10%] px-3 py-2.5">品类</th>
+                  <th className="px-3 py-2.5">采购需求</th>
                   <th className="w-[18%] px-3 py-2.5">联系人</th>
                   <th className="w-[9%] px-3 py-2.5">背调</th>
                   <th className="w-[12%] px-3 py-2.5">操作</th>
@@ -641,9 +701,11 @@ export default function LeadsPage({ onGoOutreach }) {
                           <span className="truncate">{countryLabel(c.country)}</span>
                         </span>
                       </td>
+                      <td className="px-3 py-3 text-[#64748b]">{c.postedDate || (c.postedAt || '').slice(0, 10) || '—'}</td>
+                      <td className="truncate px-3 py-3 text-[#64748b]" title={c.categoryName || ''}>{c.categoryName || '—'}</td>
                       <td className="px-3 py-3">
-                        <span className="line-clamp-2 leading-5 text-[#64748b]" title={snippetOf(c)}>
-                          {snippetOf(c)}
+                        <span className="line-clamp-2 leading-5 text-[#64748b]" title={c.product || snippetOf(c)}>
+                          {c.product || snippetOf(c)}
                         </span>
                       </td>
                       <td className="truncate px-3 py-3">
@@ -672,7 +734,7 @@ export default function LeadsPage({ onGoOutreach }) {
                 })}
                 {!loading && rows.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-6 py-20 text-center text-[13px] text-[#94a3b8]">
+                    <td colSpan={9} className="px-6 py-20 text-center text-[13px] text-[#94a3b8]">
                       没有符合条件的询盘，试试换关键词或放宽筛选
                     </td>
                   </tr>
@@ -1003,6 +1065,9 @@ function DrawerBody({ tab, customer, research, searchLinks = [], imageSearchLink
       <dl>
         <InfoRow label="公司" value={customer.company || customer.name} />
         <InfoRow label="国家" value={countryLabel(customer.country)} />
+        <InfoRow label="发布日期" value={customer.postedDate || (customer.postedAt || '').slice(0, 10)} />
+        <InfoRow label="采购品类" value={customer.categoryName} />
+        <InfoRow label="采购产品" value={customer.product} />
         <InfoRow label="官网" value={website} href={website} />
         <InfoRow label="法人名" value={research?.legalName && research.legalName !== (customer.company || customer.name) ? research.legalName : ''} />
         <InfoRow label="行业" value={industry} />
@@ -1019,6 +1084,11 @@ function DrawerBody({ tab, customer, research, searchLinks = [], imageSearchLink
           <div className="mb-1 text-[#94a3b8]">询盘摘要</div>
           <p>{snippetOf(customer)}</p>
         </div>
+        {(customer.postedDate || customer.categoryName || customer.product) && (
+          <div className="text-[#94a3b8]">
+            {[customer.postedDate, customer.categoryName, customer.product].filter(Boolean).join(' · ')}
+          </div>
+        )}
         {customer.ingestedAt && <div className="text-[#94a3b8]">入库时间 {formatTime(customer.ingestedAt)}</div>}
         {customer.imageUrl && (
           <img src={customer.imageUrl} alt="" className="mt-2 max-h-36 rounded border border-[#e8edf4] object-contain" />

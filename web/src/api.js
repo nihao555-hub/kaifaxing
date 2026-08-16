@@ -57,6 +57,8 @@ export const api = {
       quality: params.quality || '',
       country: params.country || '',
       research: params.research || '',
+      postedOn: params.postedOn || '',
+      category: params.category || '',
       limit: String(params.limit || 20),
       offset: String(params.offset || 0),
     });

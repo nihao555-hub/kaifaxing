@@ -123,7 +123,29 @@ export function parseAlibabaPublicHtml(html) {
   const countries = [...String(html).matchAll(/"count":(\d+),"item":"([A-Z]{2})"/g)]
     .map((m) => ({ code: m[2], count: Number(m[1]) }))
     .sort((a, b) => b.count - a.count);
-  return { items, totalItems, currentPage, totalPages, categoryIds, countries };
+  return { items, totalItems, currentPage, totalPages, categoryIds, countries, categories: parseCategoryCatalog(html) };
+}
+
+export function parseCategoryCatalog(html) {
+  const out = [];
+  const seen = new Set();
+  const re = /categoryIds=(\d+)&[^"]*"[^>]*>([^<]{2,80})</g;
+  let m;
+  while ((m = re.exec(String(html || '')))) {
+    const id = m[1];
+    const name = decodeAli(m[2]).replace(/\s+/g, ' ').trim();
+    if (!id || !name || seen.has(id) || name.length > 60) continue;
+    seen.add(id);
+    out.push({ id, name });
+  }
+  return out;
+}
+
+export function postedDateOf(row) {
+  const iso = String(row?.postedAt || '').slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  const parsed = parseOpenTime(row?.openTimeStr || '');
+  return parsed ? parsed.toISOString().slice(0, 10) : '';
 }
 
 export function toLead(row) {
@@ -156,8 +178,12 @@ export function toLead(row) {
     haveAnnexes: Boolean(row.haveAnnexes),
     identitySource: hint ? 'rfq_text' : '',
     postedAt: row.postedAt || '',
+    postedDate: postedDateOf(row),
+    categoryId: row.categoryId || '',
+    categoryName: row.categoryName || '',
+    product: row.subject || '',
     publicCard: { ...row },
-    painPoints: `公开询盘：${row.subject || ''}${qty ? `，数量 ${qty}` : ''}${row.country ? `，${row.country}` : ''}${when ? `，发布 ${when}` : ''}。${(row.description || '').slice(0, 400)} 列表页无邮箱。${extras}`,
+    painPoints: `公开询盘：${row.subject || ''}${qty ? `，数量 ${qty}` : ''}${row.country ? `，${row.country}` : ''}${when ? `，发布 ${when}` : ''}${row.categoryName ? `，品类 ${row.categoryName}` : ''}。${(row.description || '').slice(0, 400)} 列表页无邮箱。${extras}`,
   };
 }
 
@@ -167,16 +193,30 @@ function sinceMs(since) {
 }
 
 function keepSince(row, since) {
+  if (!since || since === 'all' || since === '*') return true;
   if (!row.postedAt) return true;
   return new Date(row.postedAt).getTime() >= sinceMs(since);
 }
 
-async function fetchListPage({ keyword = '', page = 1, categoryIds = '', country = '', openTime = '', timeoutMs = 20000 } = {}) {
+let crawlAbort = false;
+export function requestCrawlAbort() {
+  crawlAbort = true;
+}
+export function resetCrawlAbort() {
+  crawlAbort = false;
+}
+
+async function fetchListPage({
+  keyword = '', page = 1, categoryIds = '', country = '', openTime = '',
+  silver = false, copper = false, timeoutMs = 20000,
+} = {}) {
   const qs = new URLSearchParams({ recently: 'Y', page: String(page) });
   if (keyword) qs.set('searchText', keyword);
   if (categoryIds) qs.set('categoryIds', String(categoryIds));
   if (country) qs.set('country', country);
   if (openTime) qs.set('openTime', openTime);
+  if (silver) qs.set('silverRfq', 'Y');
+  if (copper) qs.set('copperRfq', 'Y');
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -232,6 +272,8 @@ export const alibabaCrawlProgress = {
   pagesFetched: 0, kept: 0, created: 0, country: '', category: '', page: 0, slice: '',
 };
 
+const LETTERS = 'abcdefghijklmnopqrstuvwxyz0123456789'.split('');
+
 export async function crawlAlibabaPublic({
   keyword = '',
   since = PUBLIC_SINCE_DEFAULT,
@@ -239,24 +281,35 @@ export async function crawlAlibabaPublic({
   fanout = true,
   onProgress,
   onBatch,
+  seedIds = [],
 } = {}) {
   const cap = Math.max(1, Math.min(Number(maxPages) || 100, 100));
+  resetCrawlAbort();
   alibabaCrawlProgress.created = alibabaCrawlProgress.created || 0;
-  const seen = new Set();
+  const seen = new Set((seedIds || []).map(String).filter(Boolean));
   const items = [];
+  let kept = 0;
   let totalItems = 0;
   let pagesFetched = 0;
-  const pageBudget = fanout ? 9000 : cap + 2;
+  const pageBudget = fanout ? 28000 : cap + 2;
+  const categoryById = new Map();
 
   async function ingestPage(opts) {
-    if (pagesFetched >= pageBudget) return { items: [], old: 0, totalPages: 1, totalItems: 0, exhausted: true };
+    if (crawlAbort || pagesFetched >= pageBudget) {
+      return { items: [], old: 0, totalPages: 1, totalItems: 0, exhausted: true, aborted: crawlAbort };
+    }
     if (pagesFetched) await sleep(GAP_MS);
     const data = await fetchListPage(opts);
     pagesFetched += 1;
     totalItems = Math.max(totalItems, data.totalItems || 0);
+    for (const cat of data.categories || []) categoryById.set(cat.id, cat.name);
     let old = 0;
     const fresh = [];
     for (const row of data.items) {
+      if (opts.categoryIds) {
+        row.categoryId = String(opts.categoryIds);
+        row.categoryName = opts.categoryName || categoryById.get(row.categoryId) || '';
+      }
       if (!keepSince(row, since)) {
         old += 1;
         continue;
@@ -265,16 +318,19 @@ export async function crawlAlibabaPublic({
       if (!key || seen.has(key)) continue;
       seen.add(key);
       const lead = toLead(row);
-      items.push(lead);
+      kept += 1;
+      if (!onBatch) items.push(lead);
       fresh.push(lead);
     }
     const snap = {
       pagesFetched,
-      kept: items.length,
+      kept,
+      created: alibabaCrawlProgress.created || 0,
       country: opts.country || '',
-      category: opts.categoryIds || '',
+      category: opts.categoryName || opts.categoryIds || '',
       page: opts.page,
-      slice: [opts.country, opts.categoryIds].filter(Boolean).join('/') || 'all',
+      slice: [opts.country, opts.categoryName || opts.categoryIds, opts.silver ? 'silver' : '', opts.copper ? 'copper' : '', opts.keyword]
+        .filter(Boolean).join('/') || 'all',
     };
     Object.assign(alibabaCrawlProgress, snap);
     onProgress?.(snap);
@@ -282,35 +338,69 @@ export async function crawlAlibabaPublic({
     return { ...data, old };
   }
 
-  async function crawlSlice(base, labelPages = cap) {
+  async function crawlSlice(base) {
     const first = await ingestPage({ ...base, page: 1 });
     if (first.exhausted) return first;
-    const pages = Math.min(labelPages, first.totalPages || labelPages);
+    const pages = Math.min(cap, first.totalPages || cap);
     for (let page = 2; page <= pages; page++) {
       const data = await ingestPage({ ...base, page });
-      if (data.exhausted) break;
+      if (data.exhausted) return { ...first, exhausted: true, aborted: data.aborted };
       if (data.items.length && data.old === data.items.length) break;
       if (page >= (data.totalPages || 1)) break;
     }
     return first;
   }
 
+  async function crawlDeep(base, totalHint = 0) {
+    const first = await crawlSlice(base);
+    if (first.exhausted || first.aborted) return first;
+    const size = first.totalItems || totalHint;
+    if (size <= cap * PAGE_SIZE) return first;
+    if (!base.silver && !base.copper) {
+      await crawlDeep({ ...base, silver: true }, size);
+      await crawlDeep({ ...base, copper: true }, size);
+      return first;
+    }
+    if (!base.keyword) {
+      for (const letter of LETTERS) {
+        await crawlSlice({ ...base, keyword: letter });
+        if (crawlAbort) break;
+      }
+    }
+    return first;
+  }
+
   const first = await crawlSlice({ keyword });
+  for (const cat of first.categories || []) categoryById.set(cat.id, cat.name);
 
   if (fanout && !keyword) {
-    const countries = (first.countries || [])
-      .filter((c) => c.count >= 40)
-      .slice(0, 80);
+    const catalog = first.categories?.length ? first.categories : [...categoryById].map(([id, name]) => ({ id, name }));
+    const countries = (first.countries || []).filter((c) => c.count >= 1);
     for (const { code, count } of countries) {
-      const slice = await crawlSlice({ page: 1, country: code });
-      const needCats = count > cap * PAGE_SIZE && (slice.old || 0) === 0;
-      if (!needCats) continue;
-      const cats = (slice.categoryIds || []).slice(0, 16);
-      for (const cat of cats) {
-        await crawlSlice({ country: code, categoryIds: cat });
+      if (crawlAbort) break;
+      if (count <= cap * PAGE_SIZE) {
+        await crawlSlice({ country: code });
+        for (const cat of catalog) {
+          if (crawlAbort) break;
+          await crawlSlice({ country: code, categoryIds: cat.id, categoryName: cat.name });
+        }
+        continue;
+      }
+      for (const cat of catalog) {
+        if (crawlAbort) break;
+        await crawlDeep({ country: code, categoryIds: cat.id, categoryName: cat.name }, count);
       }
     }
   }
 
-  return { items, pages: pagesFetched, totalItems, totalPages: first.totalPages, since, keyword };
+  return {
+    items: onBatch ? [] : items,
+    pages: pagesFetched,
+    totalItems,
+    totalPages: first.totalPages,
+    kept,
+    since,
+    keyword,
+    aborted: crawlAbort,
+  };
 }

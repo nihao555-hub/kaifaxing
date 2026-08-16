@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseAlibabaPublicHtml, parseOpenTime, extractAlibabaPublicBlocks, toLead } from './publicRfq.js';
+import { parseAlibabaPublicHtml, parseOpenTime, extractAlibabaPublicBlocks, toLead, parseCategoryCatalog, postedDateOf } from './publicRfq.js';
 
 const SAMPLE = `
 window.PAGE_DATA["index"].data.push({
@@ -72,5 +72,13 @@ describe('alibaba public parser', () => {
     assert.equal(lead.publicCard.rfqId, '1684056292');
     assert.equal(lead.publicCard.buyerName, 'Wilfried Kiendrebeogo');
     assert.equal(lead.publicCard.haveAnnexes, true);
+    assert.equal(lead.product, '20v Cordless Drill');
+    assert.equal(postedDateOf({ postedAt: '2026-07-03T00:00:00.000Z' }), '2026-07-03');
+  });
+
+  it('reads sidebar category names', () => {
+    const cats = parseCategoryCatalog('href="rfq_search_list.htm?categoryIds=15&tracelog=x">Consumer Electronics</a>');
+    assert.equal(cats[0].id, '15');
+    assert.equal(cats[0].name, 'Consumer Electronics');
   });
 });
