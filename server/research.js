@@ -158,6 +158,8 @@ export function isPlausibleEmail(email) {
   if (JUNK_DOMAIN.some((d) => domain === d || domain.endsWith(`.${d}`))) return false;
   if (/\.(png|jpe?g|gif|webp|svg|css|js|woff2?|ttf)$/i.test(local) || /\.(png|jpe?g|gif|webp|svg)$/i.test(domain)) return false;
   if (local.includes('cropped-') || local.includes('logo@') || local.startsWith('font-')) return false;
+  if (/^(etunimi\.sukunimi|firstname\.lastname|vorname\.nachname|nombre\.apellido|name\.surname|xxx|yourname)$/i.test(local)) return false;
+  if (domain === 'domainname.de' || domain.endsWith('.domainname.de')) return false;
   if (/\d{3,}/.test(local)) return false;
   if (!/^[a-z0-9][a-z0-9._+-]*$/.test(local)) return false;
   if (!/^[a-z0-9.-]+\.[a-z]{2,24}$/.test(domain)) return false;

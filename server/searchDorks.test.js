@@ -9,6 +9,7 @@ import {
   parseBingRss,
   pickOfficialSite,
   resultRelevant,
+  emailsFromSnippets,
 } from './searchDorks.js';
 
 const BING_FIXTURE = `
@@ -70,7 +71,8 @@ describe('research dorks', () => {
   it('adds site: and @domain formulas when the official website is known', () => {
     const q = researchDorks('Tyne Coast College', { website: 'https://www.stc.ac.uk' });
     assert.ok(q.some((s) => /site:stc\.ac\.uk/i.test(s)));
-    assert.ok(q.some((s) => /info@stc\.ac\.uk|sales@stc\.ac\.uk/i.test(s)));
+    assert.ok(q.some((s) => /"info@"|"sales@"/i.test(s)));
+    assert.ok(!q.some((s) => /info@stc\.ac\.uk/i.test(s)));
     assert.ok(q[0].startsWith('site:stc.ac.uk'));
   });
 });
@@ -119,6 +121,27 @@ describe('bing / google html parse', () => {
     assert.ok(!urls.some((u) => /facebook\.com/i.test(u)));
     assert.ok(snippetEmails.includes('info@stc.ac.uk'));
     assert.ok(snippetEmails.includes('procurement@stc.ac.uk'));
+  });
+
+  it('does not treat query-echoed role mail as a search snippet', () => {
+    const query = '"Tyne Coast College" (info@stc.ac.uk OR sales@stc.ac.uk)';
+    const html = `
+      <html><body>
+        <form><input value="${query}" /></form>
+        <p>Try info@stc.ac.uk or sales@stc.ac.uk</p>
+        <li class="b_algo">
+          <h2><a href="https://www.stc.ac.uk/contact">Contact</a></h2>
+          <div class="b_caption"><p>Write to procurement@stc.ac.uk</p></div>
+        </li>
+      </body></html>`;
+    const { snippetEmails } = parseSearchHtml(html, 'Tyne Coast College', { query });
+    assert.ok(snippetEmails.includes('procurement@stc.ac.uk'));
+    assert.ok(!snippetEmails.includes('info@stc.ac.uk'));
+    assert.ok(!snippetEmails.includes('sales@stc.ac.uk'));
+    assert.deepEqual(
+      emailsFromSnippets(['Contact info@stc.ac.uk'], { query }),
+      []
+    );
   });
 
   it('parses google /url?q= results and drops linkedin', () => {

@@ -116,6 +116,8 @@ describe('public contact extractors', () => {
     assert.equal(isPlausibleEmail('buyer@gmail.com'), false);
     assert.equal(isPlausibleEmail('sales@outlook.com'), false);
     assert.equal(isPlausibleEmail('info@qq.com'), false);
+    assert.equal(isPlausibleEmail('etunimi.sukunimi@voimia.fi'), false);
+    assert.equal(isPlausibleEmail('office@domainname.de'), false);
   });
 
   it('keeps search-snippet role mail on the company domain and drops personal inboxes', () => {

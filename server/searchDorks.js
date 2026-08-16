@@ -53,8 +53,8 @@ export function researchDorks(company, { website } = {}) {
   const host = hostFromWebsite(website);
   const out = [];
   if (host) {
-    out.push(`site:${host} (contact OR "contact us" OR impressum OR kontakt OR info@ OR sales@ OR procurement@)`);
-    out.push(`${q} (@${host} OR info@${host} OR sales@${host})`);
+    out.push(`site:${host} (contact OR "contact us" OR impressum OR kontakt OR "info@" OR "sales@" OR "procurement@")`);
+    out.push(`${q} ("@${host}" OR "info@" OR "sales@") site:${host}`);
   }
   out.push(`${q} (contact OR "contact us" OR impressum OR kontakt OR procurement OR purchasing)`);
   out.push(`${q} (info@ OR sales@ OR procurement@ OR purchasing@ OR enquiry@ OR inquiry@ OR contact@)`);
@@ -217,6 +217,25 @@ function citeToUrl(text) {
   return '';
 }
 
+export function emailsInQuery(query) {
+  return [...new Set((String(query || '').match(EMAIL_RE) || []).map((e) => e.toLowerCase()))];
+}
+
+export function emailsFromSnippets(texts, { query = '' } = {}) {
+  const ignore = new Set(emailsInQuery(query));
+  const found = [];
+  const seen = new Set();
+  for (const text of texts || []) {
+    for (const raw of String(text || '').match(EMAIL_RE) || []) {
+      const email = raw.toLowerCase();
+      if (seen.has(email) || ignore.has(email)) continue;
+      seen.add(email);
+      found.push(email);
+    }
+  }
+  return found;
+}
+
 function acceptItem(url, company, item, { siteHost } = {}) {
   const n = normalizeUrl(url);
   if (!n || !isUsefulResearchUrl(n, company)) return '';
@@ -233,30 +252,32 @@ function acceptItem(url, company, item, { siteHost } = {}) {
   return n;
 }
 
-export function parseBingRss(xml, company, { siteHost } = {}) {
+export function parseBingRss(xml, company, { siteHost, query } = {}) {
   const items = [];
   const urls = [];
   const seen = new Set();
+  const snippetTexts = [];
   const blocks = String(xml || '').match(/<item>[\s\S]*?<\/item>/gi) || [];
   for (const block of blocks) {
     const title = decodeEntities((block.match(/<title>([\s\S]*?)<\/title>/i) || [])[1] || '').trim();
     const link = decodeEntities((block.match(/<link>([\s\S]*?)<\/link>/i) || [])[1] || '').trim();
     const desc = decodeEntities((block.match(/<description>([\s\S]*?)<\/description>/i) || [])[1] || '').trim();
+    snippetTexts.push(title, desc);
     const n = acceptItem(link, company, { title, desc }, { siteHost });
     if (!n || seen.has(n)) continue;
     seen.add(n);
     urls.push(n);
     items.push({ url: n, title, desc });
   }
-  const snippetEmails = [...new Set((String(xml || '').match(EMAIL_RE) || []).map((e) => e.toLowerCase()))];
-  return { urls, items, snippetEmails };
+  return { urls, items, snippetEmails: emailsFromSnippets(snippetTexts, { query }) };
 }
 
-export function parseSearchHtml(html, company, { siteHost } = {}) {
+export function parseSearchHtml(html, company, { siteHost, query } = {}) {
   const $ = cheerio.load(html || '');
   const urls = [];
   const items = [];
   const seen = new Set();
+  const snippetTexts = [];
 
   const push = (raw, meta = {}) => {
     const decoded = decodeBingUrl(raw) || String(raw || '').trim();
@@ -270,6 +291,7 @@ export function parseSearchHtml(html, company, { siteHost } = {}) {
   $('li.b_algo').each((_, el) => {
     const title = $(el).find('h2').first().text().replace(/\s+/g, ' ').trim();
     const desc = $(el).find('.b_caption p, p').first().text().replace(/\s+/g, ' ').trim();
+    snippetTexts.push(title, desc);
     const href = $(el).find('h2 a').attr('href') || '';
     const cite = citeToUrl($(el).find('cite').first().text());
     push(href, { title, desc });
@@ -287,8 +309,12 @@ export function parseSearchHtml(html, company, { siteHost } = {}) {
     push($(el).attr('data-url') || '', { title });
   });
 
-  const snippetEmails = [...new Set((String(html || '').match(EMAIL_RE) || []).map((e) => e.toLowerCase()))];
-  return { urls, items, snippetEmails };
+  $('p, .b_caption, .result__snippet').each((_, el) => {
+    if ($(el).closest('form, nav, header').length) return;
+    snippetTexts.push($(el).text().replace(/\s+/g, ' ').trim());
+  });
+
+  return { urls, items, snippetEmails: emailsFromSnippets(snippetTexts, { query }) };
 }
 
 async function fetchSearch(url, accept = 'text/html,application/xhtml+xml,application/rss+xml') {
@@ -383,14 +409,14 @@ export async function searchCompanyPages(company, { maxQueries = 4, website } = 
     try {
       const rss = await searchBingRss(query);
       if (rss.status === 200 && rss.html && /<item>/i.test(rss.html)) {
-        mergeParsed(parsed, parseBingRss(rss.html, company, { siteHost }));
+        mergeParsed(parsed, parseBingRss(rss.html, company, { siteHost, query }));
         if (parsed.urls.length) engine = engine || 'bing';
       }
 
       if (wantHtml || !parsed.urls.length) {
         const bing = await searchBing(query);
         if (bing.status === 200 && bing.html && !isBlockedSearchPage(bing.html)) {
-          mergeParsed(parsed, parseSearchHtml(bing.html, company, { siteHost }));
+          mergeParsed(parsed, parseSearchHtml(bing.html, company, { siteHost, query }));
           if (parsed.urls.length) engine = engine || 'bing';
         } else if (bing.status && bing.status !== 200) {
           notes.push(`必应 ${bing.status}：${query.slice(0, 40)}`);
@@ -400,7 +426,7 @@ export async function searchCompanyPages(company, { maxQueries = 4, website } = 
       if (!parsed.urls.length && !parsed.snippetEmails.length) {
         const google = await searchGoogle(query);
         if (google.status === 200 && google.html && !isBlockedSearchPage(google.html)) {
-          mergeParsed(parsed, parseSearchHtml(google.html, company, { siteHost }));
+          mergeParsed(parsed, parseSearchHtml(google.html, company, { siteHost, query }));
           if (parsed.urls.length) engine = engine || 'google';
         } else if (google.html && isBlockedSearchPage(google.html)) {
           notes.push('谷歌结果页被 JS/验证码挡住，已改用必应公开结果');
