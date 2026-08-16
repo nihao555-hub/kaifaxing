@@ -8,7 +8,8 @@ import Fuse from 'fuse.js';
 import { whoisDomain } from 'whoiser';
 
 export const GITHUB_TOOLS = [
-  { id: 'cheerio', name: 'cheerio', repo: 'https://github.com/cheeriojs/cheerio', use: '解析官网 HTML、mailto、联系页链接' },
+  { id: 'cheerio', name: 'cheerio', repo: 'https://github.com/cheeriojs/cheerio', use: '解析官网 HTML、搜索结果页、mailto、联系页链接' },
+  { id: 'search-dorks', name: '外贸搜索公式', repo: 'https://github.com/cheeriojs/cheerio', use: '法定名 + contact/procurement/info@ 公开搜索，解析官网和联系页' },
   { id: 'tldts', name: 'tldts', repo: 'https://github.com/remusao/tldts', use: 'Public Suffix 域名核验' },
   { id: 'libphonenumber-js', name: 'libphonenumber-js', repo: 'https://github.com/catamphetamine/libphonenumber-js', use: '国际电话解析（Google libphonenumber）' },
   { id: 'wikibase-sdk', name: 'wikibase-sdk', repo: 'https://github.com/maxlath/wikibase-sdk', use: 'Wikidata 实体查询' },

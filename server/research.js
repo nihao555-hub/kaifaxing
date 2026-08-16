@@ -19,6 +19,10 @@ import {
   crtshHosts,
   whoisFacts,
 } from './githubTools.js';
+import {
+  searchCompanyPages,
+  scoreResearchUrl,
+} from './searchDorks.js';
 
 const UA = 'OutreachAI/1.0 (public due-diligence; +https://github.com/nihao555-hub/kaifaxing)';
 
@@ -536,7 +540,7 @@ async function resolveEntity(company, country = '') {
   return { website, legalName, extract, facts: facts.filter((f) => f.value), sources, relatedNote };
 }
 
-async function harvestContacts(website, company) {
+async function harvestContacts(website, company, { extraUrls = [] } = {}) {
   if (!website) return { emails: [], phones: [], pages: [], verified: false };
   let homeRes = { ok: false, status: 0, url: website, text: '', error: '未请求' };
   for (const home of websiteCandidates(website)) {
@@ -552,16 +556,26 @@ async function harvestContacts(website, company) {
     waybackContactUrls(homeRes.url),
     crtshHosts(homeRes.url),
   ]);
+  let siteHost = '';
+  try { siteHost = new URL(homeRes.url).hostname; } catch { /* ignore */ }
+  const searchSameDomain = extraUrls.filter((u) => {
+    try {
+      return registrableDomain(u) === registrableDomain(siteHost);
+    } catch {
+      return false;
+    }
+  }).sort((a, b) => scoreResearchUrl(b) - scoreResearchUrl(a)).slice(0, 6);
   const extra = [
     ...discoverContactLinks(homeRes.text, homeRes.url),
     ...CONTACT_PATHS.map((p) => {
       try { return new URL(p, homeRes.url).toString(); } catch { return ''; }
     }).filter(Boolean),
+    ...searchSameDomain,
     ...wayback,
     ...crtHosts.map((h) => `https://${h}/`),
   ].filter((u) => u && !isAssetUrl(u));
   const ranked = [...new Set(extra)].sort((a, b) => {
-    const weight = (u) => (/impressum|imprint|kontakt|contact/i.test(u) ? 0 : 1);
+    const weight = (u) => (/impressum|imprint|kontakt|contact|procurement|purchasing/i.test(u) ? 0 : 1);
     return weight(a) - weight(b);
   });
 
@@ -607,6 +621,7 @@ async function harvestContacts(website, company) {
       wayback: wayback.length > 0,
       crtsh: crtHosts.length > 0,
       whoiser: Boolean(whois?.domain),
+      searchDorks: searchSameDomain.length > 0,
     },
   };
 }
@@ -669,11 +684,13 @@ export async function researchLead(customer, { useAi = true } = {}) {
   let phones = [];
   let pages = [];
   let harvestedTools = {};
+  let search = { queries: [], urls: [], snippetEmails: [], officialGuess: '', notes: [], engine: '' };
 
   if (personLike) {
     steps.push({ key: 'entity', label: '主体核验', ok: false, detail: '只有个人显示名，公开库无法核到公司' });
     steps.push({ key: 'website', label: '官网定位', ok: false, detail: '无线索，未猜测域名' });
     steps.push({ key: 'contact', label: '公开联系方式', ok: false, detail: '不猜测私人邮箱，不从社交资料扒信' });
+    steps.push({ key: 'search', label: '搜索公式', ok: false, detail: '个人昵称不拿去撞搜索结果' });
     notes.push('阿里等公开 RFQ 卡片经常只有买家昵称。没有公司全称时，外贸公式到此结束。');
   } else {
     const resolved = await resolveEntity(company, customer.country);
@@ -693,24 +710,75 @@ export async function researchLead(customer, { useAi = true } = {}) {
         : 'Wikidata / GLEIF / ROR / 各国开放登记没有足够匹配',
     });
 
+    search = await searchCompanyPages(legalName || company, { maxQueries: 2 });
+    notes.push(...search.notes);
+    const openWebsite = website;
+    if (search.officialGuess && !website) website = search.officialGuess;
+    for (const it of (search.items || []).slice(0, 8)) {
+      sources.push({ title: it.title || '搜索结果', url: it.url });
+    }
+    for (const u of search.urls.slice(0, 8)) {
+      if (!sources.some((s) => s.url === u)) sources.push({ title: '搜索结果', url: u });
+    }
+
     let harvested = website
-      ? await harvestContacts(website, legalName || company)
+      ? await harvestContacts(website, legalName || company, { extraUrls: search.urls })
       : { emails: [], phones: [], pages: [], verified: false };
 
-    if ((!harvested.pages || harvested.pages.length === 0) && resolved.facts.length) {
-      for (const guess of guessWebsiteUrls(legalName || company, customer.country)) {
-        const probe = await harvestContacts(guess, legalName || company);
+    if (harvested.website && !harvested.verified && !openWebsite) {
+      harvested = { emails: [], phones: [], pages: [], verified: false };
+      website = '';
+    }
+
+    const haveVerifiedSite = Boolean(harvested.pages?.length && (harvested.verified || openWebsite));
+    if (!haveVerifiedSite && (search.urls.length || resolved.facts.length)) {
+      const guesses = [
+        ...search.urls.filter((u) => scoreResearchUrl(u) >= 3).slice(0, 4),
+        ...guessWebsiteUrls(legalName || company, customer.country),
+      ];
+      for (const guess of guesses) {
+        if (openWebsite && guess === openWebsite) continue;
+        const probe = await harvestContacts(guess, legalName || company, { extraUrls: search.urls });
         if (probe.pages?.length && probe.verified) {
           harvested = probe;
           website = probe.website || guess;
-          notes.push('公开库没有官网字段，已用主体名+国家域名打开，并核验页面提到该公司');
+          notes.push(search.urls.includes(guess)
+            ? `搜索结果页核到官网 ${website}`
+            : '公开库没有官网字段，已用主体名+国家域名打开，并核验页面提到该公司');
           break;
         }
       }
     }
+    if (harvested.verified && !openWebsite && harvested.website) {
+      facts.push({ label: '搜索官网', value: harvested.website, source: '搜索公式' });
+      notes.push(`外贸搜索公式定位到 ${harvested.website}`);
+    }
 
-    harvestedTools = harvested.tools || {};
-    if (harvested.website) website = harvested.website;
+    if (website && search.snippetEmails.length) {
+      let host = '';
+      try { host = new URL(website).hostname; } catch { /* ignore */ }
+      const extra = [];
+      for (const raw of search.snippetEmails) {
+        if (!isPlausibleEmail(raw) || !emailBelongsToCompany(raw, host, legalName || company)) continue;
+        extra.push({
+          email: raw,
+          role: raw.split('@')[0],
+          score: scoreEmail(raw, host),
+          source: '搜索摘要',
+        });
+      }
+      if (extra.length) {
+        const map = new Map((harvested.emails || []).map((e) => [e.email, e]));
+        for (const item of extra) {
+          const prev = map.get(item.email);
+          if (!prev || item.score > prev.score) map.set(item.email, item);
+        }
+        harvested = { ...harvested, emails: [...map.values()].sort((a, b) => b.score - a.score).slice(0, 8) };
+      }
+    }
+
+    harvestedTools = { ...(harvested.tools || {}), searchDorks: Boolean(harvested.tools?.searchDorks || search.urls.length) };
+    if (harvested.website && (harvested.verified || openWebsite)) website = harvested.website;
     emails = harvested.emails || [];
     const wikiPhones = facts.filter((f) => f.label === '公开电话').map((f) => f.value);
     phones = [...new Set([...(harvested.phones || []), ...wikiPhones])].slice(0, 8);
@@ -742,6 +810,14 @@ export async function researchLead(customer, { useAi = true } = {}) {
         : website
           ? '官网可打开，联系方式多为表单，没有明文角色邮箱'
           : '没有可核验的公开邮箱',
+    });
+    steps.push({
+      key: 'search',
+      label: '搜索公式',
+      ok: search.urls.length > 0,
+      detail: search.urls.length
+        ? `${search.engine === 'google' ? '谷歌' : '必应'}解析到 ${search.urls.length} 个公开页`
+        : '搜索没有可用的背调页',
     });
   }
 
@@ -828,6 +904,8 @@ export async function researchLead(customer, { useAi = true } = {}) {
     outreachAdvice,
     risks,
     notes,
+    searchQueries: search.queries || [],
+    searchPages: (search.urls || []).slice(0, 8),
     canApplyEmail: emails.length > 0,
     tools: GITHUB_TOOLS.map((t) => ({
       ...t,
@@ -836,7 +914,8 @@ export async function researchLead(customer, { useAi = true } = {}) {
         || (t.id === 'libphonenumber-js' && phones.length > 0)
         || (t.id === 'whoiser' && Boolean(harvestedTools.whoiser))
         || (t.id === 'waybackurls' && Boolean(harvestedTools.wayback))
-        || (t.id === 'subfinder' && Boolean(harvestedTools.crtsh)),
+        || (t.id === 'subfinder' && Boolean(harvestedTools.crtsh))
+        || (t.id === 'search-dorks' && Boolean(harvestedTools.searchDorks)),
     })),
   };
 }

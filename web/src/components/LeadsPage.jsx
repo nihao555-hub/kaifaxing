@@ -787,11 +787,14 @@ function researchChecks(customer, research) {
     /GLEIF|Wikidata|LEI|注册|工商|Sirene|Brreg|ROR|PRH|ARES|Receita|Companies House/i.test(`${f.source} ${f.label}`)
   );
   const procurement = Boolean(customer.sourceUrl || customer.awardId || customer.rfq || customer.painPoints);
+  const search = (research?.searchPages || []).length > 0
+    || (research?.facts || []).some((f) => f.source === '搜索公式');
   return [
     { label: '公司官网', ok: website },
     { label: '社交媒体', ok: social },
     { label: '工商信息', ok: registry },
     { label: '招投标/采购记录', ok: procurement },
+    { label: '搜索公式', ok: search },
   ];
 }
 
@@ -914,7 +917,20 @@ function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail }) {
           <InfoRow label="母公司" value={factValue(research, /最终母公司/)} />
           <InfoRow label="登记号" value={factValue(research, /登记号|SIREN|Org\.nr|IČO|CNPJ/)} />
           <InfoRow label="LEI" value={factValue(research, /^LEI$/)} />
+          <InfoRow label="搜索官网" value={factValue(research, /搜索官网/)} href={factValue(research, /搜索官网/)} />
         </dl>
+        {(research?.searchPages || []).length > 0 && (
+          <div className="mt-2">
+            <div className="mb-1 text-[12px] text-[#94a3b8]">搜索解析到的公开页</div>
+            <ul className="space-y-1">
+              {research.searchPages.slice(0, 5).map((url) => (
+                <li key={url} className="truncate text-[12px]">
+                  <a href={url} target="_blank" rel="noreferrer" className="text-primary hover:underline">{url}</a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {!website && !address && !industry && !size && !research?.phones?.length && (
           <p className="text-[12px] text-[#94a3b8]">还没有核到补充信息。</p>
         )}
