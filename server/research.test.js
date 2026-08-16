@@ -28,6 +28,18 @@ describe('company name helpers', () => {
     assert.equal(tokenOverlap('solo beck', 'Acme Corporation'), 0);
   });
 
+  it('rejects family-name and person Wikidata hits', () => {
+    const picked = pickBestHit(
+      [
+        { label: 'Bueno', description: 'family name' },
+        { label: 'Chris Van Allsburg', description: "American children's writer and illustrator" },
+      ],
+      'CHRIS',
+      (h) => h.label
+    );
+    assert.equal(picked, null);
+  });
+
   it('accepts Kier Group and rejects DE KIER', () => {
     const picked = pickBestHit(
       [
@@ -85,6 +97,11 @@ describe('public contact extractors', () => {
   it('extracts international phones', () => {
     const phones = extractPhones('<p>Call +44 191 427 3500 or +1 321-727-9100</p>');
     assert.ok(phones.some((p) => p.includes('44')));
+  });
+
+  it('reads tel links', () => {
+    const phones = extractPhones('<a href="tel:+441914273500">Call us</a>');
+    assert.ok(phones.some((p) => p.includes('441914273500') || p.includes('44 191')));
   });
 
   it('handles multi-part TLDs', () => {

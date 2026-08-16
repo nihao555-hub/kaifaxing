@@ -16,8 +16,6 @@ function CustomerDetail({ customer }) {
     ['时区', customer.timezone],
     ['行业', customer.industry],
     ['已知痛点', customer.painPoints],
-    ['数据来源', customer.source || '手动添加'],
-    ['来源链接', customer.sourceUrl || ''],
   ];
   return (
     <div className="rounded-xl border border-slate-100 bg-white p-5 shadow-sm">

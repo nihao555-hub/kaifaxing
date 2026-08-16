@@ -181,13 +181,19 @@ export function extractEmails(html, { websiteHost = '' } = {}) {
 }
 
 export function extractPhones(html) {
-  const text = stripTags(html);
+  const rawHtml = String(html || '');
+  const text = stripTags(rawHtml);
   const set = new Set();
-  for (const raw of text.match(PHONE_RE) || []) {
-    const compact = raw.replace(/[^\d+]/g, '');
-    if (compact.replace(/\D/g, '').length < 8) continue;
-    set.add(raw.replace(/\s+/g, ' ').trim());
+  const add = (raw) => {
+    const cleaned = String(raw || '').replace(/[()\s.-]+/g, ' ').trim();
+    const compact = cleaned.replace(/[^\d+]/g, '');
+    if (compact.replace(/\D/g, '').length < 8) return;
+    set.add(cleaned);
+  };
+  for (const m of rawHtml.matchAll(/href=["']tel:([^"']+)["']/gi)) {
+    try { add(decodeURIComponent(m[1]).replace(/^tel:/i, '')); } catch { add(m[1]); }
   }
+  for (const raw of text.match(PHONE_RE) || []) add(raw);
   return [...set].slice(0, 8);
 }
 
@@ -320,6 +326,8 @@ async function searchGleif(query, mode = 'legalName') {
 
 const ORG_HINT = /compan|group|college|university|corporation|limited|gmbh|agency|contractor|construction|housing|plc|inc\b|institut|authority|hospital|council|technologies|gesellschaft/i;
 
+const JUNK_ENTITY_RE = /family name|given name|surname|disambiguation|hamlet|researcher|footballer|singer|illustrator|writer|poet|actor|musician|politician/i;
+
 export function pickBestHit(hits, company, getLabel) {
   let best = null;
   let bestScore = 0;
@@ -328,15 +336,15 @@ export function pickBestHit(hits, company, getLabel) {
   for (const hit of hits) {
     const label = getLabel(hit);
     const desc = hit.description || hit.display || '';
+    if (JUNK_ENTITY_RE.test(desc) || JUNK_ENTITY_RE.test(label)) continue;
     const labelTokens = significantTokens(label);
     const inter = companyTokens.filter((t) => labelTokens.includes(t)).length;
     const coverage = companyTokens.length ? inter / companyTokens.length : 0;
     const orgLike = ORG_HINT.test(`${label} ${desc}`);
     const startsWithFirst = first && String(label).toLowerCase().startsWith(first);
     let score = 0;
-    if (coverage >= 0.8) score = 1;
-    else if (startsWithFirst && orgLike && labelTokens.length >= 2 && coverage >= 0.4) score = 0.7;
-    else if (startsWithFirst && orgLike && first?.length >= 5 && labelTokens[0] === first) score = 0.6;
+    if (coverage >= 0.8 && (orgLike || companyTokens.length >= 2)) score = 1;
+    else if (startsWithFirst && orgLike && labelTokens.length >= 2 && coverage >= 0.5) score = 0.7;
     if (score > bestScore) {
       best = { hit, label, score };
       bestScore = score;
@@ -353,8 +361,7 @@ function queriesFor(company) {
   if (stripped && stripped.toLowerCase() !== full.toLowerCase()) q.push(stripped);
   const tokens = significantTokens(full);
   if (tokens.length >= 2) q.push(tokens.slice(0, 3).join(' '));
-  if (tokens[0] && tokens[0].length >= 4) q.push(tokens[0]);
-  return [...new Set(q)].slice(0, 5);
+  return [...new Set(q)].slice(0, 4);
 }
 
 export function websiteCandidates(url) {
@@ -402,6 +409,20 @@ function guessWebsiteUrls(company, country) {
   return [...new Set(urls)].slice(0, 4);
 }
 
+async function wikidataLabels(ids) {
+  const uniq = [...new Set(ids)].slice(0, 6);
+  if (!uniq.length) return {};
+  const data = await fetchJson(
+    `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${uniq.join('|')}&props=labels&languages=en&format=json`
+  );
+  const map = {};
+  for (const id of uniq) {
+    const label = data?.entities?.[id]?.labels?.en?.value;
+    if (label) map[id] = label;
+  }
+  return map;
+}
+
 async function resolveEntity(company) {
   const sources = [];
   const facts = [];
@@ -425,6 +446,32 @@ async function resolveEntity(company) {
       facts.push({ label: 'Wikidata', value: `${label} (${picked.hit.id})`, source: 'Wikidata' });
       if (picked.hit.description) facts.push({ label: '主体说明', value: picked.hit.description, source: 'Wikidata' });
       if (claimValues(ent, 'P571')[0]) facts.push({ label: '成立', value: claimValues(ent, 'P571')[0], source: 'Wikidata' });
+      const employees = claimValues(ent, 'P1128')[0];
+      if (employees) facts.push({ label: '员工规模', value: String(employees).replace(/^[+]/, ''), source: 'Wikidata' });
+      const phone = claimValues(ent, 'P1329')[0];
+      if (phone) facts.push({ label: '公开电话', value: phone, source: 'Wikidata' });
+      const socials = [
+        ['P4264', 'LinkedIn', (v) => (String(v).startsWith('http') ? v : `https://www.linkedin.com/company/${v}`)],
+        ['P2013', 'Facebook', (v) => (String(v).startsWith('http') ? v : `https://www.facebook.com/${v}`)],
+        ['P2002', 'X', (v) => (String(v).startsWith('http') ? v : `https://x.com/${v}`)],
+      ];
+      for (const [pid, name, toUrl] of socials) {
+        const val = claimValues(ent, pid)[0];
+        if (!val) continue;
+        facts.push({ label: name, value: toUrl(val), source: 'Wikidata' });
+      }
+      const industryIds = [...claimValues(ent, 'P452'), ...claimValues(ent, 'P31')].filter((id) => /^Q\d+$/.test(id)).slice(0, 4);
+      if (industryIds.length) {
+        const labels = await wikidataLabels(industryIds);
+        const text = industryIds.map((id) => labels[id]).filter(Boolean).join(' / ');
+        if (text) facts.push({ label: '行业', value: text, source: 'Wikidata' });
+      }
+      const hqIds = claimValues(ent, 'P159').filter((id) => /^Q\d+$/.test(id)).slice(0, 2);
+      if (hqIds.length) {
+        const labels = await wikidataLabels(hqIds);
+        const text = hqIds.map((id) => labels[id]).filter(Boolean).join(', ');
+        if (text) facts.push({ label: '总部', value: text, source: 'Wikidata' });
+      }
       sources.push({ title: `Wikidata ${picked.hit.id}`, url: `https://www.wikidata.org/wiki/${picked.hit.id}` });
       if (tokenOverlap(company, label) < 0.8) {
         relatedNote = `公开库匹配到相关主体「${label}」，不一定等于询盘上的法定全称`;
@@ -456,12 +503,13 @@ async function resolveEntity(company) {
   }
 
   let gleif = [];
-  for (const q of queriesFor(company)) {
+  const gleifQueries = queriesFor(company).filter((q) => significantTokens(q).length >= 2);
+  for (const q of gleifQueries) {
     gleif = await searchGleif(q, 'legalName');
     if (gleif.length) break;
   }
-  if (!gleif.length) {
-    for (const q of queriesFor(company)) {
+  if (!gleif.length && gleifQueries.length) {
+    for (const q of gleifQueries) {
       gleif = await searchGleif(q, 'fulltext');
       if (gleif.length) break;
     }
@@ -588,7 +636,6 @@ export async function researchLead(customer, { useAi = true } = {}) {
   const notes = [];
   const steps = [];
 
-  if (customer.source) facts.push({ label: '询盘来源', value: customer.source, source: '入库' });
   if (customer.country) facts.push({ label: '国家/地区', value: customer.country, source: '入库' });
   if (customer.painPoints) facts.push({ label: '询盘/招标摘要', value: String(customer.painPoints).slice(0, 300), source: '入库' });
   if (customer.sourceUrl) sources.push({ title: '原始询盘/公告', url: customer.sourceUrl });
@@ -640,7 +687,8 @@ export async function researchLead(customer, { useAi = true } = {}) {
 
     if (harvested.website) website = harvested.website;
     emails = harvested.emails || [];
-    phones = harvested.phones || [];
+    const wikiPhones = facts.filter((f) => f.label === '公开电话').map((f) => f.value);
+    phones = [...new Set([...(harvested.phones || []), ...wikiPhones])].slice(0, 8);
     pages = harvested.pages || [];
     if (harvested.error && !website) notes.push(`官网抓取：${harvested.error}`);
     for (const p of pages) sources.push({ title: p.title || '官网', url: p.url });
@@ -718,6 +766,11 @@ export async function researchLead(customer, { useAi = true } = {}) {
         ? 'medium'
         : 'low';
 
+  const factOf = (re) => facts.find((f) => re.test(f.label))?.value || '';
+  const socials = facts
+    .filter((f) => /LinkedIn|Facebook|^X$|Twitter|社媒/i.test(f.label))
+    .map((f) => ({ label: f.label, url: f.value }));
+
   return {
     status: 'done',
     updatedAt: new Date().toISOString(),
@@ -726,6 +779,10 @@ export async function researchLead(customer, { useAi = true } = {}) {
     website: website || '',
     emails,
     phones,
+    address: factOf(/注册地址|总部/),
+    industry: factOf(/行业/),
+    employees: factOf(/员工规模/),
+    socials,
     facts,
     sources: dedupeSources(sources),
     pages,

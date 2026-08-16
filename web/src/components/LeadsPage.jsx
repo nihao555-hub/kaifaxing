@@ -7,7 +7,6 @@ import {
   ExternalLink,
   Mail,
   ShieldCheck,
-  AlertTriangle,
   RefreshCw,
   RotateCcw,
   X,
@@ -120,12 +119,11 @@ function MenuOption({ active, onClick, label, count, leading }) {
   );
 }
 
-function ResearchStatus({ done }) {
-  return (
-    <span className={`text-[12px] ${done ? 'text-emerald-600' : 'text-[#94a3b8]'}`}>
-      {done ? '已背调' : '未背调'}
-    </span>
-  );
+function ResearchStatus({ status }) {
+  if (status === 'done') return <span className="text-[12px] text-emerald-600">已背调</span>;
+  if (status === 'running') return <span className="text-[12px] text-primary">背调中</span>;
+  if (status === 'failed') return <span className="text-[12px] text-rose-500">失败</span>;
+  return <span className="text-[12px] text-[#94a3b8]">未背调</span>;
 }
 
 export default function LeadsPage({ onGoOutreach }) {
@@ -333,6 +331,12 @@ export default function LeadsPage({ onGoOutreach }) {
               每日 {String(pipeline?.dailyHour ?? 7).padStart(2, '0')}:00 自动更新
               <span className="mx-1.5 text-[#e2e8f0]">·</span>
               今日新增 {(pipeline?.todayNew ?? facets.todayNew ?? 0).toLocaleString()}
+              {(pipeline?.queue || 0) > 0 && (
+                <>
+                  <span className="mx-1.5 text-[#e2e8f0]">·</span>
+                  背调队列 {pipeline.queue}
+                </>
+              )}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -517,12 +521,11 @@ export default function LeadsPage({ onGoOutreach }) {
                       className="accent-primary"
                     />
                   </th>
-                  <th className="w-[18%] px-3 py-2.5">公司/买家</th>
-                  <th className="w-[11%] px-3 py-2.5">国家</th>
+                  <th className="w-[20%] px-3 py-2.5">公司/买家</th>
+                  <th className="w-[12%] px-3 py-2.5">国家</th>
                   <th className="px-3 py-2.5">询盘摘要</th>
-                  <th className="w-[13%] px-3 py-2.5">来源</th>
-                  <th className="w-[16%] px-3 py-2.5">联系人</th>
-                  <th className="w-[8%] px-3 py-2.5">背调</th>
+                  <th className="w-[18%] px-3 py-2.5">联系人</th>
+                  <th className="w-[9%] px-3 py-2.5">背调</th>
                   <th className="w-[12%] px-3 py-2.5">操作</th>
                 </tr>
               </thead>
@@ -542,7 +545,7 @@ export default function LeadsPage({ onGoOutreach }) {
                       <td className="px-3 py-3">
                         <button
                           type="button"
-                          onClick={() => openDrawer(c.id, 'basic')}
+                          onClick={() => openDrawer(c.id, 'research')}
                           className="block w-full truncate text-left font-medium text-primary hover:underline"
                           title={companyOf(c)}
                         >
@@ -560,12 +563,11 @@ export default function LeadsPage({ onGoOutreach }) {
                           {snippetOf(c)}
                         </span>
                       </td>
-                      <td className="truncate px-3 py-3 text-[#64748b]">{c.source || '—'}</td>
                       <td className="truncate px-3 py-3">
                         {c.email ? <span className="text-primary">{c.email}</span> : <span className="text-[#cbd5e1]">—</span>}
                       </td>
                       <td className="px-3 py-3">
-                        <ResearchStatus done={c.research?.status === 'done'} />
+                        <ResearchStatus status={c.research?.status} />
                       </td>
                       <td className="px-3 py-3">
                         <div className="flex items-center gap-3 whitespace-nowrap">
@@ -587,7 +589,7 @@ export default function LeadsPage({ onGoOutreach }) {
                 })}
                 {!loading && rows.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-6 py-20 text-center text-[13px] text-[#94a3b8]">
+                    <td colSpan={7} className="px-6 py-20 text-center text-[13px] text-[#94a3b8]">
                       没有符合条件的询盘，试试换关键词或放宽筛选
                     </td>
                   </tr>
@@ -668,13 +670,6 @@ export default function LeadsPage({ onGoOutreach }) {
                     <CountryFlag country={customer?.country} size={16} />
                     {countryLabel(customer?.country)}
                   </span>
-                  {customer?.sourceUrl ? (
-                    <a href={customer.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded bg-[#f1f5f9] px-1.5 py-0.5 text-primary hover:underline">
-                      {customer.source || '原始询盘'} <ExternalLink size={11} />
-                    </a>
-                  ) : (
-                    <span className="rounded bg-[#f1f5f9] px-1.5 py-0.5">{customer?.source || '公开询盘'}</span>
-                  )}
                 </div>
               </div>
               <button type="button" onClick={() => setDrawerOpen(false)} className="rounded p-1 text-[#94a3b8] hover:bg-[#f1f5f9]">
@@ -755,11 +750,16 @@ function InfoRow({ label, value, href }) {
   );
 }
 
+function factValue(research, re) {
+  return research?.facts?.find((f) => re.test(f.label))?.value || '';
+}
+
 function researchChecks(customer, research) {
   const website = Boolean(research?.website || customer.website);
-  const social = (research?.facts || []).some((f) => /linkedin|facebook|twitter|社媒|social/i.test(`${f.label} ${f.value}`));
+  const social = (research?.socials || []).length > 0
+    || (research?.facts || []).some((f) => /LinkedIn|Facebook|^X$|Twitter|社媒/i.test(f.label));
   const registry = (research?.facts || []).some((f) => /GLEIF|Wikidata|LEI|注册|工商/i.test(`${f.source} ${f.label}`));
-  const procurement = Boolean(customer.sourceUrl || customer.awardId || customer.rfq);
+  const procurement = Boolean(customer.sourceUrl || customer.awardId || customer.rfq || customer.painPoints);
   return [
     { label: '公司官网', ok: website },
     { label: '社交媒体', ok: social },
@@ -768,20 +768,46 @@ function researchChecks(customer, research) {
   ];
 }
 
+function EmailPick({ emails, pickedEmail, setPickedEmail, name }) {
+  if (!emails.length) return null;
+  return (
+    <div className="space-y-1.5">
+      {emails.map((e, i) => (
+        <label
+          key={e.email}
+          className={`flex cursor-pointer items-center gap-2 rounded border px-2.5 py-2 ${
+            pickedEmail === e.email ? 'border-primary bg-primary-light' : 'border-[#e2e8f0]'
+          }`}
+        >
+          <input type="radio" name={name} checked={pickedEmail === e.email} onChange={() => setPickedEmail(e.email)} />
+          <span className="text-[12px] text-[#334155]">{i + 1}. {e.email}</span>
+          <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-600">
+            {e.role === 'info' || e.role === 'enquiry' || e.role === 'contact' ? '官网' : (e.role || '官网')}
+          </span>
+          <span className="ml-auto text-[10px] text-emerald-600">可用</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail }) {
+  const address = research?.address || factValue(research, /注册地址|总部|地址/);
+  const industry = research?.industry || factValue(research, /行业/) || customer.industry;
+  const size = research?.employees || factValue(research, /员工规模/);
+  const website = research?.website || customer.website;
+  const emails = research?.emails?.length ? research.emails : (customer.email ? [{ email: customer.email, role: '官网' }] : []);
+
   if (tab === 'basic') {
     return (
       <dl>
         <InfoRow label="公司" value={customer.company || customer.name} />
-        <InfoRow label="买家" value={customer.buyer && customer.buyer !== customer.company ? customer.buyer : customer.name} />
         <InfoRow label="国家" value={countryLabel(customer.country)} />
-        <InfoRow label="来源" value={customer.source} />
-        <InfoRow label="官网" value={research?.website || customer.website} href={research?.website || customer.website} />
-        <InfoRow label="行业" value={research?.facts?.find((f) => /行业|industry/i.test(f.label))?.value || customer.industry} />
-        <InfoRow label="法人名" value={research?.legalName} />
-        {(research?.facts || []).slice(0, 8).map((f) => (
-          <InfoRow key={`${f.label}-${f.value}`} label={f.label} value={f.value} />
-        ))}
+        <InfoRow label="官网" value={website} href={website} />
+        <InfoRow label="法人名" value={research?.legalName && research.legalName !== (customer.company || customer.name) ? research.legalName : ''} />
+        <InfoRow label="行业" value={industry} />
+        <InfoRow label="地址" value={address} />
+        <InfoRow label="员工规模" value={size} />
       </dl>
     );
   }
@@ -793,56 +819,35 @@ function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail }) {
           <div className="mb-1 text-[#94a3b8]">询盘摘要</div>
           <p>{snippetOf(customer)}</p>
         </div>
-        {customer.rfq?.title && (
-          <div>
-            <div className="mb-1 text-[#94a3b8]">标题</div>
-            <p>{customer.rfq.title}</p>
-          </div>
-        )}
-        {customer.sourceUrl && (
-          <a href={customer.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
-            打开原始询盘 <ExternalLink size={12} />
-          </a>
-        )}
         {customer.ingestedAt && <div className="text-[#94a3b8]">入库时间 {formatTime(customer.ingestedAt)}</div>}
       </div>
     );
   }
 
   if (tab === 'contacts') {
-    const emails = research?.emails || (customer.email ? [{ email: customer.email, role: '已写入' }] : []);
     return (
-      <div className="space-y-2">
-        {emails.length ? emails.map((e) => (
-          <label
-            key={e.email}
-            className={`flex cursor-pointer items-center gap-2 rounded border px-2.5 py-2 ${
-              pickedEmail === e.email ? 'border-primary bg-primary-light' : 'border-[#e2e8f0]'
-            }`}
-          >
-            <input type="radio" name="email" checked={pickedEmail === e.email} onChange={() => setPickedEmail(e.email)} />
-            <span className="text-[12px] text-[#334155]">{e.email}</span>
-            <span className="ml-auto text-[10px] text-[#94a3b8]">{e.role || '公开邮箱'}</span>
-          </label>
-        )) : (
-          <p className="text-[12px] text-[#94a3b8]">还没有可核验的公开角色邮箱，先点底部「挖邮箱」。</p>
+      <div className="space-y-3">
+        {emails.length ? (
+          <EmailPick emails={emails} pickedEmail={pickedEmail} setPickedEmail={setPickedEmail} name="email" />
+        ) : (
+          <p className="text-[12px] text-[#94a3b8]">还没有可核验的公开角色邮箱。入库后会自动背调；也可点底部「挖邮箱」。</p>
         )}
         {research?.phones?.length > 0 && (
-          <div className="pt-2 text-[12px] text-[#475569]">公开电话：{research.phones.join(' · ')}</div>
+          <div className="text-[12px] text-[#475569]">公开电话：{research.phones.join(' · ')}</div>
         )}
       </div>
     );
   }
 
   const checks = researchChecks(customer, research);
-  const address = research?.facts?.find((f) => /地址|address/i.test(f.label))?.value;
-  const industry = research?.facts?.find((f) => /行业|industry/i.test(f.label))?.value || customer.industry;
-  const size = research?.facts?.find((f) => /员工|规模|employee/i.test(f.label))?.value;
 
   return (
     <div className="space-y-5">
-      {research?.status === 'running' && <p className="text-[12px] text-[#64748b]">正在查 Wikidata / GLEIF / 官网联系页…</p>}
+      {research?.status === 'running' && <p className="text-[12px] text-[#64748b]">入库后已自动背调，正在查公开主体和官网联系页…</p>}
       {research?.status === 'failed' && <p className="text-[12px] text-rose-500">{research.error || '背调失败'}</p>}
+      {!research?.status && (
+        <p className="text-[12px] leading-relaxed text-[#64748b]">排队自动背调中。只查公开主体库和官网联系页，不扒私人邮箱。</p>
+      )}
 
       <div className="space-y-2.5">
         {checks.map((s) => (
@@ -858,54 +863,32 @@ function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail }) {
         ))}
       </div>
 
-      {research?.status === 'done' && research.brief && (
-        <p className="text-[12px] leading-relaxed text-[#475569]">{research.brief}</p>
-      )}
-
       <div>
         <div className="mb-2 text-[12px] font-medium text-[#334155]">公开角色邮箱</div>
-        {research?.emails?.length ? (
-          <div className="space-y-1.5">
-            {research.emails.map((e) => (
-              <label
-                key={e.email}
-                className={`flex cursor-pointer items-center gap-2 rounded border px-2.5 py-2 ${
-                  pickedEmail === e.email ? 'border-primary bg-primary-light' : 'border-[#e2e8f0]'
-                }`}
-              >
-                <input type="radio" name="email-research" checked={pickedEmail === e.email} onChange={() => setPickedEmail(e.email)} />
-                <span className="text-[12px] text-[#334155]">{e.email}</span>
-                <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-600">{e.role || '官网'}</span>
-                <span className="ml-auto text-[10px] text-emerald-600">可用</span>
-              </label>
-            ))}
-          </div>
+        {emails.length ? (
+          <EmailPick emails={emails} pickedEmail={pickedEmail} setPickedEmail={setPickedEmail} name="email-research" />
         ) : (
           <p className="text-[12px] leading-relaxed text-[#64748b]">
             {research?.status === 'done'
-              ? '这次没有拿到可验证的公开邮箱。大公司常用联系表单；阿里公开 RFQ 往往只有昵称。'
-              : '还没做过公开背调。点底部「挖邮箱」，只查 Wikidata / GLEIF / 官网联系页上的角色邮箱。'}
+              ? '公开页没有明文角色邮箱。大公司常用联系表单；只有昵称的询盘核不到公司主体。'
+              : '自动背调完成后，核到的官网角色邮箱会显示在这里。'}
           </p>
         )}
       </div>
 
-      <dl className="border-t border-[#eef1f6] pt-3">
-        <InfoRow label="电话" value={research?.phones?.join(' · ')} />
-        <InfoRow label="官网" value={research?.website || customer.website} href={research?.website || customer.website} />
-        <InfoRow label="地址" value={address} />
-        <InfoRow label="行业" value={industry} />
-        <InfoRow label="员工规模" value={size} />
-      </dl>
-
-      {research?.outreachAdvice && (
-        <div className="rounded bg-[#f8fafc] p-3 text-[12px] leading-relaxed text-[#475569]">{research.outreachAdvice}</div>
-      )}
-      {research?.risks?.length > 0 && (
-        <div className="flex gap-2 text-[12px] text-amber-700">
-          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-          <span>{research.risks.join('；')}</span>
-        </div>
-      )}
+      <div>
+        <div className="mb-2 text-[12px] font-medium text-[#334155]">补充信息</div>
+        <dl>
+          <InfoRow label="电话" value={research?.phones?.join(' · ')} />
+          <InfoRow label="官网" value={website} href={website} />
+          <InfoRow label="地址" value={address} />
+          <InfoRow label="行业" value={industry} />
+          <InfoRow label="员工规模" value={size} />
+        </dl>
+        {!website && !address && !industry && !size && !research?.phones?.length && (
+          <p className="text-[12px] text-[#94a3b8]">还没有核到补充信息。</p>
+        )}
+      </div>
     </div>
   );
 }
