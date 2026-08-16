@@ -7,6 +7,7 @@ import {
   isPersonLikeDisplayName,
   isPersonLikeLead,
   skippedLeadReport,
+  applyLeadIdentity,
   isPlausibleEmail,
   scoreEmail,
   extractEmails,
@@ -92,6 +93,13 @@ describe('company name helpers', () => {
     const skipped = skippedLeadReport({ company: 'Linda N', country: 'Netherlands' });
     assert.equal(skipped.grade, 'C');
     assert.equal(skipped.status, 'done');
+    const row = { company: 'Linda N', name: 'Linda N' };
+    assert.equal(isPersonLikeLead(row), true);
+    applyLeadIdentity(row, { company: 'NMG TECHNICAL SERVICE L.L.C', regNo: '123456' });
+    assert.equal(row.forceCompany, true);
+    assert.equal(isPersonLikeLead(row), false);
+    assert.equal(row.buyerAlias, 'Linda N');
+    assert.throws(() => applyLeadIdentity({ company: 'Sam W' }, { company: 'Sam W' }), /昵称/);
   });
 
   it('keeps distinctive tokens', () => {

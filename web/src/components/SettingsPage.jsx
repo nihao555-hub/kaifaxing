@@ -170,6 +170,23 @@ export default function SettingsPage() {
             </div>
           )}
         </section>
+
+        <section className="mt-5 max-w-[640px] rounded-xl border border-[#e8edf4] bg-white p-5 shadow-sm">
+          <div className="text-[14px] font-medium text-[#1e293b]">阿里国际站（昵称询盘）</div>
+          <p className="mt-2 text-[12px] leading-relaxed text-[#64748b]">
+            公开列表大约 96% 只有买家昵称，没有公司名和邮箱。这类不能拿去撞谷歌。
+            要背调，只能：在卖家后台报价后看到法定名，填进询盘抽屉的「补主体」；
+            或配置
+            {' '}
+            <code className="rounded bg-[#f1f5f9] px-1">ALIBABA_APP_KEY / SECRET / SESSION</code>
+            {' '}
+            走官方
+            {' '}
+            <a className="text-primary hover:underline" href="https://open.taobao.com/" target="_blank" rel="noreferrer">alibaba.icbu.rfq.search</a>
+            ，接口若返回 buyer_company_name 会按公司名再查。
+            当前官方 API：{status?.alibabaReady ? '已配置' : '未配置'}。
+          </p>
+        </section>
       </div>
     </div>
   );

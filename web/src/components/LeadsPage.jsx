@@ -245,6 +245,25 @@ export default function LeadsPage({ onGoOutreach }) {
     setDrawerOpen(true);
   };
 
+  const identifyCompany = async (payload) => {
+    if (!selectedId) return;
+    setBusy(true);
+    setErr('');
+    setOkMsg('');
+    try {
+      const data = await api.identifyLead(selectedId, payload);
+      setDetail(data);
+      setPickedEmail(data.research?.emails?.[0]?.email || '');
+      setDrawerTab('research');
+      await load();
+      setOkMsg(`已按「${data.customer?.company}」重新背调`);
+    } catch (e) {
+      setErr(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const runResearch = async (id) => {
     setBusy(true);
     setErr('');
@@ -742,6 +761,8 @@ export default function LeadsPage({ onGoOutreach }) {
                   googleReady={Boolean(detail?.searchStatus?.ready)}
                   pickedEmail={pickedEmail}
                   setPickedEmail={setPickedEmail}
+                  onIdentify={identifyCompany}
+                  identifying={busy}
                 />
               )}
             </div>
@@ -842,6 +863,57 @@ function EmailPick({ emails, pickedEmail, setPickedEmail, name }) {
   );
 }
 
+function IdentifyForm({ customer, onSubmit, busy = false }) {
+  const [company, setCompany] = useState('');
+  const [regNo, setRegNo] = useState('');
+  const [website, setWebsite] = useState('');
+  return (
+    <form
+      className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSubmit?.({ company, regNo, website });
+      }}
+    >
+      <div className="text-[12px] font-medium text-[#334155]">补主体后再背调</div>
+      <p className="text-[11px] leading-relaxed text-[#64748b]">
+        阿里公开列表只有「{customer?.company || customer?.name || '昵称'}」，没有公司名和邮箱。谷歌对不上主体。
+        请在国际站后台报价后把看到的法定全称填进来，或让对方回登记号。不要猜私人邮箱。
+      </p>
+      {customer?.sourceUrl && (
+        <a href={customer.sourceUrl} target="_blank" rel="noreferrer" className="inline-block text-[11px] text-primary hover:underline">
+          打开这条阿里询盘去报价
+        </a>
+      )}
+      <input
+        value={company}
+        onChange={(e) => setCompany(e.target.value)}
+        placeholder="法定公司名，如 NMG TECHNICAL SERVICE L.L.C"
+        className="w-full rounded border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-[12px] outline-none focus:border-primary"
+      />
+      <input
+        value={regNo}
+        onChange={(e) => setRegNo(e.target.value)}
+        placeholder="登记号（可选）"
+        className="w-full rounded border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-[12px] outline-none focus:border-primary"
+      />
+      <input
+        value={website}
+        onChange={(e) => setWebsite(e.target.value)}
+        placeholder="官网（可选）"
+        className="w-full rounded border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-[12px] outline-none focus:border-primary"
+      />
+      <button
+        type="submit"
+        disabled={busy || !company.trim()}
+        className="h-8 rounded bg-primary px-3 text-[12px] text-white disabled:opacity-40"
+      >
+        {busy ? '正在按新主体背调…' : '补主体并背调'}
+      </button>
+    </form>
+  );
+}
+
 function GoogleSearchLinks({ links, googleReady = false }) {
   if (!links?.length) return null;
   return (
@@ -867,7 +939,7 @@ function GoogleSearchLinks({ links, googleReady = false }) {
   );
 }
 
-function DrawerBody({ tab, customer, research, searchLinks = [], googleReady = false, pickedEmail, setPickedEmail }) {
+function DrawerBody({ tab, customer, research, searchLinks = [], googleReady = false, pickedEmail, setPickedEmail, onIdentify, identifying = false }) {
   const address = research?.address || factValue(research, /注册地址|总部|地址/);
   const industry = research?.industry || factValue(research, /行业/) || customer.industry;
   const size = research?.employees || factValue(research, /员工规模/);
@@ -939,6 +1011,10 @@ function DrawerBody({ tab, customer, research, searchLinks = [], googleReady = f
             <p className="mt-1 text-[12px] text-[#64748b]">请对方提供法定全称、登记号、付款主体后再查。</p>
           )}
         </div>
+      )}
+
+      {research?.kyb?.grade === 'C' && research?.kyb?.needRegNo && (
+        <IdentifyForm customer={customer} onSubmit={onIdentify} busy={identifying} />
       )}
 
       {(research?.kyb?.sanctions || []).length > 0 && (

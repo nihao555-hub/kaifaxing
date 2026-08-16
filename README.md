@@ -38,6 +38,8 @@ npm run dev           # 同时启动后端(3001)和前端(5173)
 
 阿里国际站：用卖家账号在开放平台创建应用，申请 `alibaba.icbu.rfq.search`，授权后写入 `ALIBABA_APP_KEY` / `ALIBABA_APP_SECRET` / `ALIBABA_SESSION`。不爬页面。
 
+阿里公开询盘大约 96% 只有买家昵称。这类不能搜谷歌。在询盘抽屉「补主体」填入后台看到的法定全称/登记号后，会按公司名再跑背调。配置 `ALIBABA_APP_KEY` / `SECRET` / `SESSION` 后，官方 `alibaba.icbu.rfq.search` 若返回 `buyer_company_name` 也会当公司名查。
+
 谷歌搜索：不要抓 `google.com/search` HTML（会被验证码挡住）。GitHub 上能接的是官方 [`googleapis` Custom Search](https://github.com/googleapis/google-api-nodejs-client)：
 
 1. 打开 [Programmable Search Engine](https://programmablesearchengine.google.com/) 新建搜索引擎，勾选 Search the entire web，记下 CX

@@ -65,6 +65,7 @@ export const api = {
   },
   rfqLead: (id) => req(`/api/rfq/leads/${id}`),
   rfqResearch: (id) => req(`/api/rfq/leads/${id}/research`, { method: 'POST', body: '{}' }),
+  identifyLead: (id, payload) => req(`/api/rfq/leads/${id}/identify`, { method: 'POST', body: JSON.stringify(payload) }),
   rfqResearchBatch: (ids) => req('/api/rfq/leads/research-batch', { method: 'POST', body: JSON.stringify({ ids }) }),
   rfqApplyContact: (id, payload) =>
     req(`/api/rfq/leads/${id}/apply-contact`, { method: 'POST', body: JSON.stringify(payload) }),

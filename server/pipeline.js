@@ -1,7 +1,7 @@
 import { config } from './config.js';
 import { db, save, getCustomer, isRfqLead, isDemoCustomer, logActivity } from './store.js';
 import { crawlAllAndImport } from './rfq.js';
-import { researchLead, isPersonLikeLead, isPlausibleEmail, skippedLeadReport } from './research.js';
+import { researchLead, isPersonLikeLead, isPlausibleEmail, skippedLeadReport, applyLeadIdentity } from './research.js';
 import { VERIFIED_SOURCES } from './openSources.js';
 import { isForwarderName } from './kyb.js';
 
@@ -169,6 +169,24 @@ function enqueueDailyBacklog() {
   p.backlogEnqueued = added;
   save();
   return added;
+}
+
+export async function identifyLead(id, payload = {}) {
+  const customer = getCustomer(id);
+  if (!customer) {
+    const err = new Error('线索不存在');
+    err.status = 404;
+    throw err;
+  }
+  applyLeadIdentity(customer, payload);
+  save();
+  logActivity({
+    customerId: customer.id,
+    action: '补主体',
+    detail: `${customer.buyerAlias || customer.name} → ${customer.company}${customer.regNo ? `，登记号 ${customer.regNo}` : ''}`,
+  });
+  const research = await runLeadResearch(customer, { useAi: false, autoApply: true });
+  return { customer, research };
 }
 
 export function applyPublicContact(customer, email, extra = {}) {

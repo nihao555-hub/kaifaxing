@@ -181,10 +181,30 @@ export function skippedLeadReport(customer) {
 }
 
 export function isPersonLikeLead(customer) {
+  if (customer?.forceCompany || customer?.regNo) return false;
   const company = String(customer?.company || '').trim();
   const name = String(customer?.name || '').trim();
   if (company) return isPersonLikeDisplayName(company);
   return isPersonLikeDisplayName(name);
+}
+
+export function applyLeadIdentity(customer, { company, legalName, regNo, website } = {}) {
+  if (!customer) throw new Error('线索不存在');
+  const name = String(company || legalName || '').trim();
+  const registry = String(regNo || '').trim();
+  const site = String(website || '').trim();
+  if (!name) throw new Error('请填法定公司名。公开列表只有昵称，不能拿 Linda N 去撞谷歌');
+  if (isPersonLikeDisplayName(name) && !registry && !site) {
+    throw new Error('这个名字仍像个人昵称。请写成带 Ltd/LLC/GmbH 的法定全称，或同时提供登记号/官网');
+  }
+  customer.buyerAlias = customer.buyerAlias || customer.company || customer.name;
+  customer.company = name;
+  customer.legalName = String(legalName || name).trim();
+  if (registry) customer.regNo = registry;
+  if (site) customer.website = site;
+  customer.forceCompany = true;
+  customer.research = null;
+  return customer;
 }
 
 export function registrableDomain(host) {
@@ -859,6 +879,10 @@ export async function researchLead(customer, { useAi = true } = {}) {
   const steps = [];
 
   if (customer.country) facts.push({ label: '国家/地区', value: customer.country, source: '入库' });
+  if (customer.regNo) facts.push({ label: '登记号', value: customer.regNo, source: '补主体' });
+  if (customer.buyerAlias && customer.buyerAlias !== company) {
+    facts.push({ label: '询盘显示名', value: customer.buyerAlias, source: '入库' });
+  }
   if (customer.painPoints) facts.push({ label: '询盘/招标摘要', value: String(customer.painPoints).slice(0, 300), source: '入库' });
   if (customer.sourceUrl) sources.push({ title: '原始询盘/公告', url: customer.sourceUrl });
 

@@ -3,6 +3,7 @@ import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config, googleSearchReady, googleSearchStatus } from './config.js';
+import { alibabaReady } from './alibaba.js';
 import { db, save, getCustomer, listCustomers, leadFacets, saveSearchSettings } from './store.js';
 import { generateEmail, evaluateEmail, suggestSendTime } from './agent.js';
 import { createBatchJob, getJob, listJobs } from './scheduler.js';
@@ -23,6 +24,7 @@ import {
   enqueuePendingResearch,
   kickResearch,
   stampPersonLikeLeads,
+  identifyLead,
   applyPublicContact,
   promoteLeads,
 } from './pipeline.js';
@@ -169,13 +171,24 @@ app.get('/api/research/tools', (req, res) => res.json({ tools: GITHUB_TOOLS }));
 app.get('/api/search/status', (req, res) => {
   res.json({
     ...googleSearchStatus(),
+    alibabaReady: alibabaReady(),
     docs: {
       cse: 'https://developers.google.com/custom-search/v1/overview',
       cseGithub: 'https://github.com/googleapis/google-api-nodejs-client',
       program: 'https://programmablesearchengine.google.com/',
       serper: 'https://serper.dev/',
+      alibaba: 'https://open.taobao.com/',
     },
   });
+});
+
+app.post('/api/rfq/leads/:id/identify', async (req, res) => {
+  try {
+    const result = await identifyLead(req.params.id, req.body || {});
+    res.json(result);
+  } catch (err) {
+    res.status(err.status || 400).json({ error: err.message || '补主体失败' });
+  }
 });
 
 app.post('/api/search/settings', (req, res) => {
