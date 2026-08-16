@@ -46,7 +46,9 @@ export function isRfqLead(c) {
 function leadRank(c) {
   const person = isPersonLikeDisplayName(c.company || c.name) && (!c.company || c.company === c.name);
   if (person) return 2;
-  if (/USASpending|Contracts Finder|TED|World Bank|SAM/.test(c.source || '')) return 0;
+  const src = c.source || '';
+  if (/阿里|Alibaba|GoldSupplier|TradeIndia/i.test(src)) return 0;
+  if (/USASpending|Contracts Finder|TED|World Bank|SAM/.test(src)) return 1;
   return 1;
 }
 
@@ -102,7 +104,11 @@ export function listCustomers({
     items.push(c);
   }
   if (view === 'leads') {
-    items.sort((a, b) => leadRank(a) - leadRank(b));
+    items.sort((a, b) => {
+      const d = leadRank(a) - leadRank(b);
+      if (d) return d;
+      return String(b.ingestedAt || b.lastActivity || '').localeCompare(String(a.ingestedAt || a.lastActivity || ''));
+    });
   }
   const safeLimit = Math.min(Math.max(Number(limit) || 200, 1), 500);
   const safeOffset = Math.max(Number(offset) || 0, 0);
