@@ -33,8 +33,18 @@ function isOwnInbox(email) {
   return String(email || '').toLowerCase() === String(config.smtp.user || '').toLowerCase();
 }
 
+function isBlockedOutreachEmail(email) {
+  const e = String(email || '').toLowerCase();
+  if (/@(gmail|yahoo|ymail|hotmail|outlook|live\.com|icloud|proton|qq\.com|163\.com|126\.com|mail\.ru)/i.test(e)) {
+    return true;
+  }
+  return /lawrencetheband\.com|washington\.org|civilsolutionsva\.com/i.test(e);
+}
+
 function isPendingFirstTouch(c) {
+  if (!c.inOutreach) return false;
   if (!c.email || !c.email.includes('@')) return false;
+  if (isBlockedOutreachEmail(c.email)) return false;
   if (c.agentPhase === 'need_email') return false;
   return (
     c.status === 'uncontacted' &&
@@ -85,6 +95,7 @@ function saveDraft(customer, draft, evaluation) {
 }
 
 function enqueue(customer, draft, actionLabel) {
+  if (isBlockedOutreachEmail(customer.email) || isOwnInbox(customer.email)) return;
   const job = createBatchJob(
     [{ customerId: customer.id, subject: draft.subject, body: draft.body }],
     'smart'
@@ -324,14 +335,20 @@ export function getAgentState() {
 
 function recoverScheduled() {
   for (const c of db.customers) {
+    if (isBlockedOutreachEmail(c.email) && c.agentPhase !== 'paused') {
+      c.agentPhase = 'paused';
+      continue;
+    }
     if (c.agentPhase === 'working') c.agentPhase = null;
     const draft = db.aiPanel[c.id]?.draft;
     const sent = (db.threads[c.id] || []).some((t) => t.type === 'outbound');
     if (
+      c.inOutreach &&
       c.status === 'uncontacted' &&
       draft?.subject &&
       !sent &&
       !isOwnInbox(c.email) &&
+      !isBlockedOutreachEmail(c.email) &&
       c.agentPhase !== 'error' &&
       c.agentPhase !== 'paused'
     ) {

@@ -6,7 +6,7 @@ import { config, googleSearchReady, googleSearchStatus } from './config.js';
 import { alibabaReady } from './alibaba.js';
 import { db, save, getCustomer, listCustomers, leadFacets, saveSearchSettings } from './store.js';
 import { generateEmail, evaluateEmail, suggestSendTime } from './agent.js';
-import { createBatchJob, getJob, listJobs } from './scheduler.js';
+import { createBatchJob, getJob, listJobs, cancelScheduledFor } from './scheduler.js';
 import { sentToday, logActivity } from './store.js';
 import { startAgent, stopAgent, getAgentState } from './autopilot.js';
 import { ingestInbound } from './inbox.js';
@@ -503,6 +503,12 @@ app.post('/api/batch/send', (req, res) => {
   } catch (err) {
     res.status(400).json({ error: String(err.message || err) });
   }
+});
+
+app.post('/api/batch/cancel', (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  const cancelled = cancelScheduledFor(ids);
+  res.json({ cancelled, agent: getAgentState() });
 });
 
 app.get('/api/batch/jobs', (req, res) => res.json({ jobs: listJobs() }));

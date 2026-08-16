@@ -694,9 +694,23 @@ export async function promoteLeads(ids = [], { researchLimit = 6 } = {}) {
       skipped.push({ id, company: customer.company || customer.name, reason: '不能用自己的发件箱当客户' });
       continue;
     }
+    if (/@(gmail|yahoo|ymail|hotmail|outlook|live\.com|icloud|proton|qq\.com|163\.com|126\.com|mail\.ru)/i.test(email)) {
+      skipped.push({ id, company: customer.company || customer.name, reason: '私人邮箱不能进开发信' });
+      continue;
+    }
+    if (/lawrencetheband\.com|washington\.org|civilsolutionsva\.com/i.test(email)) {
+      skipped.push({ id, company: customer.company || customer.name, reason: '撞名域名，不是这家主体的官网邮箱' });
+      continue;
+    }
+    if (customer.research?.kyb?.grade && customer.research.kyb.grade !== 'A') {
+      skipped.push({ id, company: customer.company || customer.name, reason: '开发信只收录 A 级可发信主体' });
+      continue;
+    }
     customer.inOutreach = true;
-    customer.status = customer.status === 'replied' ? customer.status : 'uncontacted';
-    customer.agentPhase = null;
+    if (customer.status !== 'replied' && customer.status !== 'following') customer.status = 'uncontacted';
+    if (!['scheduled', 'waiting', 'working'].includes(customer.agentPhase)) {
+      customer.agentPhase = null;
+    }
     promoted.push({ id, company: customer.company || customer.name, email: customer.email });
     logActivity({
       customerId: customer.id,

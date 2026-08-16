@@ -194,6 +194,25 @@ export function resumeSending() {
   cancelled = false;
 }
 
+export function cancelScheduledFor(customerIds = []) {
+  const want = new Set(customerIds.map(String));
+  let n = 0;
+  for (const job of jobs.values()) {
+    for (const task of job.items) {
+      if (!want.has(String(task.customerId))) continue;
+      if (task.status !== 'scheduled') continue;
+      const timer = timers.get(task.id);
+      if (timer) {
+        clearTimeout(timer);
+        timers.delete(task.id);
+      }
+      task.status = 'cancelled';
+      n += 1;
+    }
+  }
+  return n;
+}
+
 export function getJob(id) {
   return jobs.get(id);
 }
