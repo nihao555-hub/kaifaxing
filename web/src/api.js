@@ -9,7 +9,15 @@ async function req(path, options) {
 }
 
 export const api = {
-  getCustomers: () => req('/api/customers'),
+  getCustomers: (params = {}) => {
+    const qs = new URLSearchParams({
+      view: params.view || 'inbox',
+      limit: String(params.limit || 200),
+      offset: String(params.offset || 0),
+    });
+    if (params.q) qs.set('q', params.q);
+    return req(`/api/customers?${qs}`);
+  },
   addCustomer: (payload) => req('/api/customers', { method: 'POST', body: JSON.stringify(payload) }),
   getThread: (id) => req(`/api/customers/${id}/thread`),
   generate: (customerId, extraContext) =>
@@ -41,4 +49,21 @@ export const api = {
   rfqCrawlAllStatus: () => req('/api/rfq/crawl-all'),
   rfqSchema: () => req('/api/rfq/schema'),
   updateCustomer: (id, payload) => req(`/api/customers/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  rfqLeads: (params = {}) => {
+    const qs = new URLSearchParams({
+      q: params.q || '',
+      source: params.source || '',
+      contact: params.contact || '',
+      quality: params.quality || '',
+      country: params.country || '',
+      limit: String(params.limit || 20),
+      offset: String(params.offset || 0),
+    });
+    return req(`/api/rfq/leads?${qs}`);
+  },
+  rfqLead: (id) => req(`/api/rfq/leads/${id}`),
+  rfqResearch: (id) => req(`/api/rfq/leads/${id}/research`, { method: 'POST', body: '{}' }),
+  rfqResearchBatch: (ids) => req('/api/rfq/leads/research-batch', { method: 'POST', body: JSON.stringify({ ids }) }),
+  rfqApplyContact: (id, payload) =>
+    req(`/api/rfq/leads/${id}/apply-contact`, { method: 'POST', body: JSON.stringify(payload) }),
 };

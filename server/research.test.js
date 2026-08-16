@@ -1,0 +1,77 @@
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  stripLegalSuffix,
+  significantTokens,
+  tokenOverlap,
+  isPersonLikeDisplayName,
+  isPlausibleEmail,
+  scoreEmail,
+  extractEmails,
+  extractPhones,
+  registrableDomain,
+} from './research.js';
+
+describe('company name helpers', () => {
+  it('strips legal suffixes', () => {
+    assert.equal(stripLegalSuffix('KIER TRANSPORTATION LIMITED'), 'KIER TRANSPORTATION');
+    assert.equal(stripLegalSuffix('HOWOGE Wohnungsbaugesellschaft mbH'), 'HOWOGE Wohnungsbaugesellschaft');
+    assert.equal(stripLegalSuffix('L3HARRIS TECHNOLOGIES, INC.'), 'L3HARRIS TECHNOLOGIES');
+  });
+
+  it('scores parent-company overlap', () => {
+    assert.ok(tokenOverlap('KIER TRANSPORTATION LIMITED', 'Kier Group') >= 0.5);
+    assert.ok(tokenOverlap('L3HARRIS TECHNOLOGIES, INC.', 'L3Harris Technologies') >= 0.8);
+    assert.equal(tokenOverlap('solo beck', 'Acme Corporation'), 0);
+  });
+
+  it('treats Alibaba display names as people, not companies', () => {
+    assert.equal(isPersonLikeDisplayName('solo beck'), true);
+    assert.equal(isPersonLikeDisplayName('Ahmed AlMansouri'), true);
+    assert.equal(isPersonLikeDisplayName('Tyne Coast College'), false);
+    assert.equal(isPersonLikeDisplayName('KIER TRANSPORTATION LIMITED'), false);
+    assert.equal(isPersonLikeDisplayName('L3HARRIS TECHNOLOGIES, INC.'), false);
+  });
+
+  it('keeps distinctive tokens', () => {
+    assert.deepEqual(significantTokens('The Kier Group PLC'), ['kier', 'group']);
+  });
+});
+
+describe('public contact extractors', () => {
+  it('keeps role mailboxes and drops image/css junk', () => {
+    const html = `
+      <title>Contact - South Tyneside College</title>
+      <p>Email us at info@stc.ac.uk or careersteam@tynecoast.ac.uk</p>
+      <img src="cropped-stc-logo@2x.png" />
+      <style>@font-face{src:url(realist-howoge-regular.woff2)}</style>
+      <a href="mailto:noreply@stc.ac.uk">no</a>
+    `;
+    const emails = extractEmails(html, { websiteHost: 'www.stc.ac.uk' });
+    assert.deepEqual(emails.map((e) => e.email), ['info@stc.ac.uk', 'careersteam@tynecoast.ac.uk']);
+    assert.ok(scoreEmail('info@stc.ac.uk', 'www.stc.ac.uk') > scoreEmail('random@gmail.com', 'www.stc.ac.uk'));
+  });
+
+  it('reads German imprint role email', () => {
+    const html = '<p>Unternehmenskommunikation uk@howoge.de 030 - 5464-0</p>';
+    const emails = extractEmails(html, { websiteHost: 'www.howoge.de' });
+    assert.equal(emails[0].email, 'uk@howoge.de');
+  });
+
+  it('rejects implausible addresses', () => {
+    assert.equal(isPlausibleEmail('cropped-stc-logo@2x.png'), false);
+    assert.equal(isPlausibleEmail('noreply@stc.ac.uk'), false);
+    assert.equal(isPlausibleEmail('info@stc.ac.uk'), true);
+  });
+
+  it('extracts international phones', () => {
+    const phones = extractPhones('<p>Call +44 191 427 3500 or +1 321-727-9100</p>');
+    assert.ok(phones.some((p) => p.includes('44')));
+  });
+
+  it('handles multi-part TLDs', () => {
+    assert.equal(registrableDomain('www.kier.co.uk'), 'kier.co.uk');
+    assert.equal(registrableDomain('www.stc.ac.uk'), 'stc.ac.uk');
+    assert.equal(registrableDomain('www.l3harris.com'), 'l3harris.com');
+  });
+});

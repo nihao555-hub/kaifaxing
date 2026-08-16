@@ -3,7 +3,7 @@ import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
-import { db, save } from './store.js';
+import { db, save, getCustomer, listCustomers, leadFacets } from './store.js';
 import { generateEmail, evaluateEmail, suggestSendTime } from './agent.js';
 import { createBatchJob, getJob, listJobs } from './scheduler.js';
 import { sentToday, logActivity } from './store.js';
@@ -11,6 +11,7 @@ import { startAgent, stopAgent, getAgentState } from './autopilot.js';
 import { ingestInbound } from './inbox.js';
 import { listSources, searchRfq, importRfqItems, ingestCommercial, crawlAlibabaPublic, crawlAllAndImport, ALIBABA_PUBLIC_FIELDS, PUBLIC_SINCE_DEFAULT } from './rfq.js';
 import { alibabaCrawlProgress } from './publicRfq.js';
+import { researchLead, isPlausibleEmail } from './research.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -19,7 +20,12 @@ app.use(express.json({ limit: '2mb' }));
 
 // ---------- 客户 ----------
 app.get('/api/customers', (req, res) => {
-  res.json({ customers: db.customers });
+  const view = req.query.view || 'inbox';
+  const q = String(req.query.q || '');
+  const limit = Number(req.query.limit || 200);
+  const offset = Number(req.query.offset || 0);
+  const result = listCustomers({ view, q, limit, offset });
+  res.json({ customers: result.items, total: result.total, offset: result.offset, limit: result.limit });
 });
 
 app.post('/api/customers', (req, res) => {
@@ -49,7 +55,7 @@ app.post('/api/customers', (req, res) => {
 app.patch('/api/customers/:id', (req, res) => {
   const customer = db.customers.find((c) => c.id === req.params.id);
   if (!customer) return res.status(404).json({ error: '客户不存在' });
-  const { email, painPoints, title, company } = req.body || {};
+  const { email, painPoints, title, company, website } = req.body || {};
   if (email) {
     if (String(email).toLowerCase() === String(config.smtp.user).toLowerCase()) {
       return res.status(400).json({ error: '请填写真实客户邮箱，不要用自己的发件箱' });
@@ -60,6 +66,7 @@ app.patch('/api/customers/:id', (req, res) => {
   if (painPoints != null) customer.painPoints = painPoints;
   if (title != null) customer.title = title;
   if (company != null) customer.company = company;
+  if (website != null) customer.website = website;
   save();
   res.json({ customer });
 });
@@ -136,6 +143,117 @@ app.post('/api/rfq/ingest', (req, res) => {
   } catch (err) {
     res.status(400).json({ error: `导入失败：${err.message}` });
   }
+});
+
+const researching = new Set();
+
+app.get('/api/rfq/leads', (req, res) => {
+  const result = listCustomers({
+    view: 'leads',
+    q: String(req.query.q || ''),
+    source: String(req.query.source || ''),
+    country: String(req.query.country || ''),
+    contact: String(req.query.contact || ''),
+    quality: String(req.query.quality || ''),
+    limit: Number(req.query.limit || 30),
+    offset: Number(req.query.offset || 0),
+  });
+  res.json({
+    ...result,
+    facets: leadFacets(),
+  });
+});
+
+app.get('/api/rfq/leads/:id', (req, res) => {
+  const customer = getCustomer(req.params.id);
+  if (!customer) return res.status(404).json({ error: '线索不存在' });
+  res.json({ customer, research: customer.research || null });
+});
+
+async function runLeadResearch(customer) {
+  if (researching.has(customer.id)) {
+    const err = new Error('正在背调中');
+    err.status = 409;
+    throw err;
+  }
+  researching.add(customer.id);
+  customer.research = { ...(customer.research || {}), status: 'running', updatedAt: new Date().toISOString() };
+  save();
+  try {
+    const report = await researchLead(customer);
+    customer.research = report;
+    if (report.website && !customer.website) customer.website = report.website;
+    if (report.legalName && report.legalName !== customer.company) customer.legalName = report.legalName;
+    save();
+    logActivity({
+      customerId: customer.id,
+      action: '公开背调',
+      detail: report.emails?.length
+        ? `${customer.company || customer.name}：核到官网公开邮箱 ${report.emails.map((e) => e.email).join('、')}`
+        : `${customer.company || customer.name}：${report.steps?.find((s) => s.key === 'contact')?.detail || '未找到公开邮箱'}`,
+    });
+    return report;
+  } catch (err) {
+    customer.research = { status: 'failed', error: String(err.message || err), updatedAt: new Date().toISOString() };
+    save();
+    throw err;
+  } finally {
+    researching.delete(customer.id);
+  }
+}
+
+app.post('/api/rfq/leads/research-batch', async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.slice(0, 5) : [];
+  const results = [];
+  for (const id of ids) {
+    const customer = getCustomer(id);
+    if (!customer) {
+      results.push({ id, error: '线索不存在' });
+      continue;
+    }
+    try {
+      const research = await runLeadResearch(customer);
+      results.push({ id, research });
+    } catch (err) {
+      results.push({ id, error: String(err.message || err) });
+    }
+  }
+  res.json({ results });
+});
+
+app.post('/api/rfq/leads/:id/research', async (req, res) => {
+  const customer = getCustomer(req.params.id);
+  if (!customer) return res.status(404).json({ error: '线索不存在' });
+  try {
+    const research = await runLeadResearch(customer);
+    res.json({ customer, research });
+  } catch (err) {
+    res.status(err.status || 502).json({ error: `背调失败：${err.message}`, research: customer.research || null });
+  }
+});
+
+app.post('/api/rfq/leads/:id/apply-contact', (req, res) => {
+  const customer = getCustomer(req.params.id);
+  if (!customer) return res.status(404).json({ error: '线索不存在' });
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const website = req.body?.website != null ? String(req.body.website).trim() : '';
+  const company = req.body?.company != null ? String(req.body.company).trim() : '';
+  if (!isPlausibleEmail(email)) return res.status(400).json({ error: '请提供从公开页核到的有效邮箱' });
+  if (email === String(config.smtp.user).toLowerCase()) {
+    return res.status(400).json({ error: '请填写真实客户邮箱，不要用自己的发件箱' });
+  }
+  customer.email = email;
+  if (website) customer.website = website;
+  if (company) customer.company = company;
+  customer.contactSource = 'public_research';
+  if (customer.agentPhase === 'need_email') customer.agentPhase = null;
+  save();
+  logActivity({
+    customerId: customer.id,
+    action: '写入公开联系方式',
+    detail: `已把 ${email} 写入 ${customer.company || customer.name}。若 Agent 在运行，可能按开发信流程自动联系该公开角色邮箱。`,
+  });
+  res.json({ customer });
 });
 
 // ---------- 沟通历史与 AI 面板 ----------

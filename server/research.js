@@ -1,0 +1,653 @@
+import { chat, parseJson } from './ai.js';
+
+const UA = 'OutreachAI/1.0 (public due-diligence; +https://github.com/nihao555-hub/kaifaxing)';
+
+const LEGAL_SUFFIX_RE =
+  /\b(limited|ltd\.?|inc\.?|incorporated|llc|l\.l\.c\.|gmbh|mbh|sarl|s\.a\.r\.l\.|plc|p\.l\.c\.|corp\.?|corporation|co\.|company|ag|s\.a\.|n\.v\.|b\.v\.|oy|ab|a\/s|s\.p\.a\.|s\.r\.l\.|pty|pvt|private|public|lp|llp|llc\.|m\.b\.h\.)\b/gi;
+
+const INSTITUTION_RE =
+  /\b(college|university|hospital|council|ministry|department|authority|agency|municipality|borough|county|city|trust|consortium|society|foundation|institute|school|police|nhs|government|kommune|gemeinde|stadt|amt)\b/i;
+
+const MULTI_TLD = new Set([
+  'co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'co.jp', 'com.cn', 'co.in', 'com.sg', 'com.hk', 'co.nz', 'com.br',
+]);
+
+const CONTACT_PATHS = [
+  '/contact', '/contact-us', '/contactus', '/contacts', '/contact.html',
+  '/about', '/about-us', '/about/contact',
+  '/impressum', '/imprint', '/legal', '/legal-notice', '/legal.html',
+  '/kontakt', '/kontaktieren', '/contacto', '/contatti',
+  '/privacy', '/privacy-policy',
+  '/enquiry', '/inquire',
+];
+
+const ROLE_SCORE = {
+  procurement: 100,
+  purchasing: 100,
+  purchase: 95,
+  buying: 90,
+  buyer: 88,
+  sourcing: 90,
+  vendor: 80,
+  tenders: 85,
+  tender: 85,
+  suppliers: 70,
+  supplier: 70,
+  export: 78,
+  import: 78,
+  trade: 72,
+  trading: 72,
+  sales: 70,
+  sale: 65,
+  enquiry: 82,
+  inquiry: 82,
+  enquiries: 82,
+  inquiries: 82,
+  info: 76,
+  contact: 74,
+  office: 70,
+  hello: 50,
+  mail: 42,
+  press: 40,
+  media: 36,
+  marketing: 46,
+  comms: 44,
+  uk: 55,
+};
+
+const JUNK_LOCAL = new Set([
+  'noreply', 'no-reply', 'donotreply', 'mailer-daemon', 'postmaster', 'webmaster', 'abuse', 'security',
+]);
+
+const JUNK_DOMAIN = [
+  'example.com', 'example.org', 'w3.org', 'schema.org', 'sentry.io', 'google.com', 'gstatic.com',
+  'cloudflare.com', 'github.com', 'facebook.com', 'twitter.com', 'linkedin.com', 'youtube.com',
+  'gravatar.com', 'wordpress.org', 'jquery.com', 'cloudfront.net',
+];
+
+const EMAIL_RE = /[a-zA-Z0-9][a-zA-Z0-9._%+-]{0,63}@[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,24}/g;
+const PHONE_RE = /(?:\+|00)[1-9][\d\s().-]{7,16}\d/g;
+
+export function stripLegalSuffix(name) {
+  return String(name || '')
+    .replace(LEGAL_SUFFIX_RE, ' ')
+    .replace(/[(),.]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function significantTokens(name) {
+  const stop = new Set(['the', 'and', 'of', 'for', 'und', 'der', 'die', 'das', 'van', 'de', 'la', 'le']);
+  return stripLegalSuffix(name)
+    .toLowerCase()
+    .split(/[^a-z0-9äöüß]+/i)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 3 && !stop.has(t));
+}
+
+export function tokenOverlap(a, b) {
+  const ta = new Set(significantTokens(a));
+  const tb = new Set(significantTokens(b));
+  if (!ta.size || !tb.size) return 0;
+  let inter = 0;
+  for (const t of ta) if (tb.has(t)) inter += 1;
+  return inter / Math.min(ta.size, tb.size);
+}
+
+export function isPersonLikeDisplayName(name) {
+  const s = String(name || '').trim();
+  if (!s) return false;
+  if (new RegExp(LEGAL_SUFFIX_RE.source, 'i').test(s) || INSTITUTION_RE.test(s)) return false;
+  const words = s.split(/\s+/);
+  if (words.length < 2 || words.length > 4 || s.length > 42) return false;
+  return words.every((w) => /^[A-Za-z][A-Za-z.'-]{1,20}$/.test(w));
+}
+
+export function registrableDomain(host) {
+  const h = String(host || '').replace(/^www\./i, '').toLowerCase();
+  const parts = h.split('.').filter(Boolean);
+  if (parts.length <= 2) return h;
+  const last3 = parts.slice(-3).join('.');
+  const last2plus = parts.slice(-2).join('.');
+  if (MULTI_TLD.has(last2plus) || MULTI_TLD.has(parts.slice(-2).join('.'))) return last3;
+  const maybe = `${parts[parts.length - 2]}.${parts[parts.length - 1]}`;
+  if (MULTI_TLD.has(maybe)) return parts.slice(-3).join('.');
+  return maybe;
+}
+
+export function isPlausibleEmail(email) {
+  const e = String(email || '').trim().toLowerCase();
+  const parts = e.split('@');
+  if (parts.length !== 2) return false;
+  const [local, domain] = parts;
+  if (!local || !domain || local.length > 64) return false;
+  if (JUNK_LOCAL.has(local)) return false;
+  if (JUNK_DOMAIN.some((d) => domain === d || domain.endsWith(`.${d}`))) return false;
+  if (/\.(png|jpe?g|gif|webp|svg|css|js|woff2?|ttf)$/i.test(local) || /\.(png|jpe?g|gif|webp|svg)$/i.test(domain)) return false;
+  if (local.includes('cropped-') || local.includes('logo@') || local.startsWith('font-')) return false;
+  if (!/^[a-z0-9][a-z0-9._+-]*$/.test(local)) return false;
+  if (!/^[a-z0-9.-]+\.[a-z]{2,24}$/.test(domain)) return false;
+  return true;
+}
+
+export function scoreEmail(email, websiteHost = '') {
+  const e = String(email || '').toLowerCase();
+  const local = e.split('@')[0] || '';
+  const domain = e.split('@')[1] || '';
+  let score = ROLE_SCORE[local] || (local.includes('.') ? 30 : 48);
+  if (websiteHost) {
+    const site = registrableDomain(websiteHost);
+    const mail = registrableDomain(domain);
+    if (site && mail && (mail === site || domain.endsWith(`.${site}`))) score += 20;
+  }
+  return Math.min(score, 120);
+}
+
+export function extractEmails(html, { websiteHost = '' } = {}) {
+  const text = stripTags(html);
+  const found = new Map();
+  for (const raw of text.match(EMAIL_RE) || []) {
+    const email = raw.toLowerCase();
+    if (!isPlausibleEmail(email)) continue;
+    const prev = found.get(email);
+    const item = {
+      email,
+      role: email.split('@')[0],
+      score: scoreEmail(email, websiteHost),
+    };
+    if (!prev || item.score > prev.score) found.set(email, item);
+  }
+  return [...found.values()].sort((a, b) => b.score - a.score);
+}
+
+export function extractPhones(html) {
+  const text = stripTags(html);
+  const set = new Set();
+  for (const raw of text.match(PHONE_RE) || []) {
+    const compact = raw.replace(/[^\d+]/g, '');
+    if (compact.replace(/\D/g, '').length < 8) continue;
+    set.add(raw.replace(/\s+/g, ' ').trim());
+  }
+  return [...set].slice(0, 8);
+}
+
+function stripTags(html) {
+  return String(html || '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ');
+}
+
+function pageTitle(html) {
+  const m = String(html || '').match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  return m ? stripTags(m[1]).trim().slice(0, 160) : '';
+}
+
+function pageMentionsCompany(html, company) {
+  const tokens = significantTokens(company).filter((t) => t.length >= 4);
+  const text = `${pageTitle(html)} ${stripTags(html).slice(0, 4000)}`.toLowerCase();
+  if (!tokens.length) {
+    return significantTokens(company).some((t) => text.includes(t));
+  }
+  const hits = tokens.filter((t) => text.includes(t));
+  return hits.length >= Math.min(2, tokens.length) || (hits.length >= 1 && tokens[0].length >= 5);
+}
+
+async function fetchText(url, { timeout = 12000, accept = '*/*' } = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeout);
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': UA, Accept: accept },
+      signal: ctrl.signal,
+      redirect: 'follow',
+    });
+    const text = await res.text();
+    return { ok: res.ok, status: res.status, url: res.url, text };
+  } catch (err) {
+    return { ok: false, status: 0, url, text: '', error: String(err.message || err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchJson(url, accept = 'application/json') {
+  const r = await fetchText(url, { accept });
+  if (!r.ok || !r.text) return null;
+  try {
+    return JSON.parse(r.text);
+  } catch {
+    return null;
+  }
+}
+
+function sameSite(fromUrl, href) {
+  try {
+    const base = new URL(fromUrl);
+    const next = new URL(href, fromUrl);
+    if (!/^https?:$/.test(next.protocol)) return false;
+    return registrableDomain(base.hostname) === registrableDomain(next.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function discoverContactLinks(html, pageUrl) {
+  const hrefs = [];
+  const re = /href=["']([^"']+)["']/gi;
+  let m;
+  while ((m = re.exec(html))) {
+    const href = m[1];
+    if (!/contact|kontakt|impressum|imprint|about|legal|enquiry|privacy/i.test(href)) continue;
+    if (!sameSite(pageUrl, href)) continue;
+    try {
+      hrefs.push(new URL(href, pageUrl).toString());
+    } catch { /* skip */ }
+  }
+  return [...new Set(hrefs)].slice(0, 8);
+}
+
+function claimValues(entity, pid) {
+  const out = [];
+  for (const c of entity?.claims?.[pid] || []) {
+    const val = c?.mainsnak?.datavalue?.value;
+    if (val == null) continue;
+    if (typeof val === 'string') out.push(val);
+    else if (val.time) out.push(String(val.time).replace(/T.*$/, '').replace(/^\+/, ''));
+    else if (val.amount) out.push(String(val.amount));
+    else if (val.id) out.push(val.id);
+    else if (val.text) out.push(val.text);
+  }
+  return out;
+}
+
+async function searchWikidata(query) {
+  const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&language=en&format=json&limit=5&search=${encodeURIComponent(query)}`;
+  const data = await fetchJson(url);
+  return data?.search || [];
+}
+
+async function loadWikidataEntity(id) {
+  const data = await fetchJson(`https://www.wikidata.org/wiki/Special:EntityData/${id}.json`);
+  return data?.entities?.[id] || null;
+}
+
+async function searchWikipedia(query) {
+  const url = `https://en.wikipedia.org/w/api.php?action=opensearch&limit=5&namespace=0&format=json&search=${encodeURIComponent(query)}`;
+  const data = await fetchJson(url);
+  const titles = data?.[1] || [];
+  const links = data?.[3] || [];
+  return titles.map((title, i) => ({ title, url: links[i] }));
+}
+
+async function wikipediaSummary(title) {
+  const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
+  return fetchJson(url);
+}
+
+async function searchGleif(query, mode = 'legalName') {
+  const filter = mode === 'fulltext' ? 'filter[fulltext]' : 'filter[entity.legalName]';
+  const url = `https://api.gleif.org/api/v1/lei-records?page[size]=5&${filter}=${encodeURIComponent(query)}`;
+  const data = await fetchJson(url);
+  return data?.data || [];
+}
+
+function pickBestHit(hits, company, getLabel) {
+  let best = null;
+  let bestScore = 0;
+  for (const hit of hits) {
+    const label = getLabel(hit);
+    const score = tokenOverlap(company, label);
+    if (score > bestScore) {
+      best = { hit, label, score };
+      bestScore = score;
+    }
+  }
+  if (bestScore >= 0.5) return best;
+  const tokens = significantTokens(company);
+  if (best && bestScore > 0 && tokens.some((t) => t.length >= 4 && String(best.label).toLowerCase().includes(t))) {
+    return best;
+  }
+  return null;
+}
+
+function queriesFor(company) {
+  const full = String(company || '').trim();
+  const stripped = stripLegalSuffix(full);
+  const q = [];
+  if (full) q.push(full);
+  if (stripped && stripped.toLowerCase() !== full.toLowerCase()) q.push(stripped);
+  const tokens = significantTokens(full);
+  if (tokens.length >= 2) q.push(tokens.slice(0, 3).join(' '));
+  return [...new Set(q)].slice(0, 4);
+}
+
+async function resolveEntity(company) {
+  const sources = [];
+  const facts = [];
+  let website = '';
+  let legalName = company;
+  let extract = '';
+  let wikiTitle = '';
+  let relatedNote = '';
+
+  for (const q of queriesFor(company)) {
+    const wdHits = await searchWikidata(q);
+    const picked = pickBestHit(wdHits, company, (h) => h.label || '');
+    if (picked) {
+      const ent = await loadWikidataEntity(picked.hit.id);
+      const label = ent?.labels?.en?.value || picked.label;
+      legalName = label || legalName;
+      const sites = claimValues(ent, 'P856');
+      if (sites[0]) website = sites[0];
+      const sitelink = ent?.sitelinks?.enwiki?.title;
+      if (sitelink) wikiTitle = sitelink;
+      facts.push({ label: 'Wikidata', value: `${label} (${picked.hit.id})`, source: 'Wikidata' });
+      if (picked.hit.description) facts.push({ label: '主体说明', value: picked.hit.description, source: 'Wikidata' });
+      if (claimValues(ent, 'P571')[0]) facts.push({ label: '成立', value: claimValues(ent, 'P571')[0], source: 'Wikidata' });
+      sources.push({ title: `Wikidata ${picked.hit.id}`, url: `https://www.wikidata.org/wiki/${picked.hit.id}` });
+      if (tokenOverlap(company, label) < 0.8) {
+        relatedNote = `公开库匹配到相关主体「${label}」，不一定等于询盘上的法定全称`;
+      }
+      break;
+    }
+  }
+
+  if (!wikiTitle) {
+    for (const q of queriesFor(company)) {
+      const hits = await searchWikipedia(q);
+      const picked = pickBestHit(hits, company, (h) => h.title);
+      if (picked) {
+        wikiTitle = picked.label;
+        break;
+      }
+    }
+  }
+
+  if (wikiTitle) {
+    const sum = await wikipediaSummary(wikiTitle);
+    if (sum?.extract) extract = sum.extract;
+    const wikiUrl = sum?.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(wikiTitle)}`;
+    sources.push({ title: `Wikipedia · ${wikiTitle}`, url: wikiUrl });
+    if (extract) facts.push({ label: '公开简介', value: extract.slice(0, 400), source: 'Wikipedia' });
+    if (!website && sum?.content_urls) {
+      /* official site still comes from Wikidata P856 when available */
+    }
+  }
+
+  let gleif = [];
+  for (const q of queriesFor(company)) {
+    gleif = await searchGleif(q, 'legalName');
+    if (gleif.length) break;
+  }
+  if (!gleif.length) {
+    for (const q of queriesFor(company)) {
+      gleif = await searchGleif(q, 'fulltext');
+      if (gleif.length) break;
+    }
+  }
+  const gleifPick = pickBestHit(gleif, company, (h) => h?.attributes?.entity?.legalName?.name || '');
+  if (gleifPick) {
+    const attrs = gleifPick.hit.attributes || {};
+    const ent = attrs.entity || {};
+    const addr = ent.legalAddress || {};
+    legalName = ent.legalName?.name || legalName;
+    facts.push({ label: 'LEI', value: attrs.lei || '', source: 'GLEIF' });
+    facts.push({ label: '登记状态', value: ent.status || '', source: 'GLEIF' });
+    facts.push({
+      label: '注册地址',
+      value: [addr.addressLines, addr.city, addr.postalCode, addr.country].flat().filter(Boolean).join(', '),
+      source: 'GLEIF',
+    });
+    if (ent.jurisdiction) facts.push({ label: '法域', value: ent.jurisdiction, source: 'GLEIF' });
+    sources.push({ title: `GLEIF ${attrs.lei}`, url: `https://search.gleif.org/#/record/${attrs.lei}` });
+  }
+
+  return { website, legalName, extract, facts: facts.filter((f) => f.value), sources, relatedNote };
+}
+
+async function harvestContacts(website, company) {
+  if (!website) return { emails: [], phones: [], pages: [], verified: false };
+  const home = website.startsWith('http') ? website : `https://${website}`;
+  const homeRes = await fetchText(home, { accept: 'text/html', timeout: 14000 });
+  if (!homeRes.ok) return { emails: [], phones: [], pages: [], verified: false, error: homeRes.error || `HTTP ${homeRes.status}` };
+
+  const verified = pageMentionsCompany(homeRes.text, company) || pageMentionsCompany(homeRes.text, pageTitle(homeRes.text));
+  const pages = [{ url: homeRes.url, title: pageTitle(homeRes.text) || '官网首页' }];
+  const htmls = [homeRes.text];
+  const extra = new Set([
+    ...CONTACT_PATHS.map((p) => {
+      try { return new URL(p, homeRes.url).toString(); } catch { return ''; }
+    }).filter(Boolean),
+    ...discoverContactLinks(homeRes.text, homeRes.url),
+  ]);
+
+  let fetched = 0;
+  for (const url of extra) {
+    if (fetched >= 5) break;
+    if (url === homeRes.url) continue;
+    const r = await fetchText(url, { accept: 'text/html', timeout: 10000 });
+    fetched += 1;
+    if (!r.ok || !r.text) continue;
+    pages.push({ url: r.url, title: pageTitle(r.text) || url });
+    htmls.push(r.text);
+  }
+
+  let host = '';
+  try { host = new URL(homeRes.url).hostname; } catch { /* ignore */ }
+  const emailMap = new Map();
+  const phones = new Set();
+  for (const html of htmls) {
+    for (const item of extractEmails(html, { websiteHost: host })) {
+      const prev = emailMap.get(item.email);
+      if (!prev || item.score > prev.score) emailMap.set(item.email, { ...item, source: '官网公开页' });
+    }
+    for (const p of extractPhones(html)) phones.add(p);
+  }
+
+  return {
+    emails: [...emailMap.values()].sort((a, b) => b.score - a.score).slice(0, 8),
+    phones: [...phones].slice(0, 8),
+    pages,
+    verified,
+    website: homeRes.url,
+  };
+}
+
+function fallbackBrief({ customer, legalName, extract, emails, website, personLike, relatedNote }) {
+  const bits = [];
+  bits.push(`${customer.company || customer.name} 来自 ${customer.source || '公开询盘'}，国家/地区 ${customer.country || '未知'}。`);
+  if (personLike) {
+    bits.push('公开源只有个人显示名，核不到公司主体，也没有可验证的公开角色邮箱。按外贸公式不应猜测私人邮箱，更不应群发。');
+  } else if (legalName) {
+    bits.push(`主体核验指向「${legalName}」。${relatedNote || ''}`.trim());
+  }
+  if (extract) bits.push(extract.slice(0, 220));
+  if (website) bits.push(`官网：${website}。`);
+  if (emails.length) bits.push(`公开页找到角色邮箱：${emails.map((e) => e.email).join('、')}。优先用采购/询盘邮箱，不要用媒体或招聘邮箱当开发信入口。`);
+  else if (website) bits.push('官网能打开，但联系方式是表单或未明文公布邮箱，不能编造 purchase@ 域名去撞。');
+  if (customer.painPoints) bits.push(`询盘意图：${String(customer.painPoints).slice(0, 160)}`);
+  return bits.join(' ');
+}
+
+async function aiBrief(payload) {
+  const text = await chat(
+    [
+      {
+        role: 'system',
+        content: `你是外贸开发信前的公开背调分析师。只根据给定公开事实，禁止编造联系方式、营收、新闻或未出现的子公司。
+用中文输出 JSON：
+{
+  "brief": "8-12 句背调摘要，按主体核验 / 官网 / 公开联系方式 / 采购意图 / 开发信建议写",
+  "entityType": "listed_company|sme|government|institution|unknown_person|unknown",
+  "buyingRole": "一句话采购意图",
+  "outreachAdvice": "能不能写开发信、写给哪个公开角色邮箱、注意什么",
+  "risks": ["风险点"]
+}`,
+      },
+      { role: 'user', content: JSON.stringify(payload) },
+    ],
+    { temperature: 0.3 }
+  );
+  return parseJson(text);
+}
+
+export async function researchLead(customer, { useAi = true } = {}) {
+  const company = String(customer.company || customer.name || '').trim();
+  const personLike = isPersonLikeDisplayName(company) && (!customer.company || customer.company === customer.name);
+  const facts = [];
+  const sources = [];
+  const notes = [];
+  const steps = [];
+
+  if (customer.source) facts.push({ label: '询盘来源', value: customer.source, source: '入库' });
+  if (customer.country) facts.push({ label: '国家/地区', value: customer.country, source: '入库' });
+  if (customer.painPoints) facts.push({ label: '询盘/招标摘要', value: String(customer.painPoints).slice(0, 300), source: '入库' });
+  if (customer.sourceUrl) sources.push({ title: '原始询盘/公告', url: customer.sourceUrl });
+
+  let website = '';
+  let legalName = company;
+  let extract = '';
+  let relatedNote = '';
+  let emails = [];
+  let phones = [];
+  let pages = [];
+
+  if (personLike) {
+    steps.push({ key: 'entity', label: '主体核验', ok: false, detail: '只有个人显示名，公开库无法核到公司' });
+    steps.push({ key: 'website', label: '官网定位', ok: false, detail: '无线索，未猜测域名' });
+    steps.push({ key: 'contact', label: '公开联系方式', ok: false, detail: '不猜测私人邮箱，不从社交资料扒信' });
+    notes.push('阿里等公开 RFQ 卡片经常只有买家昵称。没有公司全称时，外贸公式到此结束。');
+  } else {
+    const resolved = await resolveEntity(company);
+    website = resolved.website;
+    legalName = resolved.legalName || company;
+    extract = resolved.extract;
+    relatedNote = resolved.relatedNote;
+    facts.push(...resolved.facts);
+    sources.push(...resolved.sources);
+    if (relatedNote) notes.push(relatedNote);
+    steps.push({
+      key: 'entity',
+      label: '主体核验',
+      ok: Boolean(resolved.facts.length),
+      detail: resolved.facts.length ? `匹配到 ${legalName}` : 'Wikidata / GLEIF / Wikipedia 没有足够匹配',
+    });
+
+    const harvested = await harvestContacts(website, legalName || company);
+    if (harvested.website) website = harvested.website;
+    emails = harvested.emails || [];
+    phones = harvested.phones || [];
+    pages = harvested.pages || [];
+    if (harvested.error) notes.push(`官网抓取：${harvested.error}`);
+    for (const p of pages) sources.push({ title: p.title || '官网', url: p.url });
+    steps.push({
+      key: 'website',
+      label: '官网定位',
+      ok: Boolean(website),
+      detail: website || '公开库未给出官网，未用撞库方式猜测域名发信',
+    });
+    steps.push({
+      key: 'contact',
+      label: '公开联系方式',
+      ok: emails.length > 0,
+      detail: emails.length
+        ? `官网公开页找到 ${emails.map((e) => e.email).join('、')}`
+        : website
+          ? '官网可打开，联系方式多为表单，没有明文角色邮箱'
+          : '没有可核验的公开邮箱',
+    });
+  }
+
+  steps.push({
+    key: 'intent',
+    label: '采购意图',
+    ok: Boolean(customer.painPoints),
+    detail: customer.painPoints ? String(customer.painPoints).slice(0, 160) : '入库摘要为空',
+  });
+
+  let brief = fallbackBrief({ customer, legalName, extract, emails, website, personLike, relatedNote });
+  let entityType = personLike ? 'unknown_person' : emails.length || website ? 'unknown' : 'unknown';
+  let buyingRole = customer.painPoints ? String(customer.painPoints).slice(0, 120) : '';
+  let outreachAdvice = emails.length
+    ? `可向公开角色邮箱 ${emails[0].email} 写一封开发信，先确认对方是否接受供应商来信。`
+    : personLike
+      ? '不要写。没有可验证主体和公开邮箱。'
+      : '先走官网表单或招标规定渠道，不要编造邮箱群发。';
+  let risks = personLike
+    ? ['显示名无法核验', '猜测私人邮箱属违规获客']
+    : emails.length
+      ? ['公开角色邮箱不一定是采购决策人', '写入后若 Agent 在跑可能自动发信']
+      : ['无明文邮箱', '大公司常用表单，角色邮箱不公开'];
+
+  if (useAi) {
+    try {
+      const ai = await aiBrief({
+        name: customer.name,
+        company,
+        legalName,
+        country: customer.country,
+        source: customer.source,
+        inquiry: customer.painPoints,
+        website,
+        emails,
+        phones,
+        extract,
+        facts,
+        notes,
+        personLike,
+      });
+      if (ai.brief) brief = String(ai.brief);
+      if (ai.entityType) entityType = String(ai.entityType);
+      if (ai.buyingRole) buyingRole = String(ai.buyingRole);
+      if (ai.outreachAdvice) outreachAdvice = String(ai.outreachAdvice);
+      if (Array.isArray(ai.risks) && ai.risks.length) risks = ai.risks.map(String);
+    } catch {
+      notes.push('AI 摘要未生成，已用公开事实拼接。');
+    }
+  }
+
+  const confidence = personLike
+    ? 'none'
+    : emails.length && website
+      ? 'high'
+      : website || facts.some((f) => f.source === 'GLEIF' || f.source === 'Wikidata')
+        ? 'medium'
+        : 'low';
+
+  return {
+    status: 'done',
+    updatedAt: new Date().toISOString(),
+    confidence,
+    legalName,
+    website: website || '',
+    emails,
+    phones,
+    facts,
+    sources: dedupeSources(sources),
+    pages,
+    steps,
+    brief,
+    entityType,
+    buyingRole,
+    outreachAdvice,
+    risks,
+    notes,
+    canApplyEmail: emails.length > 0,
+  };
+}
+
+function dedupeSources(list) {
+  const seen = new Set();
+  const out = [];
+  for (const s of list) {
+    const url = s?.url || '';
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    out.push(s);
+  }
+  return out.slice(0, 16);
+}

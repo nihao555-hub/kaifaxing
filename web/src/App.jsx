@@ -5,10 +5,13 @@ import MainPanel from './components/MainPanel.jsx';
 import BatchModal from './components/BatchModal.jsx';
 import AddCustomerModal from './components/AddCustomerModal.jsx';
 import ImportRfqModal from './components/ImportRfqModal.jsx';
+import LeadsPage from './components/LeadsPage.jsx';
 import { api } from './api.js';
 
 export default function App() {
+  const [page, setPage] = useState('outreach');
   const [customers, setCustomers] = useState([]);
+  const [inboxTotal, setInboxTotal] = useState(0);
   const [selectedId, setSelectedId] = useState(null);
   const [thread, setThread] = useState([]);
   const [aiPanel, setAiPanel] = useState(null);
@@ -20,8 +23,9 @@ export default function App() {
   const [agent, setAgent] = useState(null);
 
   const refreshCustomers = useCallback(async () => {
-    const { customers: list } = await api.getCustomers();
+    const { customers: list, total } = await api.getCustomers({ view: 'inbox', limit: 200 });
     setCustomers(list);
+    setInboxTotal(total || list.length);
     return list;
   }, []);
 
@@ -45,6 +49,7 @@ export default function App() {
 
   // 人工监控：Agent 工作时自动刷新名单、沟通历史与活动记录
   useEffect(() => {
+    if (page !== 'outreach') return undefined;
     const tick = async () => {
       try {
         const [list, st] = await Promise.all([refreshCustomers(), api.getAgent()]);
@@ -56,7 +61,7 @@ export default function App() {
     tick();
     const timer = setInterval(tick, 3000);
     return () => clearInterval(timer);
-  }, [refreshCustomers, loadThread, selectedId]);
+  }, [refreshCustomers, loadThread, selectedId, page]);
 
   const regenerate = async () => {
     if (!selectedId || generating) return;
@@ -75,9 +80,14 @@ export default function App() {
 
   return (
     <div className="flex h-full overflow-hidden bg-page">
-      <Sidebar />
+      <Sidebar page={page} onNavigate={setPage} />
+      {page === 'leads' ? (
+        <LeadsPage />
+      ) : (
+        <>
       <CustomerList
         customers={customers}
+        total={inboxTotal}
         selectedId={selectedId}
         onSelect={setSelectedId}
         onAdd={() => setAddOpen(true)}
@@ -132,6 +142,8 @@ export default function App() {
             });
           }}
         />
+      )}
+        </>
       )}
     </div>
   );

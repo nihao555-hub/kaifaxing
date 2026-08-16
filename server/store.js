@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { seedCustomers, seedThreads, seedAiPanel } from './data/seed.js';
+import { isPersonLikeDisplayName } from './research.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.join(__dirname, 'data', 'db.json');
@@ -32,6 +33,88 @@ export function save() {
 
 export function getCustomer(id) {
   return db.customers.find((c) => c.id === id);
+}
+
+function hasUsableEmail(c) {
+  return Boolean(c?.email) && c.agentPhase !== 'need_email';
+}
+
+export function isRfqLead(c) {
+  return Boolean(c?.source || c?.awardId || c?.sourceUrl || c?.agentPhase === 'need_email');
+}
+
+function leadRank(c) {
+  const person = isPersonLikeDisplayName(c.company || c.name) && (!c.company || c.company === c.name);
+  if (person) return 2;
+  if (/USASpending|Contracts Finder|TED|World Bank|SAM/.test(c.source || '')) return 0;
+  return 1;
+}
+
+export function listCustomers({
+  view = 'inbox',
+  q = '',
+  source = '',
+  country = '',
+  contact = '',
+  quality = '',
+  limit = 200,
+  offset = 0,
+} = {}) {
+  const kw = String(q || '').trim().toLowerCase();
+  const src = String(source || '').trim();
+  const ctry = String(country || '').trim().toLowerCase();
+  const items = [];
+  for (const c of db.customers) {
+    if (view === 'inbox' && !hasUsableEmail(c)) continue;
+    if (view === 'leads' && !isRfqLead(c)) continue;
+    if (src && (c.source || '') !== src) continue;
+    if (ctry && !String(c.country || '').toLowerCase().includes(ctry)) continue;
+    if (contact === 'missing' && c.email) continue;
+    if (contact === 'found' && !c.email) continue;
+    if (contact === 'researched' && c.research?.status !== 'done') continue;
+    if (contact === 'pending' && (c.email || c.research?.status === 'done')) continue;
+    if (quality === 'company' || quality === 'person') {
+      const person = isPersonLikeDisplayName(c.company || c.name) && (!c.company || c.company === c.name);
+      if (quality === 'company' && person) continue;
+      if (quality === 'person' && !person) continue;
+    }
+    if (kw) {
+      const hay = [c.name, c.company, c.email, c.country, c.source, c.painPoints, c.rfq?.title]
+        .map((x) => String(x || '').toLowerCase())
+        .join(' ');
+      if (!hay.includes(kw)) continue;
+    }
+    items.push(c);
+  }
+  if (view === 'leads') {
+    items.sort((a, b) => leadRank(a) - leadRank(b));
+  }
+  const safeLimit = Math.min(Math.max(Number(limit) || 200, 1), 500);
+  const safeOffset = Math.max(Number(offset) || 0, 0);
+  return {
+    total: items.length,
+    offset: safeOffset,
+    limit: safeLimit,
+    items: items.slice(safeOffset, safeOffset + safeLimit),
+  };
+}
+
+export function leadFacets() {
+  const sources = {};
+  let total = 0;
+  let needEmail = 0;
+  let hasEmail = 0;
+  let researched = 0;
+  for (const c of db.customers) {
+    if (!isRfqLead(c)) continue;
+    total += 1;
+    const key = c.source || '未知';
+    sources[key] = (sources[key] || 0) + 1;
+    if (c.email) hasEmail += 1;
+    else needEmail += 1;
+    if (c.research?.status === 'done') researched += 1;
+  }
+  return { total, needEmail, hasEmail, researched, sources };
 }
 
 export function appendThread(customerId, entry) {

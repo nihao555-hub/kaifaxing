@@ -1,15 +1,17 @@
-import { Send, LayoutGrid, BarChart3, Settings, Info } from 'lucide-react';
+import { Send, ScanSearch, LayoutGrid, BarChart3, Settings, Info } from 'lucide-react';
 import { Avatar } from './common.jsx';
 
 const NAV_ITEMS = [
   { key: 'outreach', label: '开发信', icon: Send },
+  { key: 'leads', label: '询盘获客', icon: ScanSearch },
   { key: 'templates', label: '模板', icon: LayoutGrid },
   { key: 'analytics', label: '数据分析', icon: BarChart3 },
   { key: 'settings', label: '设置', icon: Settings },
 ];
 
-// 左侧深色导航栏（仅"开发信"页面可用，其余为占位导航）
-export default function Sidebar() {
+const OPEN_KEYS = new Set(['outreach', 'leads']);
+
+export default function Sidebar({ page = 'outreach', onNavigate }) {
   return (
     <aside className="flex w-[76px] shrink-0 flex-col items-center bg-sidebar py-4">
       {/* Logo */}
@@ -22,17 +24,19 @@ export default function Sidebar() {
 
       {/* 导航 */}
       <nav className="flex flex-col items-center gap-2">
-        {NAV_ITEMS.map(({ key, label, icon: Icon }, idx) => {
-          const active = idx === 0;
+        {NAV_ITEMS.map(({ key, label, icon: Icon }) => {
+          const open = OPEN_KEYS.has(key);
+          const active = page === key;
           return (
             <button
               key={key}
+              onClick={() => open && onNavigate?.(key)}
               className={`flex w-[60px] flex-col items-center gap-1 rounded-xl py-2.5 transition-colors ${
                 active
                   ? 'bg-primary text-white shadow-lg shadow-primary/30'
                   : 'text-slate-400 hover:bg-white/10 hover:text-white'
               }`}
-              title={active ? label : `${label}（暂未开放）`}
+              title={open ? label : `${label}（暂未开放）`}
             >
               <Icon size={20} strokeWidth={2} />
               <span className="text-[10px] leading-none">{label}</span>

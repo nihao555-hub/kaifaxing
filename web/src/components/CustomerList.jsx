@@ -16,7 +16,7 @@ function formatDate(d) {
 }
 
 // 中间客户名单栏
-export default function CustomerList({ customers, selectedId, onSelect, onAdd, onImportRfq }) {
+export default function CustomerList({ customers, total, selectedId, onSelect, onAdd, onImportRfq }) {
   const [tab, setTab] = useState('all');
   const [keyword, setKeyword] = useState('');
 
@@ -41,7 +41,7 @@ export default function CustomerList({ customers, selectedId, onSelect, onAdd, o
       <div className="flex items-center gap-2 px-4 pt-4 pb-3">
         <h2 className="text-[15px] font-semibold text-slate-800">客户名单</h2>
         <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-500">
-          {counts.all}
+          {total ?? counts.all}
         </span>
       </div>
 
