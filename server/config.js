@@ -41,6 +41,12 @@ export const config = {
   },
 
   samApiKey: process.env.SAM_API_KEY || '',
+  companiesHouse: {
+    apiKey: process.env.COMPANIES_HOUSE_API_KEY || '',
+  },
+  openCorporates: {
+    apiKey: process.env.OPENCORPORATES_API_KEY || '',
+  },
 
   // 谷歌搜索：官方 Custom Search JSON API（googleapis），或可选 Serper
   google: {
@@ -106,5 +112,9 @@ export function googleSearchStatus() {
     apiKeyMasked: maskSecret(config.google.apiKey),
     cseIdMasked: maskSecret(config.google.cseId),
     serperMasked: maskSecret(config.google.serperKey),
+    companiesHouseReady: Boolean(config.companiesHouse.apiKey),
+    openCorporatesReady: Boolean(config.openCorporates.apiKey),
+    companiesHouseMasked: maskSecret(config.companiesHouse.apiKey),
+    openCorporatesMasked: maskSecret(config.openCorporates.apiKey),
   };
 }

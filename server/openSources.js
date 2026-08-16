@@ -1,3 +1,5 @@
+import { config } from './config.js';
+
 // 公开企业背调。只查公司主体和官网，不扒私人邮箱。
 // 对齐 GitHub 上专门做客户尽调的工具用的公开接口：
 //   StephenAbbott/opencheck（GLEIF → 各国开放登记）
@@ -304,6 +306,32 @@ export function shouldQueryAres(country, jurisdiction) {
   return countryIs(country, jurisdiction, ['czech', 'czechia', '捷克', 'cz']);
 }
 
+export function shouldQueryUk(country, jurisdiction) {
+  const hay = `${country || ''} ${jurisdiction || ''}`.toLowerCase();
+  if (/\bukraine\b|乌克兰/.test(hay)) return false;
+  return countryIs(country, jurisdiction, ['united kingdom', 'britain', 'england', 'scotland', 'wales', '英国'])
+    || /\b(uk|gb|gbr)\b/.test(hay);
+}
+
+export function openCorporatesReady() {
+  return Boolean(config.openCorporates?.apiKey);
+}
+
+export async function searchOpenCorporates(company) {
+  if (!openCorporatesReady() || tokensOf(company).length < 2) return null;
+  const url = `https://api.opencorporates.com/v0.4/companies/search?q=${encodeURIComponent(company)}&per_page=5&api_token=${encodeURIComponent(config.openCorporates.apiKey)}`;
+  const data = await getJson(url);
+  const rows = (data?.results?.companies || []).map((x) => x.company).filter(Boolean);
+  const picked = pickOpenHit(rows, company, (h) => h.name || '');
+  if (!picked?.name) return null;
+  return {
+    name: picked.name,
+    number: picked.company_number || '',
+    jurisdiction: picked.jurisdiction_code || '',
+    url: picked.opencorporates_url || '',
+  };
+}
+
 export async function searchPrh(company) {
   const q = String(company || '').trim();
   if (q.length < 4) return null;
@@ -350,6 +378,32 @@ function factVal(facts, labelRe) {
 function pushFact(extra, sources, item) {
   if (!item?.value) return;
   extra.push(item);
+}
+
+export function companiesHouseReady() {
+  return Boolean(config.companiesHouse?.apiKey);
+}
+
+export function parseCompaniesHouseHit(row) {
+  if (!row) return null;
+  const addr = row.address || {};
+  const address = [addr.address_line_1, addr.locality, addr.postal_code, addr.country].filter(Boolean).join(', ');
+  return {
+    name: row.title || row.company_name || '',
+    number: row.company_number || '',
+    status: row.company_status || '',
+    address,
+  };
+}
+
+export async function searchCompaniesHouse(company) {
+  if (!companiesHouseReady() || tokensOf(company).length < 2) return null;
+  const url = `https://api.company-information.service.gov.uk/search/companies?q=${encodeURIComponent(company)}&items_per_page=5`;
+  const auth = Buffer.from(`${config.companiesHouse.apiKey}:`).toString('base64');
+  const data = await getJson(url, { Authorization: `Basic ${auth}` });
+  const rows = data?.items || [];
+  const picked = pickOpenHit(rows, company, (h) => h.title || h.company_name || '');
+  return parseCompaniesHouseHit(picked);
 }
 
 function companyHouseUrl(number) {
@@ -495,6 +549,23 @@ export async function enrichOpenSources({ company, country, facts = [], website 
     extra.push({ label: '捷克企业登记', value: `${cz.name}${cz.ico ? ` · IČO ${cz.ico}` : ''}`, source: 'ARES' });
     if (cz.address) extra.push({ label: '注册地址', value: cz.address, source: 'ARES' });
     if (cz.ico) sources.push({ title: `ARES ${cz.ico}`, url: `https://ares.gov.cz/ekonomicke-subjekty?ico=${cz.ico}` });
+  })());
+
+  jobs.push((async () => {
+    if (!shouldQueryUk(country, jurisdiction) || factVal(facts, /英国公司登记/)) return;
+    const ch = await searchCompaniesHouse(company);
+    if (!ch?.name) return;
+    extra.push({ label: '英国公司登记', value: `${ch.name}${ch.number ? ` · ${ch.number}` : ''}${ch.status ? ` · ${ch.status}` : ''}`, source: 'Companies House' });
+    if (ch.address) extra.push({ label: '注册地址', value: ch.address, source: 'Companies House' });
+    if (ch.number) sources.push({ title: `Companies House ${ch.number}`, url: companyHouseUrl(ch.number) });
+  })());
+
+  jobs.push((async () => {
+    if (!openCorporatesReady() || factVal(facts, /OpenCorporates/)) return;
+    const oc = await searchOpenCorporates(company);
+    if (!oc?.name) return;
+    extra.push({ label: 'OpenCorporates', value: `${oc.name}${oc.number ? ` · ${oc.number}` : ''}${oc.jurisdiction ? ` · ${oc.jurisdiction}` : ''}`, source: 'OpenCorporates' });
+    if (oc.url) sources.push({ title: oc.name, url: oc.url });
   })());
 
   jobs.push((async () => {

@@ -16,6 +16,8 @@ import { isPlausibleEmail, isPersonLikeLead } from './research.js';
 import { imageSearchLinks } from './rfqHints.js';
 import { buildSearchLinks, rfqProductTerms, searchGoogleCse, searchSerper, parseGoogleCse, parseSerper } from './searchDorks.js';
 import { GITHUB_TOOLS } from './githubTools.js';
+import { paidSourceStatus } from './paidSources.js';
+import { companiesHouseReady, openCorporatesReady } from './openSources.js';
 import {
   startLeadPipeline,
   getPipelineState,
@@ -170,16 +172,28 @@ app.post('/api/rfq/ingest', (req, res) => {
 
 app.get('/api/research/tools', (req, res) => res.json({ tools: GITHUB_TOOLS }));
 
+app.get('/api/paid-sources', (req, res) => {
+  res.json(paidSourceStatus({
+    alibabaReady: alibabaReady(),
+    companiesHouseReady: companiesHouseReady(),
+    openCorporatesReady: openCorporatesReady(),
+  }));
+});
+
 app.get('/api/search/status', (req, res) => {
   res.json({
     ...googleSearchStatus(),
     alibabaReady: alibabaReady(),
+    companiesHouseReady: companiesHouseReady(),
+    openCorporatesReady: openCorporatesReady(),
     docs: {
       cse: 'https://developers.google.com/custom-search/v1/overview',
       cseGithub: 'https://github.com/googleapis/google-api-nodejs-client',
       program: 'https://programmablesearchengine.google.com/',
       serper: 'https://serper.dev/',
       alibaba: 'https://open.taobao.com/',
+      companiesHouse: 'https://developer.company-information.service.gov.uk/',
+      openCorporates: 'https://opencorporates.com/api_accounts/new',
     },
   });
 });
@@ -198,6 +212,8 @@ app.post('/api/search/settings', (req, res) => {
     apiKey: req.body?.apiKey,
     cseId: req.body?.cseId,
     serperKey: req.body?.serperKey,
+    companiesHouseKey: req.body?.companiesHouseKey,
+    openCorporatesKey: req.body?.openCorporatesKey,
     clear: Boolean(req.body?.clear),
   });
   res.json(status);

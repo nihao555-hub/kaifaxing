@@ -48,6 +48,8 @@ npm run dev           # 同时启动后端(3001)和前端(5173)
 
 免费额度约 100 次/天。新账号若已无法开通 CSE，可改用 Serper（同一套外贸公式，返回谷歌结果 JSON）。公共 SearXNG / 直接扒谷歌页在服务器上会被 403/验证码挡住，不会去绕。
 
+付费源能查到公司名/联系方式，是因为买了平台解锁或授权库，不是公开列表多了字段。对齐方式：阿里卖家报价/后台导出、`COMPANIES_HOUSE_API_KEY`（英国工商免费 Key）、`OPENCORPORATES_API_KEY`、或把 Apollo/海关导出转成带公司名的 JSON 导入。不接 Hunter/Apollo 扒私人邮箱。
+
 其他付费聚合（TendersOnTime、dgMarket 等）或卖家后台导出：
 
 ```bash
@@ -78,6 +80,8 @@ npm run build && npm start   # 后端 3001 端口同时托管前端构建产物
 | `ALIBABA_APP_KEY` / `ALIBABA_APP_SECRET` / `ALIBABA_SESSION` | 阿里国际站开放平台（可选） | 空 |
 | `GOOGLE_API_KEY` / `GOOGLE_CSE_ID` | 谷歌官方 Custom Search JSON API（也可在「设置」里填） | 空 |
 | `SERPER_API_KEY` | 可选，[serper.dev](https://serper.dev/) 谷歌 SERP JSON；CSE 没开通时用 | 空 |
+| `COMPANIES_HOUSE_API_KEY` | 英国 Companies House 官方 API（[免费申请](https://developer.company-information.service.gov.uk/)），也可在「设置」里填 | 空 |
+| `OPENCORPORATES_API_KEY` | OpenCorporates 多国工商聚合（可选；没 Key 仍打各国免费登记口） | 空 |
 | `PIPELINE_DAILY_HOUR` | 北京时间每日拉新询盘的整点 | 7 |
 | `PIPELINE_REFRESH_HOURS` | 当天已同步后再扫一轮的间隔（小时） | 6 |
 

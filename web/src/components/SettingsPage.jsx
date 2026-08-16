@@ -3,17 +3,21 @@ import { api } from '../api.js';
 
 export default function SettingsPage() {
   const [status, setStatus] = useState(null);
+  const [paid, setPaid] = useState(null);
   const [apiKey, setApiKey] = useState('');
   const [cseId, setCseId] = useState('');
   const [serperKey, setSerperKey] = useState('');
+  const [companiesHouseKey, setCompaniesHouseKey] = useState('');
+  const [openCorporatesKey, setOpenCorporatesKey] = useState('');
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [test, setTest] = useState(null);
   const [error, setError] = useState('');
 
   const load = async () => {
-    const data = await api.searchStatus();
+    const [data, sources] = await Promise.all([api.searchStatus(), api.paidSources().catch(() => null)]);
     setStatus(data);
+    setPaid(sources);
   };
 
   useEffect(() => {
@@ -24,11 +28,16 @@ export default function SettingsPage() {
     setSaving(true);
     setError('');
     try {
-      const data = await api.saveSearchSettings({ apiKey, cseId, serperKey });
+      const data = await api.saveSearchSettings({
+        apiKey, cseId, serperKey, companiesHouseKey, openCorporatesKey,
+      });
       setStatus(data);
       setApiKey('');
       setCseId('');
       setSerperKey('');
+      setCompaniesHouseKey('');
+      setOpenCorporatesKey('');
+      setPaid(await api.paidSources().catch(() => null));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -65,7 +74,7 @@ export default function SettingsPage() {
     <div className="flex min-h-0 flex-1 flex-col bg-[#f6f8fb]">
       <div className="border-b border-[#e8edf4] bg-white px-8 py-5">
         <div className="text-[18px] font-semibold text-[#1e293b]">设置</div>
-        <p className="mt-1 text-[12px] text-[#64748b]">把谷歌搜索接到自动背调。不抓 google.com 结果页，不绕验证码。</p>
+        <p className="mt-1 text-[12px] text-[#64748b]">接官方搜索和工商 Key。付费源能做到的，是买了解锁或授权库，不是公开页多了字段。</p>
       </div>
 
       <div className="thin-scroll min-h-0 flex-1 overflow-y-auto px-8 py-6">
@@ -169,6 +178,61 @@ export default function SettingsPage() {
               )}
             </div>
           )}
+        </section>
+
+        <section className="mt-5 max-w-[640px] rounded-xl border border-[#e8edf4] bg-white p-5 shadow-sm">
+          <div className="text-[14px] font-medium text-[#1e293b]">付费源为什么能做到</div>
+          <p className="mt-2 text-[12px] leading-relaxed text-[#64748b]">
+            他们不是在公开列表上多了一种魔法。能拿到公司名和联系方式，是因为买了平台解锁、买了授权库、或买了别人的通讯录。
+            同一条路我们也能走：官方 Key 或后台导出。不会去爬登录墙、也不会猜私人邮箱。
+          </p>
+          <div className="mt-3 space-y-3">
+            {(paid?.models || []).map((m) => (
+              <div key={m.key} className="rounded-lg border border-[#e8edf4] bg-[#f8fafc] px-3 py-2.5">
+                <div className="text-[12px] font-medium text-[#334155]">{m.title}</div>
+                <p className="mt-1 text-[11px] leading-relaxed text-[#64748b]">{m.how}</p>
+                <p className="mt-1 text-[11px] text-[#334155]">我们怎么对齐：{m.weCan}</p>
+                <p className="mt-0.5 text-[11px] text-[#94a3b8]">不做：{m.weWont}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 space-y-1.5 text-[11px] text-[#475569]">
+            {(paid?.connectors || []).map((c) => (
+              <div key={c.key}>
+                <span className={c.ready ? 'text-emerald-600' : 'text-[#94a3b8]'}>{c.ready ? '已接通' : '未配 Key'}</span>
+                {' · '}
+                {c.name}
+                {' · '}
+                {c.need}
+              </div>
+            ))}
+          </div>
+          <label className="mt-4 block text-[12px] text-[#64748b]">
+            Companies House API Key（英国工商，官网免费申请）
+            <input
+              value={companiesHouseKey}
+              onChange={(e) => setCompaniesHouseKey(e.target.value)}
+              placeholder={status?.companiesHouseMasked || 'developer.company-information.service.gov.uk'}
+              className="mt-1 w-full rounded-lg border border-[#e2e8f0] px-3 py-2 text-[13px] text-[#1e293b] outline-none focus:border-primary"
+            />
+          </label>
+          <label className="mt-3 block text-[12px] text-[#64748b]">
+            OpenCorporates API Key（可选，多国工商聚合）
+            <input
+              value={openCorporatesKey}
+              onChange={(e) => setOpenCorporatesKey(e.target.value)}
+              placeholder={status?.openCorporatesMasked || 'opencorporates.com 的 Key'}
+              className="mt-1 w-full rounded-lg border border-[#e2e8f0] px-3 py-2 text-[13px] text-[#1e293b] outline-none focus:border-primary"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={save}
+            disabled={saving}
+            className="mt-4 rounded-lg bg-primary px-3 py-1.5 text-[12px] text-white disabled:opacity-60"
+          >
+            {saving ? '保存中…' : '保存工商 Key'}
+          </button>
         </section>
 
         <section className="mt-5 max-w-[640px] rounded-xl border border-[#e8edf4] bg-white p-5 shadow-sm">

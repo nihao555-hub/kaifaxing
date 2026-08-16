@@ -9,6 +9,8 @@ import {
   shouldQueryBrreg,
   shouldQueryPrh,
   shouldQueryAres,
+  shouldQueryUk,
+  parseCompaniesHouseHit,
   countryIs,
 } from './openSources.js';
 
@@ -84,5 +86,23 @@ describe('open sources', () => {
     assert.equal(shouldQueryPrh('France', 'FR'), false);
     assert.equal(shouldQueryAres('Czechia', ''), true);
     assert.equal(shouldQueryAres('挪威', ''), false);
+    assert.equal(shouldQueryUk('英国', ''), true);
+    assert.equal(shouldQueryUk('United Kingdom', ''), true);
+    assert.equal(shouldQueryUk('UK', ''), true);
+    assert.equal(shouldQueryUk('Ukraine', ''), false);
+    assert.equal(shouldQueryUk('法国', ''), false);
+  });
+
+  it('parses a Companies House search hit', () => {
+    const hit = parseCompaniesHouseHit({
+      title: 'TYNE COAST COLLEGE',
+      company_number: '10005999',
+      company_status: 'active',
+      address: { address_line_1: 'St Georges Avenue', locality: 'South Shields', postal_code: 'NE34 6ET', country: 'United Kingdom' },
+    });
+    assert.equal(hit.name, 'TYNE COAST COLLEGE');
+    assert.equal(hit.number, '10005999');
+    assert.equal(hit.status, 'active');
+    assert.match(hit.address, /South Shields/);
   });
 });

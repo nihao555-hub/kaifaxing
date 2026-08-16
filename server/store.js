@@ -35,15 +35,25 @@ export function applyStoredSearchSettings() {
   if (!process.env.GOOGLE_API_KEY && saved.apiKey) config.google.apiKey = saved.apiKey;
   if (!process.env.GOOGLE_CSE_ID && !process.env.GOOGLE_CX && saved.cseId) config.google.cseId = saved.cseId;
   if (!process.env.SERPER_API_KEY && saved.serperKey) config.google.serperKey = saved.serperKey;
+  if (!process.env.COMPANIES_HOUSE_API_KEY && saved.companiesHouseKey) {
+    config.companiesHouse.apiKey = saved.companiesHouseKey;
+  }
+  if (!process.env.OPENCORPORATES_API_KEY && saved.openCorporatesKey) {
+    config.openCorporates.apiKey = saved.openCorporatesKey;
+  }
 }
 
-export function saveSearchSettings({ apiKey, cseId, serperKey, clear } = {}) {
+export function saveSearchSettings({
+  apiKey, cseId, serperKey, companiesHouseKey, openCorporatesKey, clear,
+} = {}) {
   ensureSearchSettings();
   if (clear) {
     db.settings.search = {};
     if (!process.env.GOOGLE_API_KEY) config.google.apiKey = '';
     if (!process.env.GOOGLE_CSE_ID && !process.env.GOOGLE_CX) config.google.cseId = '';
     if (!process.env.SERPER_API_KEY) config.google.serperKey = '';
+    if (!process.env.COMPANIES_HOUSE_API_KEY) config.companiesHouse.apiKey = '';
+    if (!process.env.OPENCORPORATES_API_KEY) config.openCorporates.apiKey = '';
     save();
     return googleSearchStatus();
   }
@@ -58,6 +68,14 @@ export function saveSearchSettings({ apiKey, cseId, serperKey, clear } = {}) {
   if (typeof serperKey === 'string' && serperKey.trim()) {
     db.settings.search.serperKey = serperKey.trim();
     if (!process.env.SERPER_API_KEY) config.google.serperKey = serperKey.trim();
+  }
+  if (typeof companiesHouseKey === 'string' && companiesHouseKey.trim()) {
+    db.settings.search.companiesHouseKey = companiesHouseKey.trim();
+    if (!process.env.COMPANIES_HOUSE_API_KEY) config.companiesHouse.apiKey = companiesHouseKey.trim();
+  }
+  if (typeof openCorporatesKey === 'string' && openCorporatesKey.trim()) {
+    db.settings.search.openCorporatesKey = openCorporatesKey.trim();
+    if (!process.env.OPENCORPORATES_API_KEY) config.openCorporates.apiKey = openCorporatesKey.trim();
   }
   save();
   return googleSearchStatus();

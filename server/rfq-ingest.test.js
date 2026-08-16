@@ -60,6 +60,15 @@ describe('commercial ingest', () => {
     assert.equal(items[0].company, 'Sahel Tools Ltd');
     assert.equal(items[0].email, 'buy@sahel.example');
   });
+
+  it('reads Apollo / customs-style paid export columns', () => {
+    const items = parseIngestPayload({
+      source: 'Apollo 导出',
+      items: [{ organization_name: 'Tyne Coast College', work_email: 'info@stc.ac.uk', country: 'UK' }],
+    });
+    assert.equal(items[0].company, 'Tyne Coast College');
+    assert.equal(items[0].email, 'info@stc.ac.uk');
+  });
 });
 
 describe('source catalog', () => {
