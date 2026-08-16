@@ -9,7 +9,7 @@ import { createBatchJob, getJob, listJobs } from './scheduler.js';
 import { sentToday, logActivity } from './store.js';
 import { startAgent, stopAgent, getAgentState } from './autopilot.js';
 import { ingestInbound } from './inbox.js';
-import { listSources, searchRfq, importRfqItems } from './rfq.js';
+import { listSources, searchRfq, importRfqItems, ingestCommercial } from './rfq.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -80,6 +80,14 @@ app.post('/api/rfq/import', (req, res) => {
   const items = Array.isArray(req.body?.items) ? req.body.items : [];
   const created = importRfqItems(items);
   res.json({ created });
+});
+app.post('/api/rfq/ingest', (req, res) => {
+  try {
+    const { items, created } = ingestCommercial(req.body || {});
+    res.json({ accepted: items.length, created });
+  } catch (err) {
+    res.status(400).json({ error: `导入失败：${err.message}` });
+  }
 });
 
 // ---------- 沟通历史与 AI 面板 ----------

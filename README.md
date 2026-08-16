@@ -19,7 +19,11 @@
 - **批量发送（可选人工向导）**：选客户 → AI 逐个生成（可编辑）→ 选择发送策略 → 后台按计划发送、实时进度
 - **时区智能调度**：自动安排在收件人当地**周二~周四上午 9-11 点**黄金打开时段，避开周末与深夜
 - **发信频率保护**：相邻两封随机间隔 45-120 秒模拟人工节奏；单日上限 50 封，保护 163 账号信誉
-- **公开 RFQ 聚合源**：客户名单旁数据库图标默认「全部聚合」，一次并行拉取 USASpending、英国 Contracts Finder、欧盟 TED、世界银行；配置 `SAM_API_KEY` 后自动带上 SAM.gov。某个源失败不影响其他源。无公开邮箱的线索入库后不会自动发信
+- **RFQ 数据源（政府招标 + 商业询盘）**
+  - **政府招标（已接通、免费官方接口）**：USASpending、英国 Contracts Finder、欧盟 TED、世界银行；配置 `SAM_API_KEY` 后带上 SAM.gov
+  - **阿里国际站**：只走官方 `alibaba.icbu.rfq.search`（TOP 签名），需 `ALIBABA_APP_KEY` / `ALIBABA_APP_SECRET` / `ALIBABA_SESSION`。不爬页面
+  - **付费聚合 / 其他平台**：没有合法免费的「全球所有商业 RFQ」单一 API。TendersOnTime、dgMarket、中国制造网导出等用 `POST /api/rfq/ingest` 灌入
+  - 无公开邮箱的线索入库后不会自动发信
 
 ## 快速开始
 
@@ -28,7 +32,17 @@ npm run install:all   # 安装根目录 + server + web 依赖
 npm run dev           # 同时启动后端(3001)和前端(5173)
 ```
 
-打开 http://localhost:5173 即可使用。客户名单旁的数据库图标可从 USASpending.gov 拉取美国电动工具/五金相关联邦合同买家。
+打开 http://localhost:5173 即可使用。客户名单旁的数据库图标分两栏：政府招标（已接通官方接口）和商业询盘（阿里官方 API + JSON 导入）。
+
+阿里国际站：用卖家账号在开放平台创建应用，申请 `alibaba.icbu.rfq.search`，授权后写入 `ALIBABA_APP_KEY` / `ALIBABA_APP_SECRET` / `ALIBABA_SESSION`。不爬页面。
+
+其他付费聚合（TendersOnTime、dgMarket 等）或卖家后台导出：
+
+```bash
+curl -X POST http://localhost:3001/api/rfq/ingest \
+  -H 'Content-Type: application/json' \
+  -d '{"source":"TendersOnTime","items":[{"company":"Acme GmbH","email":"procurement@acme.example","country":"德国","painPoints":"Need 500 drills"}]}'
+```
 
 生产部署：
 
@@ -48,6 +62,8 @@ npm run build && npm start   # 后端 3001 端口同时托管前端构建产物
 | `AI_API_KEY` / `AI_MODEL` | API Key / 模型 | gpt-5.6-sol |
 | `SEND_MIN_INTERVAL` / `SEND_MAX_INTERVAL` | 发信间隔（秒） | 45 / 120 |
 | `SEND_DAILY_LIMIT` | 单日发送上限 | 50 |
+| `SAM_API_KEY` | SAM.gov Public API Key（可选） | 空 |
+| `ALIBABA_APP_KEY` / `ALIBABA_APP_SECRET` / `ALIBABA_SESSION` | 阿里国际站开放平台（可选） | 空 |
 
 > ⚠️ 安全提示：仓库默认值中包含真实凭据，仅适合私有仓库使用；对外部署请改用环境变量并轮换密钥。
 

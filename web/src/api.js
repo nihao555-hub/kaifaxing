@@ -27,5 +27,6 @@ export const api = {
   rfqSources: () => req('/api/rfq/sources'),
   rfqSearch: (source, q) => req(`/api/rfq/search?source=${encodeURIComponent(source || 'all')}&q=${encodeURIComponent(q || '')}`),
   rfqImport: (items) => req('/api/rfq/import', { method: 'POST', body: JSON.stringify({ items }) }),
+  rfqIngest: (payload) => req('/api/rfq/ingest', { method: 'POST', body: JSON.stringify(payload) }),
   updateCustomer: (id, payload) => req(`/api/customers/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
 };

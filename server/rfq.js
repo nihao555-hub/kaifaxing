@@ -1,5 +1,6 @@
 import { db, save, logActivity } from './store.js';
 import { config } from './config.js';
+import { alibabaReady, searchAlibaba } from './alibaba.js';
 
 // 聚合公开 RFQ / 采购数据源：一次请求并行打多个官方接口，结果归一化后合并。
 // 只走开放 API，不爬私人邮箱。某个源失败不影响其他源。
@@ -85,16 +86,33 @@ function pickLang(obj) {
   return obj.eng?.[0] || obj.ENG?.[0] || obj.en?.[0] || Object.values(obj).flat?.()?.[0] || Object.values(obj)[0] || '';
 }
 
-function lead({ id, source, sourceType, title, company, name, titleRole, email, country, timezone, industry, city, state, amount, currency, url, painPoints, awardId }) {
+const COUNTRY_TZ = {
+  美国: 'America/New_York', 英国: 'Europe/London', 德国: 'Europe/Berlin', 法国: 'Europe/Paris',
+  意大利: 'Europe/Rome', 西班牙: 'Europe/Madrid', 荷兰: 'Europe/Amsterdam', 比利时: 'Europe/Brussels',
+  波兰: 'Europe/Warsaw', 瑞典: 'Europe/Stockholm', 奥地利: 'Europe/Vienna', 爱尔兰: 'Europe/Dublin',
+  加拿大: 'America/Toronto', 澳大利亚: 'Australia/Sydney', 日本: 'Asia/Tokyo', 韩国: 'Asia/Seoul',
+  印度: 'Asia/Kolkata', 巴西: 'America/Sao_Paulo', 墨西哥: 'America/Mexico_City', 阿联酋: 'Asia/Dubai',
+  沙特: 'Asia/Riyadh', 南非: 'Africa/Johannesburg', 新加坡: 'Asia/Singapore', 马来西亚: 'Asia/Kuala_Lumpur',
+  USA: 'America/New_York', UK: 'Europe/London', Germany: 'Europe/Berlin', France: 'Europe/Paris',
+  China: 'Asia/Shanghai', 中国: 'Asia/Shanghai',
+};
+
+function guessTimezone(country, fallback = 'UTC') {
+  if (!country) return fallback;
+  return COUNTRY_TZ[country] || COUNTRY_TZ[String(country).trim()] || fallback;
+}
+
+function lead({ id, source, sourceType, kind, title, company, name, titleRole, email, country, timezone, industry, city, state, amount, currency, url, painPoints, awardId }) {
   return {
     id, source, sourceType,
+    kind: kind || 'government',
     title: title || '',
     company: company || name || '',
     name: name || company || 'Unknown buyer',
     titleRole: titleRole || 'Buyer',
     email: email || '',
     country: country || '',
-    timezone: timezone || 'UTC',
+    timezone: timezone || guessTimezone(country),
     industry: industry || '',
     city: city || '',
     state: state || '',
@@ -259,26 +277,29 @@ export async function searchSam({ keyword = 'power tools', limit = 10 } = {}) {
 }
 
 const ADAPTERS = {
-  usaspending: { search: searchUsaspending, name: 'USASpending.gov' },
-  worldbank: { search: searchWorldBank, name: 'World Bank' },
-  uk: { search: searchUk, name: 'UK Contracts Finder' },
-  ted: { search: searchTed, name: 'TED Europa' },
-  samgov: { search: searchSam, name: 'SAM.gov' },
+  usaspending: { search: searchUsaspending, name: 'USASpending.gov', kind: 'government' },
+  worldbank: { search: searchWorldBank, name: 'World Bank', kind: 'government' },
+  uk: { search: searchUk, name: 'UK Contracts Finder', kind: 'government' },
+  ted: { search: searchTed, name: 'TED Europa', kind: 'government' },
+  samgov: { search: searchSam, name: 'SAM.gov', kind: 'government' },
+  alibaba: { search: searchAlibaba, name: '阿里国际站 RFQ', kind: 'commercial' },
 };
 
 export function listSources() {
   return [
     {
       key: 'all',
-      name: '全部聚合',
+      name: '全部已接通源',
+      kind: 'aggregate',
       region: '全球',
-      auth: '免 Key 源并行',
+      auth: '已就绪源并行',
       ready: true,
-      note: '一次并行拉取 USASpending + 世界银行 + 英国 Contracts Finder + 欧盟 TED；配置了 SAM_API_KEY 时也会带上 SAM.gov。',
+      note: '并行拉取已接通的政府招标源；配了 SAM 或阿里官方凭据时一并带上。不是「全球所有 RFQ」——商业询盘要各自官方接口或 JSON 导入。',
     },
     {
       key: 'usaspending',
       name: 'USASpending.gov',
+      kind: 'government',
       region: '美国',
       auth: '无需 Key',
       ready: true,
@@ -287,6 +308,7 @@ export function listSources() {
     {
       key: 'uk',
       name: 'UK Contracts Finder',
+      kind: 'government',
       region: '英国',
       auth: '无需 Key',
       ready: true,
@@ -295,6 +317,7 @@ export function listSources() {
     {
       key: 'ted',
       name: 'TED Europa',
+      kind: 'government',
       region: '欧盟',
       auth: '无需 Key',
       ready: true,
@@ -303,6 +326,7 @@ export function listSources() {
     {
       key: 'worldbank',
       name: '世界银行采购公告',
+      kind: 'government',
       region: '全球',
       auth: '无需 Key',
       ready: true,
@@ -311,6 +335,7 @@ export function listSources() {
     {
       key: 'samgov',
       name: 'SAM.gov',
+      kind: 'government',
       region: '美国',
       auth: '免费 api_key',
       ready: Boolean(samKey()),
@@ -321,22 +346,42 @@ export function listSources() {
     {
       key: 'alibaba',
       name: '阿里国际站 RFQ',
+      kind: 'commercial',
       region: '全球买家',
       auth: '卖家开放平台',
-      ready: false,
-      note: '官方 alibaba.icbu.rfq.search，需国际站卖家 app_key，不爬页面。',
+      ready: alibabaReady(),
+      note: alibabaReady()
+        ? '已配置官方 app_key / session，走 alibaba.icbu.rfq.search，不爬页面。'
+        : '需要国际站卖家应用：ALIBABA_APP_KEY、ALIBABA_APP_SECRET、ALIBABA_SESSION。搜索接口通常不返回个人邮箱。',
+    },
+    {
+      key: 'ingest',
+      name: '商业/付费聚合导入',
+      kind: 'commercial',
+      region: '全球',
+      auth: 'JSON / webhook',
+      ready: true,
+      note: '没有合法免费的「全球所有商业 RFQ」单一 API。TendersOnTime、dgMarket、中国制造网导出等，用 POST /api/rfq/ingest 灌进来。',
     },
   ];
 }
 
-function readyKeys() {
+function readyKeys(kind) {
   const keys = ['usaspending', 'uk', 'ted', 'worldbank'];
   if (samKey()) keys.push('samgov');
+  if (alibabaReady()) keys.push('alibaba');
+  if (kind === 'government') return keys.filter((k) => ADAPTERS[k]?.kind === 'government');
+  if (kind === 'commercial') return keys.filter((k) => ADAPTERS[k]?.kind === 'commercial');
   return keys;
 }
 
 export async function searchRfq({ source = 'all', keyword = 'power tools', limit = 10 } = {}) {
-  const keys = source === 'all' ? readyKeys() : [source];
+  if (source === 'ingest') {
+    return { items: [], reports: [{ key: 'ingest', name: '商业/付费聚合导入', ok: true, count: 0, error: '请用 JSON 导入，不要走搜索' }] };
+  }
+  const keys = source === 'all' || source === 'government' || source === 'commercial'
+    ? readyKeys(source === 'all' ? undefined : source)
+    : [source];
   const per = source === 'all' ? Math.max(6, Math.min(12, limit)) : limit;
   const settled = await Promise.allSettled(
     keys.map(async (key) => {
@@ -371,13 +416,25 @@ export async function searchRfq({ source = 'all', keyword = 'power tools', limit
   return { items: unique, reports };
 }
 
+function ownInbox(email) {
+  return email && String(email).toLowerCase() === String(config.smtp.user).toLowerCase();
+}
+
+function alreadyImported(it) {
+  const email = String(it.email || '').toLowerCase();
+  return db.customers.some((c) => {
+    if (it.awardId && c.awardId === it.awardId) return true;
+    if (it.url && c.sourceUrl === it.url) return true;
+    if (email && String(c.email || '').toLowerCase() === email && (c.company || '') === (it.company || '')) return true;
+    return false;
+  });
+}
+
 export function importRfqItems(items = []) {
   const created = [];
   for (const it of items) {
-    const exists = db.customers.some(
-      (c) => (it.awardId && c.awardId === it.awardId) || (it.url && c.sourceUrl === it.url)
-    );
-    if (exists) continue;
+    if (ownInbox(it.email)) continue;
+    if (alreadyImported(it)) continue;
     const customer = {
       id: `rfq${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       name: it.name || it.company || 'Unknown buyer',
@@ -385,7 +442,7 @@ export function importRfqItems(items = []) {
       title: it.titleRole || 'Buyer',
       email: it.email || '',
       country: it.country || '',
-      timezone: it.timezone || 'America/New_York',
+      timezone: it.timezone || guessTimezone(it.country, 'America/New_York'),
       industry: it.industry || '',
       painPoints: it.painPoints || it.title || '',
       status: 'uncontacted',
@@ -407,6 +464,62 @@ export function importRfqItems(items = []) {
   }
   save();
   return created;
+}
+
+function firstText(row, keys) {
+  for (const k of keys) {
+    if (row?.[k] != null && String(row[k]).trim()) return String(row[k]).trim();
+  }
+  return '';
+}
+
+export function normalizeIngestItem(raw, sourceName = '商业导入') {
+  const row = raw && typeof raw === 'object' ? raw : {};
+  const company = firstText(row, ['company', 'companyName', 'organisation', 'organization', 'buyer', 'org']);
+  const name = firstText(row, ['name', 'contact', 'contactName', 'buyerName']) || company || 'Unknown buyer';
+  const email = firstText(row, ['email', 'contactEmail', 'buyerEmail']);
+  const country = firstText(row, ['country', 'countryName', 'nation']);
+  const title = firstText(row, ['title', 'subject', 'rfqTitle']);
+  const pain = firstText(row, ['painPoints', 'description', 'summary', 'requirement']) || title;
+  const url = firstText(row, ['url', 'link', 'sourceUrl', 'href']);
+  return lead({
+    id: firstText(row, ['id', 'rfqId', 'awardId']) || `ingest_${cryptoRandom()}`,
+    source: firstText(row, ['source']) || sourceName,
+    sourceType: 'commercial_ingest',
+    kind: 'commercial',
+    title,
+    company: company || name,
+    name,
+    titleRole: firstText(row, ['titleRole', 'role', 'jobTitle']) || 'Buyer',
+    email,
+    country,
+    timezone: firstText(row, ['timezone', 'tz']) || guessTimezone(country, 'UTC'),
+    industry: firstText(row, ['industry', 'category']),
+    url,
+    awardId: firstText(row, ['awardId', 'rfqId', 'id']),
+    amount: Number(row.amount || row.value || 0) || 0,
+    currency: firstText(row, ['currency']),
+    painPoints: pain,
+  });
+}
+
+function cryptoRandom() {
+  return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function parseIngestPayload(body = {}) {
+  const sourceName = body.source || body.provider || '商业导入';
+  let rows = [];
+  if (Array.isArray(body)) rows = body;
+  else if (Array.isArray(body.items)) rows = body.items;
+  else if (Array.isArray(body.leads)) rows = body.leads;
+  else if (body.company || body.email || body.name) rows = [body];
+  return rows.map((row) => normalizeIngestItem(row, sourceName));
+}
+
+export function ingestCommercial(body = {}) {
+  const items = parseIngestPayload(body);
+  return { items, created: importRfqItems(items) };
 }
 
 export const RFQ_CATALOG = listSources();

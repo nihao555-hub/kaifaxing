@@ -42,6 +42,14 @@ export const config = {
 
   samApiKey: process.env.SAM_API_KEY || '',
 
+  // 阿里国际站官方开放平台（ICBU RFQ），不爬页面
+  alibaba: {
+    appKey: process.env.ALIBABA_APP_KEY || '',
+    appSecret: process.env.ALIBABA_APP_SECRET || '',
+    session: process.env.ALIBABA_SESSION || '',
+    gateway: process.env.ALIBABA_GATEWAY || 'https://eco.taobao.com/router/rest',
+  },
+
   imap: {
     host: process.env.IMAP_HOST || 'imap.163.com',
     port: Number(process.env.IMAP_PORT || 993),
