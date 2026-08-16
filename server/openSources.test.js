@@ -7,6 +7,8 @@ import {
   pickOpenHit,
   shouldQuerySirene,
   shouldQueryBrreg,
+  shouldQueryPrh,
+  shouldQueryAres,
   countryIs,
 } from './openSources.js';
 
@@ -78,5 +80,9 @@ describe('open sources', () => {
     assert.equal(shouldQueryBrreg('挪威', ''), true);
     assert.equal(shouldQueryBrreg('France', 'FR'), false);
     assert.equal(countryIs('United Kingdom', '', ['uk', 'united kingdom', '英国']), true);
+    assert.equal(shouldQueryPrh('芬兰', ''), true);
+    assert.equal(shouldQueryPrh('France', 'FR'), false);
+    assert.equal(shouldQueryAres('Czechia', ''), true);
+    assert.equal(shouldQueryAres('挪威', ''), false);
   });
 });

@@ -23,6 +23,9 @@ import {
   searchCompanyPages,
   scoreResearchUrl,
 } from './searchDorks.js';
+import { gradeKyb, hasVerifiedEntity, hasProcurementTrace, isForwarderName } from './kyb.js';
+import { screenSanctions } from './sanctions.js';
+import { findTradeTraces } from './tradeTraces.js';
 
 const UA = 'OutreachAI/1.0 (public due-diligence; +https://github.com/nihao555-hub/kaifaxing)';
 
@@ -653,9 +656,10 @@ async function aiBrief(payload) {
   "brief": "8-12 句背调摘要，按主体核验 / 官网 / 公开联系方式 / 采购意图 / 开发信建议写",
   "entityType": "listed_company|sme|government|institution|unknown_person|unknown",
   "buyingRole": "一句话采购意图",
-  "outreachAdvice": "能不能写开发信、写给哪个公开角色邮箱、注意什么",
+  "outreachAdvice": "必须遵守给定的 A/B/C 分级：A 才能写开发信，B 走表单或要登记号，C 停",
   "risks": ["风险点"]
-}`,
+}
+分级是强制约束，禁止把 C 级写成可以群发。`,
       },
       { role: 'user', content: JSON.stringify(payload) },
     ],
@@ -828,19 +832,76 @@ export async function researchLead(customer, { useAi = true } = {}) {
     detail: customer.painPoints ? String(customer.painPoints).slice(0, 160) : '入库摘要为空',
   });
 
+  const [sanctions, traces] = await Promise.all([
+    personLike ? { hits: [], screened: false, lists: [] } : screenSanctions(legalName || company),
+    personLike
+      ? []
+      : findTradeTraces({
+        company: legalName || company,
+        country: customer.country,
+        source: customer.source,
+        sourceUrl: customer.sourceUrl,
+        awardId: customer.awardId,
+      }),
+  ]);
+  if (sanctions.error) notes.push(`制裁名单未能下载：${sanctions.error}`);
+  else if (!personLike && !sanctions.screened) notes.push('制裁名单本轮未筛到，发信前请人工复核。');
+  for (const hit of sanctions.hits || []) {
+    facts.push({ label: '制裁名单', value: `${hit.name} · ${hit.list}`, source: hit.list });
+    if (hit.url) sources.push({ title: `制裁 ${hit.name}`, url: hit.url });
+  }
+  for (const t of traces) {
+    facts.push({ label: t.label, value: t.value, source: t.source });
+    if (t.url) sources.push({ title: t.label, url: t.url });
+  }
+  steps.push({
+    key: 'sanctions',
+    label: '制裁筛查',
+    ok: Boolean(sanctions.screened) && !(sanctions.hits || []).length,
+    detail: !sanctions.screened
+      ? '名单未下载'
+      : sanctions.hits?.length
+        ? `命中 ${sanctions.hits.map((h) => h.name).join('、')}`
+        : `已对照 ${sanctions.lists.join(' / ')}，无命中`,
+  });
+  steps.push({
+    key: 'trade',
+    label: '采购痕迹',
+    ok: traces.length > 0,
+    detail: traces.length
+      ? traces.map((t) => t.value).join('；')
+      : '没有公开招标/联邦采购痕迹。海关提单需付费库，本轮未查。',
+  });
+
+  const kyb = {
+    ...gradeKyb({
+      personLike,
+      forwarder: isForwarderName(legalName || company),
+      verified: hasVerifiedEntity(facts),
+      website,
+      emails,
+      sanctions: sanctions.hits || [],
+      procurement: hasProcurementTrace(customer, traces),
+      legalName: legalName || company,
+    }),
+    sanctions: sanctions.hits || [],
+    traces,
+    screened: Boolean(sanctions.screened),
+  };
+  steps.push({
+    key: 'grade',
+    label: '背调分级',
+    ok: kyb.grade === 'A',
+    detail: `${kyb.grade} · ${kyb.nextAction}`,
+  });
+  notes.push(`分级 ${kyb.grade}：${kyb.nextAction}`);
+  if (kyb.needRegNo) notes.push('标准动作：向询盘方要法定全称、登记号、付款主体，不要继续猜域名。');
+
   let brief = fallbackBrief({ customer, legalName, extract, emails, website, personLike, relatedNote });
   let entityType = personLike ? 'unknown_person' : emails.length || website ? 'unknown' : 'unknown';
   let buyingRole = customer.painPoints ? String(customer.painPoints).slice(0, 120) : '';
-  let outreachAdvice = emails.length
-    ? `可向公开角色邮箱 ${emails[0].email} 写一封开发信，先确认对方是否接受供应商来信。`
-    : personLike
-      ? '不要写。没有可验证主体和公开邮箱。'
-      : '先走官网表单或招标规定渠道，不要编造邮箱群发。';
-  let risks = personLike
-    ? ['显示名无法核验', '猜测私人邮箱属违规获客']
-    : emails.length
-      ? ['公开角色邮箱不一定是采购决策人', '写入后若 Agent 在跑可能自动发信']
-      : ['无明文邮箱', '大公司常用表单，角色邮箱不公开'];
+  let outreachAdvice = kyb.nextAction;
+  let risks = kyb.risks.length ? kyb.risks : ['公开源有限，海关提单和信用报告需付费补'];
 
   if (useAi) {
     try {
@@ -858,22 +919,23 @@ export async function researchLead(customer, { useAi = true } = {}) {
         facts,
         notes,
         personLike,
+        kyb,
       });
       if (ai.brief) brief = String(ai.brief);
       if (ai.entityType) entityType = String(ai.entityType);
       if (ai.buyingRole) buyingRole = String(ai.buyingRole);
-      if (ai.outreachAdvice) outreachAdvice = String(ai.outreachAdvice);
-      if (Array.isArray(ai.risks) && ai.risks.length) risks = ai.risks.map(String);
+      if (ai.outreachAdvice && kyb.grade !== 'C') outreachAdvice = String(ai.outreachAdvice);
+      if (Array.isArray(ai.risks) && ai.risks.length && kyb.grade !== 'C') risks = ai.risks.map(String);
     } catch {
       notes.push('AI 摘要未生成，已用公开事实拼接。');
     }
   }
 
-  const confidence = personLike
+  const confidence = kyb.grade === 'C' || personLike
     ? 'none'
-    : emails.length && website
+    : kyb.grade === 'A'
       ? 'high'
-      : website || facts.some((f) => f.source === 'GLEIF' || f.source === 'Wikidata' || f.source === 'ROR' || f.source === 'Sirene' || f.source === 'Brreg')
+      : kyb.grade === 'B'
         ? 'medium'
         : 'low';
 
@@ -906,7 +968,11 @@ export async function researchLead(customer, { useAi = true } = {}) {
     notes,
     searchQueries: search.queries || [],
     searchPages: (search.urls || []).slice(0, 8),
-    canApplyEmail: emails.length > 0,
+    kyb,
+    grade: kyb.grade,
+    nextAction: kyb.nextAction,
+    needRegNo: kyb.needRegNo,
+    canApplyEmail: emails.length > 0 && kyb.grade === 'A',
     tools: GITHUB_TOOLS.map((t) => ({
       ...t,
       used: t.id === 'cheerio' || t.id === 'tldts' || t.id === 'fuse'

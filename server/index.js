@@ -254,6 +254,9 @@ app.post('/api/rfq/leads/:id/apply-contact', (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
   const website = req.body?.website != null ? String(req.body.website).trim() : '';
   const company = req.body?.company != null ? String(req.body.company).trim() : '';
+  if (customer.research?.kyb?.grade === 'C' || (customer.research?.kyb?.sanctions || []).length) {
+    return res.status(400).json({ error: customer.research.kyb?.nextAction || '分级为停，不能写入开发信' });
+  }
   if (!applyPublicContact(customer, email, { website, company, contactSource: 'public_research' })) {
     return res.status(400).json({ error: '请提供从公开页核到的有效邮箱，不要用自己的发件箱' });
   }

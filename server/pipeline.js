@@ -3,6 +3,7 @@ import { db, save, getCustomer, isRfqLead, isDemoCustomer, logActivity } from '.
 import { crawlAllAndImport } from './rfq.js';
 import { researchLead, isPersonLikeLead, isPlausibleEmail } from './research.js';
 import { VERIFIED_SOURCES } from './openSources.js';
+import { isForwarderName } from './kyb.js';
 
 const AUTO_ROLES = new Set([
   'info', 'enquiry', 'inquiry', 'enquiries', 'inquiries', 'contact', 'office',
@@ -12,8 +13,6 @@ const AUTO_ROLES = new Set([
 const SKIP_ROLES = new Set([
   'ir', 'cosec', 'press', 'media', 'careers', 'careersteam', 'jobs', 'privacy', 'legal', 'uk',
 ]);
-const FORWARDER_RE = /freight|forwarder|logistics|货代|shipping agency|customs broker/i;
-
 let tickTimer = null;
 let researchingId = null;
 let researchLoop = false;
@@ -59,6 +58,7 @@ export function ensurePipeline() {
 
 export function pickAutoEmail(research) {
   if (!research?.emails?.length) return null;
+  if (research.kyb?.grade === 'C' || (research.kyb?.sanctions || []).length) return null;
   if (!['high', 'medium'].includes(research.confidence)) return null;
   const verified = (research.facts || []).some((f) => VERIFIED_SOURCES.has(f.source));
   if (!verified) return null;
@@ -68,9 +68,7 @@ export function pickAutoEmail(research) {
   );
 }
 
-export function isForwarderName(name) {
-  return FORWARDER_RE.test(String(name || ''));
-}
+export { isForwarderName };
 
 function ownInbox(email) {
   return String(email || '').toLowerCase() === String(config.smtp.user || '').toLowerCase();
@@ -360,6 +358,14 @@ export async function promoteLeads(ids = [], { researchLimit = 6 } = {}) {
         company: customer.research.legalName || customer.company,
         contactSource: 'public_research',
       });
+    }
+    if (customer.research?.kyb?.grade === 'C' || (customer.research?.kyb?.sanctions || []).length) {
+      skipped.push({
+        id,
+        company: customer.company || customer.name,
+        reason: customer.research.kyb?.nextAction || '分级为停，不能录入开发信',
+      });
+      continue;
     }
     const email = String(customer.email || '').toLowerCase();
     if (!email || customer.agentPhase === 'need_email' || isDemoCustomer(customer)) {

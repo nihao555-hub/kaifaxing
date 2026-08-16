@@ -40,6 +40,12 @@ describe('auto apply rules', () => {
       facts: [{ source: 'ROR', label: 'ROR 机构库', value: 'Tyne Coast College' }],
       emails: [{ email: 'info@stc.ac.uk', role: 'info', score: 96 }],
     })?.email, 'info@stc.ac.uk');
+    assert.equal(pickAutoEmail({
+      confidence: 'high',
+      kyb: { grade: 'C', sanctions: [{ name: 'Rosneft', list: 'OFAC SDN' }] },
+      facts: [{ source: 'GLEIF', label: 'LEI', value: '1' }],
+      emails: [{ email: 'info@rosneft.com', role: 'info', score: 96 }],
+    }), null);
   });
 
   it('flags freight forwarders', () => {

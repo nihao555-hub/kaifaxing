@@ -296,6 +296,53 @@ export function shouldQueryBrreg(country, jurisdiction) {
   return countryIs(country, jurisdiction, ['norway', '挪威', 'norge', 'no']);
 }
 
+export function shouldQueryPrh(country, jurisdiction) {
+  return countryIs(country, jurisdiction, ['finland', '芬兰', 'suomi', 'fi']);
+}
+
+export function shouldQueryAres(country, jurisdiction) {
+  return countryIs(country, jurisdiction, ['czech', 'czechia', '捷克', 'cz']);
+}
+
+export async function searchPrh(company) {
+  const q = String(company || '').trim();
+  if (q.length < 4) return null;
+  const data = await getJson(
+    `https://avoindata.prh.fi/opendata-ytj-api/v3/companies?name=${encodeURIComponent(q)}&maxResults=8`
+  );
+  const rows = data?.companies || [];
+  const picked = pickOpenHit(rows, company, (h) => {
+    const live = (h.names || []).find((n) => !n.endDate)?.name || (h.names || [])[0]?.name || '';
+    return live;
+  });
+  if (!picked) return null;
+  return fetchPrhById(picked.businessId?.value || '');
+}
+
+export async function searchAres(company) {
+  const q = String(company || '').trim();
+  if (q.length < 4) return null;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 12000);
+  try {
+    const res = await fetch('https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty/vyhledat', {
+      method: 'POST',
+      headers: { 'User-Agent': UA, Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ obchodniJmeno: q, start: 0, pocet: 5 }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const rows = data?.ekonomickeSubjekty || [];
+    const picked = pickOpenHit(rows, company, (h) => h.obchodniJmeno || '');
+    return picked ? fetchAresByIco(picked.ico) : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function factVal(facts, labelRe) {
   return facts.find((f) => labelRe.test(f.label))?.value || '';
 }
@@ -427,6 +474,27 @@ export async function enrichOpenSources({ company, country, facts = [], website 
     if (no.phone) extra.push({ label: '公开电话', value: no.phone, source: 'Brreg' });
     if (!site && no.website) site = no.website;
     if (no.orgnr) sources.push({ title: `Brreg ${no.orgnr}`, url: `https://data.brreg.no/enhetsregisteret/oppslag/enheter/${no.orgnr}` });
+  })());
+
+  jobs.push((async () => {
+    if (!shouldQueryPrh(country, jurisdiction) || tokensOf(company).length < 2) return;
+    if (factVal(facts, /芬兰企业登记/)) return;
+    const fi = await searchPrh(company);
+    if (!fi?.name) return;
+    extra.push({ label: '芬兰企业登记', value: `${fi.name}${fi.businessId ? ` · ${fi.businessId}` : ''}`, source: 'PRH' });
+    if (fi.address) extra.push({ label: '注册地址', value: fi.address, source: 'PRH' });
+    if (!site && fi.website) site = fi.website;
+    if (fi.businessId) sources.push({ title: `PRH ${fi.businessId}`, url: `https://www.kauppalehti.fi/yritykset/yritys/${fi.businessId}` });
+  })());
+
+  jobs.push((async () => {
+    if (!shouldQueryAres(country, jurisdiction) || tokensOf(company).length < 2) return;
+    if (factVal(facts, /捷克企业登记/)) return;
+    const cz = await searchAres(company);
+    if (!cz?.name) return;
+    extra.push({ label: '捷克企业登记', value: `${cz.name}${cz.ico ? ` · IČO ${cz.ico}` : ''}`, source: 'ARES' });
+    if (cz.address) extra.push({ label: '注册地址', value: cz.address, source: 'ARES' });
+    if (cz.ico) sources.push({ title: `ARES ${cz.ico}`, url: `https://ares.gov.cz/ekonomicke-subjekty?ico=${cz.ico}` });
   })());
 
   jobs.push((async () => {

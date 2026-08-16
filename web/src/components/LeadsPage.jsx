@@ -119,10 +119,20 @@ function MenuOption({ active, onClick, label, count, leading }) {
   );
 }
 
-function ResearchStatus({ status }) {
-  if (status === 'done') return <span className="text-[12px] text-emerald-600">已背调</span>;
+function gradeStyle(grade) {
+  if (grade === 'A') return 'bg-emerald-50 text-emerald-700';
+  if (grade === 'B') return 'bg-amber-50 text-amber-700';
+  if (grade === 'C') return 'bg-rose-50 text-rose-600';
+  return 'bg-[#f1f5f9] text-[#94a3b8]';
+}
+
+function ResearchStatus({ status, grade }) {
   if (status === 'running') return <span className="text-[12px] text-primary">背调中</span>;
   if (status === 'failed') return <span className="text-[12px] text-rose-500">失败</span>;
+  if (status === 'done' && grade) {
+    return <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${gradeStyle(grade)}`}>{grade}级</span>;
+  }
+  if (status === 'done') return <span className="text-[12px] text-emerald-600">已背调</span>;
   return <span className="text-[12px] text-[#94a3b8]">未背调</span>;
 }
 
@@ -287,6 +297,10 @@ export default function LeadsPage({ onGoOutreach }) {
 
   const applyContact = async () => {
     if (!customer) return;
+    if (research?.kyb?.grade === 'C' || (research?.kyb?.sanctions || []).length) {
+      setErr(research.kyb?.nextAction || '分级为停，不能录入开发信');
+      return;
+    }
     if (pickedEmail && !window.confirm(`把 ${pickedEmail} 写入该线索并录入开发信？Agent 会自动给这个公开角色邮箱写信。`)) return;
     await promoteToOutreach([customer.id], { applyEmail: pickedEmail || undefined });
   };
@@ -592,7 +606,7 @@ export default function LeadsPage({ onGoOutreach }) {
                         {c.email ? <span className="text-primary">{c.email}</span> : <span className="text-[#cbd5e1]">—</span>}
                       </td>
                       <td className="px-3 py-3">
-                        <ResearchStatus status={c.research?.status} />
+                        <ResearchStatus status={c.research?.status} grade={c.research?.grade || c.research?.kyb?.grade} />
                       </td>
                       <td className="px-3 py-3">
                         <div className="flex items-center gap-3 whitespace-nowrap">
@@ -743,7 +757,7 @@ export default function LeadsPage({ onGoOutreach }) {
               <button
                 type="button"
                 onClick={applyContact}
-                disabled={busy || !customer}
+                disabled={busy || !customer || research?.kyb?.grade === 'C' || (research?.kyb?.sanctions || []).length > 0}
                 className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded bg-primary text-[13px] font-medium text-white hover:bg-blue-600 disabled:opacity-40"
               >
                 <ShieldCheck size={13} />
@@ -789,12 +803,17 @@ function researchChecks(customer, research) {
   const procurement = Boolean(customer.sourceUrl || customer.awardId || customer.rfq || customer.painPoints);
   const search = (research?.searchPages || []).length > 0
     || (research?.facts || []).some((f) => f.source === '搜索公式');
+  const sanctionsOk = research?.status === 'done'
+    && research?.kyb?.screened
+    && !(research?.kyb?.sanctions || []).length;
+  const trade = (research?.kyb?.traces || []).length > 0 || procurement;
   return [
     { label: '公司官网', ok: website },
     { label: '社交媒体', ok: social },
     { label: '工商信息', ok: registry },
-    { label: '招投标/采购记录', ok: procurement },
+    { label: '招投标/采购记录', ok: trade },
     { label: '搜索公式', ok: search },
+    { label: '制裁筛查', ok: sanctionsOk },
   ];
 }
 
@@ -879,6 +898,27 @@ function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail }) {
         <p className="text-[12px] leading-relaxed text-[#64748b]">排队自动背调中。只查公开主体库和官网联系页，不扒私人邮箱。</p>
       )}
 
+      {research?.kyb?.grade && (
+        <div className={`rounded-lg border px-3 py-2.5 ${
+          research.kyb.grade === 'A' ? 'border-emerald-200 bg-emerald-50' : research.kyb.grade === 'B' ? 'border-amber-200 bg-amber-50' : 'border-rose-200 bg-rose-50'
+        }`}
+        >
+          <div className="mb-1 flex items-center gap-2">
+            <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${gradeStyle(research.kyb.grade)}`}>{research.kyb.grade}级 · {research.kyb.label}</span>
+          </div>
+          <p className="text-[12px] leading-relaxed text-[#334155]">{research.kyb.nextAction || research.nextAction}</p>
+          {research.kyb.needRegNo && (
+            <p className="mt-1 text-[12px] text-[#64748b]">请对方提供法定全称、登记号、付款主体后再查。</p>
+          )}
+        </div>
+      )}
+
+      {(research?.kyb?.sanctions || []).length > 0 && (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700">
+          制裁名单命中：{research.kyb.sanctions.map((h) => `${h.name}（${h.list}）`).join('；')}
+        </div>
+      )}
+
       <div className="space-y-2.5">
         {checks.map((s) => (
           <div key={s.label} className="flex items-center justify-between text-[12px]">
@@ -918,7 +958,21 @@ function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail }) {
           <InfoRow label="登记号" value={factValue(research, /登记号|SIREN|Org\.nr|IČO|CNPJ/)} />
           <InfoRow label="LEI" value={factValue(research, /^LEI$/)} />
           <InfoRow label="搜索官网" value={factValue(research, /搜索官网/)} href={factValue(research, /搜索官网/)} />
+          <InfoRow label="下一步" value={research?.nextAction || research?.kyb?.nextAction} />
         </dl>
+        {(research?.kyb?.traces || []).length > 0 && (
+          <div className="mt-2">
+            <div className="mb-1 text-[12px] text-[#94a3b8]">采购痕迹</div>
+            <ul className="space-y-1">
+              {research.kyb.traces.slice(0, 4).map((t) => (
+                <li key={`${t.source}-${t.value}`} className="truncate text-[12px] text-[#475569]">
+                  {t.url ? <a href={t.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">{t.value}</a> : t.value}
+                  <span className="text-[#94a3b8]"> · {t.source}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         {(research?.searchPages || []).length > 0 && (
           <div className="mt-2">
             <div className="mb-1 text-[12px] text-[#94a3b8]">搜索解析到的公开页</div>
