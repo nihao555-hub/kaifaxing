@@ -64,6 +64,14 @@ describe('extractCompanyHintFromText', () => {
       extractCompanyHintFromText('Signal Technologies Inc.is currently implementing a project that requires Wi-Fi gear.'),
       'Signal Technologies Inc',
     );
+    assert.equal(
+      extractCompanyHintFromText('I am the Executive Director of Forthright International Company Limited,based in Lagos.'),
+      'Forthright International Company Limited',
+    );
+    assert.equal(
+      extractCompanyHintFromText('I am contacting you on behalf of Titanor Group. We are looking for a manufacturer.'),
+      'Titanor Group',
+    );
   });
 
   it('ignores we-are-seeking and product titles that happen to end in Limited', () => {

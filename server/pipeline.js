@@ -98,6 +98,15 @@ export function stampLeadPath(c) {
   return { path, changed };
 }
 
+function identityNeedsRefresh(customer = {}) {
+  const name = String(customer.company || '');
+  if (!name) return false;
+  if (/^(contacting|looking|seeking|reaching|writing|interested|executive director|director|manager)\b/i.test(name)) return true;
+  if (/\bon behalf of\b/i.test(name)) return true;
+  if (/\.\s*We$/i.test(name)) return true;
+  return false;
+}
+
 export function applyTextCompanyHints() {
   let promoted = 0;
   let dirty = false;
@@ -108,11 +117,11 @@ export function applyTextCompanyHints() {
       c.website = clues.websites[0];
       dirty = true;
     }
-    if (c.forceCompany) {
+    if (c.forceCompany && !identityNeedsRefresh(c)) {
       if (stampLeadPath(c).changed) dirty = true;
       continue;
     }
-    if (!isPersonLikeLead(c)) {
+    if (!isPersonLikeLead(c) && !identityNeedsRefresh(c)) {
       if (stampLeadPath(c).changed) dirty = true;
       continue;
     }

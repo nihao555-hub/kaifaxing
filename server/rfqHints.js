@@ -2,7 +2,7 @@
 
 const LEGAL_SUFFIX = String.raw`(?:L\.?L\.?C\.?|Ltd\.?|Limited|GmbH|Mbh|Inc\.?|PLC|Pte\.?\s*Ltd\.?|Co\.?,?\s*Ltd\.?|S\.?A\.?S?\.?|B\.?V\.?|N\.?V\.?|Pty\.?\s*Ltd\.?|Pvt\.?\s*Ltd\.?|SARL|SRL)`;
 
-const ATTRIBUTION = String.raw`(?:our\s+company(?:\s+name)?\s+is|company\s+name\s*(?:is|:)|i\s+(?:work|am)\s+(?:at|for|with|from)|i\s+represent|(?:we\s+are\s+)?representing|on\s+behalf\s+of|this\s+is\s+[A-Z][a-zA-Z]+\s+from|i\s+am\s+[A-Z][a-zA-Z]+\s+[A-Z][a-zA-Z]+\s+from|our\s+company(?!\s+is\s+looking)|we\s+are(?!\s+(?:seeking|looking|interested|from|representing|considering|reaching|planning|hoping|trying|sourcing|procuring|contacting|writing|a\s+(?:company|manufacturer|supplier|buyer|distributor))))`;
+const ATTRIBUTION = String.raw`(?:our\s+company(?:\s+name)?\s+is|company\s+name\s*(?:is|:)|i\s+(?:work|am)\s+(?:at|for|with|from)|i\s+represent|(?:we\s+are\s+)?representing|on\s+behalf\s+of|(?:executive\s+)?director\s+of|manager\s+of|this\s+is\s+[A-Z][a-zA-Z]+\s+from|i\s+am\s+[A-Z][a-zA-Z]+\s+[A-Z][a-zA-Z]+\s+from|our\s+company(?!\s+is\s+looking)|we\s+are(?!\s+(?:seeking|looking|interested|from|representing|considering|reaching|planning|hoping|trying|sourcing|procuring|contacting|writing|a\s+(?:company|manufacturer|supplier|buyer|distributor))))`;
 
 const JUNK_HINT = /\b(your|our|the|this|their|my|new|industrial)\s+company\b|\b(procuring|sourcing|considering|reaching|hardware|packaging|edition|screens?|galaxy|iphone|flavor|cotton|oem)\b/i;
 
@@ -22,11 +22,11 @@ const AFTER_NAME_OK = /^(?:[,.]{0,2}\s*(?:a|an|is|are|was|'s|established|based|f
 const PRODUCT_NAME = /\b(galaxy|iphone|screen|edition|series|type|model|flavor|cotton|oem|odm|jumbo|roll|tissue|wifi|amplifier|smps)\b/i;
 const VERB_FIRST = /^(contacting|looking|seeking|reaching|interested|writing|trying|planning|hoping|sourcing|procuring|considering)$/i;
 
-const ORG_TOKEN = /\b(Ltd|Limited|LLC|Inc|GmbH|SARL|PLC|Co|Authority|Hospital|College|University|Services|Equipment|Supplies|Department|Ministry|Council|Agency|Institute|Foundation|Clinic|School|Bureau|Commission|Association|Designs?|Healthcare|Standard|Quality)\b/i;
+const ORG_TOKEN = /\b(Ltd|Limited|LLC|Inc|GmbH|SARL|PLC|Co|Group|Holdings|Enterprises|Authority|Hospital|College|University|Services|Equipment|Supplies|Department|Ministry|Council|Agency|Institute|Foundation|Clinic|School|Bureau|Commission|Association|Designs?|Healthcare|Standard|Quality)\b/i;
 
 function cleanHintName(raw, { cutSentence = false } = {}) {
   let s = String(raw || '').replace(/\([^)]{0,40}$/, '');
-  if (cutSentence) s = s.replace(/\.(We|Please|I|Need|Looking|Hello)\b.*$/i, '');
+  if (cutSentence) s = s.replace(/\.\s*(We|Please|I|Need|Looking|Hello)\b.*$/i, '');
   return s.replace(/[.,;:]+$/, '').replace(/\s+/g, ' ').trim();
 }
 
