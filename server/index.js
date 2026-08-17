@@ -8,7 +8,8 @@ import { db, save, getCustomer, listCustomers, leadFacets, saveSearchSettings } 
 import { generateEmail, evaluateEmail, suggestSendTime } from './agent.js';
 import { createBatchJob, getJob, listJobs, cancelScheduledFor } from './scheduler.js';
 import { sentToday, logActivity } from './store.js';
-import { startAgent, stopAgent, getAgentState } from './autopilot.js';
+import { startAgent, stopAgent, getAgentState, rewriteOutreach } from './autopilot.js';
+import { hydrateInquiry } from './rfq.js';
 import { ingestInbound } from './inbox.js';
 import { listSources, searchRfq, importRfqItems, ingestCommercial, crawlAlibabaPublic, crawlAllAndImport, ALIBABA_PUBLIC_FIELDS, PUBLIC_SINCE_DEFAULT } from './rfq.js';
 import { alibabaCrawlProgress, requestCrawlAbort } from './publicRfq.js';
@@ -427,6 +428,10 @@ app.post('/api/agent/stop', (req, res) => {
   stopAgent();
   res.json(getAgentState());
 });
+app.post('/api/agent/rewrite', (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  res.json(rewriteOutreach(ids));
+});
 
 // 把一封客户来信挂进沟通历史（IMAP 正常时会自动做；也可用于补录）
 app.post('/api/inbox/inbound', (req, res) => {
@@ -444,6 +449,7 @@ app.post('/api/ai/generate', async (req, res) => {
     const { customerId, extraContext } = req.body || {};
     const customer = db.customers.find((c) => c.id === customerId);
     if (!customer) return res.status(404).json({ error: '客户不存在' });
+    await hydrateInquiry(customer);
 
     const generated = await generateEmail(customer, extraContext);
     const draft = {

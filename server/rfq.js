@@ -83,11 +83,56 @@ function money(n, currency = 'USD') {
   return `${symbol}${Math.round(v).toLocaleString('en-US')}`;
 }
 
-function pickLang(obj) {
+export function pickLang(obj) {
   if (!obj) return '';
-  if (typeof obj === 'string') return obj;
-  if (Array.isArray(obj)) return obj[0] || '';
-  return obj.eng?.[0] || obj.ENG?.[0] || obj.en?.[0] || Object.values(obj).flat?.()?.[0] || Object.values(obj)[0] || '';
+  if (typeof obj === 'string') return obj.trim();
+  if (Array.isArray(obj)) {
+    const hit = obj.map((x) => pickLang(x)).find((s) => s.length > 1);
+    return hit || String(obj[0] || '');
+  }
+  if (typeof obj !== 'object') return String(obj);
+  const preferred = ['eng', 'ENG', 'en', 'EN', 'deu', 'fra', 'nld', 'ces', 'ita', 'spa'];
+  for (const k of preferred) {
+    const s = pickLang(obj[k]);
+    if (s.length > 1) return s;
+  }
+  for (const v of Object.values(obj)) {
+    const s = pickLang(v);
+    if (s.length > 1) return s;
+  }
+  return '';
+}
+
+export async function fetchTedNoticeTitle(publicationNumber) {
+  const num = String(publicationNumber || '').trim();
+  if (!num) return '';
+  const data = await postJson('https://api.ted.europa.eu/v3/notices/search', {
+    query: `publication-number="${num}"`,
+    fields: ['publication-number', 'notice-title', 'buyer-name'],
+    limit: 1,
+    scope: 'ACTIVE',
+    paginationMode: 'ITERATION',
+  });
+  return pickLang((data.notices || [])[0]?.['notice-title']);
+}
+
+/** TED 旧数据把多语言标题取成了首字母（eng[0] === 'C'）。写信前补回全文。 */
+export async function hydrateInquiry(customer) {
+  if (!customer) return customer;
+  const pain = String(customer.painPoints || '');
+  const stub = /欧盟 TED 招标\s+\S+：\S{0,2}$/.test(pain) || String(customer.title || '').trim().length <= 2;
+  if (/TED/i.test(customer.source || '') && customer.awardId && stub) {
+    try {
+      const title = await fetchTedNoticeTitle(customer.awardId);
+      if (title) {
+        if (String(customer.title || '').trim().length <= 2) customer.title = title;
+        customer.painPoints = `欧盟 TED 招标 ${customer.awardId}：${title}`;
+      }
+    } catch {
+      /* 保留原摘要，不阻断写信 */
+    }
+  }
+  return customer;
 }
 
 const COUNTRY_TZ = {

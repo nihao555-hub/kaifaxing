@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { topSign, beijingTimestamp, extractRfqList, normalizeAlibabaRfq } from './alibaba.js';
-import { parseIngestPayload, listSources } from './rfq.js';
+import { parseIngestPayload, listSources, pickLang } from './rfq.js';
 
 describe('TOP sign', () => {
   it('hmac matches official sorted concat', () => {
@@ -68,6 +68,13 @@ describe('commercial ingest', () => {
     });
     assert.equal(items[0].company, 'Tyne Coast College');
     assert.equal(items[0].email, 'info@stc.ac.uk');
+  });
+});
+
+describe('TED title language', () => {
+  it('does not take the first character of an English title string', () => {
+    assert.equal(pickLang({ eng: 'Cleaning of windows and communal areas' }), 'Cleaning of windows and communal areas');
+    assert.equal(pickLang({ deu: 'A', eng: 'Supply of workshop tools' }), 'Supply of workshop tools');
   });
 });
 

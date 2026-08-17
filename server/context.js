@@ -37,18 +37,72 @@ function factLine(f) {
 function officerLine(o) {
   if (!o) return '';
   if (typeof o === 'string') return o;
-  return [o.name, o.title || o.role].filter(Boolean).join(' · ');
+  return [o.name, o.title || o.role, o.source ? `（${o.source}）` : ''].filter(Boolean).join(' · ').replace(' · （', '（');
 }
 
-/** 开发信首封 / 质检用的公开核验上下文。只喂已入库字段，不重新搜人。 */
+function decodeEntities(s) {
+  return String(s || '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&agrave;/gi, 'à')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+    .replace(/&[a-z]+;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function companySocials(list = []) {
+  return list
+    .map((s) => (typeof s === 'string' ? { url: s, label: '' } : s))
+    .filter((s) => {
+      const url = String(s.url || '');
+      if (/linkedin\.com\/in\//i.test(url) || /linkedin\.com\/pub\//i.test(url)) return false;
+      return /linkedin\.com\/company\//i.test(url) || /facebook\.com\//i.test(url);
+    })
+    .slice(0, 4)
+    .map((s) => `${s.label || '社媒'} ${s.url}`);
+}
+
+function inquiryBlock(customer = {}) {
+  const card = customer.publicCard || {};
+  const qty = [card.quantity || customer.quantity, card.quantityUnit || card.quantityValueUnit]
+    .filter(Boolean)
+    .join(' ');
+  const lines = [
+    `来源：${[customer.source, customer.sourceUrl || customer.awardId].filter(Boolean).join(' ')}`,
+    `询盘/招标标题：${decodeEntities(card.subject || customer.product || customer.title || customer.rfq?.title || '') || '无'}`,
+    `品类：${customer.categoryName || card.categoryName || '未标注'}`,
+    `数量：${qty || '未标注'}`,
+    `发布：${customer.postedDate || customer.postedAt || card.postedAt || card.openTimeStr || '未标注'}`,
+    `截止：${card.expirationTime || ''}`.replace(/截止：$/, ''),
+    `买家显示名（可能是昵称，不是法定主体）：${card.buyerName || customer.buyer || customer.name || ''}`,
+    `附件：${card.haveAnnexes || customer.haveAnnexes ? '列表标记有附件（未登录不下载）' : '未见附件'}`,
+    `询盘/招标正文：${decodeEntities(card.description || customer.rfq?.description || customer.painPoints || '').slice(0, 900) || '无'}`,
+  ];
+  return lines.filter((l) => !l.endsWith('：') && !l.endsWith('未标注') || /标题|正文|来源|显示名/.test(l)).join('\n');
+}
+
+/** 开发信首封 / 质检用的公开核验上下文。只喂已入库字段，不搜人名、不猜私人邮箱。 */
 export function buildWriterBrief(customer = {}) {
   const r = customer.research || {};
   const intel = r.intel || {};
-  const facts = (r.facts || []).slice(0, 10).map(factLine);
+  const facts = (r.facts || []).slice(0, 12).map(factLine);
   const officers = (r.officers || intel.officers || []).slice(0, 6).map(officerLine).filter(Boolean);
   const risks = (r.risks || r.kyb?.risks || []).slice(0, 4).map(String);
   const traces = (intel.traces || []).slice(0, 4).map((t) => (typeof t === 'string' ? t : t.title || t.value || '')).filter(Boolean);
-  return `【客户档案】
+  const socials = companySocials(r.socials || intel.socials || []);
+  const roleMails = (r.emails || [])
+    .map((e) => (typeof e === 'string' ? e : e.email))
+    .filter(Boolean)
+    .slice(0, 6);
+  return `【询盘 / 招标原文——写信必须点名其中的货物、数量、型号或截止日期，不能只写行业套话】
+${inquiryBlock(customer)}
+
+【客户档案】
 姓名：${customer.name || ''}
 公司：${customer.company || ''}
 法定名称：${customer.legalName || r.legalName || customer.company || ''}
@@ -56,17 +110,17 @@ export function buildWriterBrief(customer = {}) {
 国家/地区：${customer.country || ''}（时区 ${customer.timezone || ''}）
 行业：${customer.industry || r.industry || ''}
 官网：${customer.website || r.website || intel.website || '未知'}
-开发信收件邮箱：${customer.email || r.outreach?.email || ''}
-来源：${[customer.source, customer.sourceUrl || customer.awardId].filter(Boolean).join(' ')}
-已知痛点/招标摘要：${customer.painPoints || '未知，请根据行业和职位合理推断'}
+开发信收件邮箱（角色箱，不要改成私人邮箱）：${customer.email || r.outreach?.email || ''}
+官网出现的其他角色邮箱：${roleMails.join('、') || '无'}
+公司主页（仅 company 页，不是个人主页）：${socials.join('；') || '未核到'}
 
-【公开背调（必须引用至少一处可核验事实，不得编造公司近况或职务）】
+【公开背调——必须再引用至少一处可核验事实（官网/登记地址/LEI/法定名称），不得编造近况或职务】
 分级：${r.kyb?.grade || r.grade || '未知'}
-背调摘要：${String(r.brief || '').slice(0, 500) || '无'}
+背调摘要：${String(r.brief || '').slice(0, 600) || '无'}
 核验事实：
 ${facts.join('\n') || '- 无'}
 母公司：${intel.parent || '未知'}
-公开职务：${officers.join('；') || '未在公开页核到'}
+公开职务（招标原文或官网领导页的姓名+职务，没有私人邮箱）：${officers.join('；') || '未在公开页核到'}
 招标/采购痕迹：${traces.join('；') || '无'}
 开发信建议：${r.outreachAdvice || r.outreach?.reason || ''}
 风险：${risks.join('；') || '无'}`;

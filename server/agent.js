@@ -21,8 +21,8 @@ const WRITER_SYSTEM_PROMPT = `你是一位顶尖的外贸开发信（Cold Email�
 - 尽量包含对方公司名或一个具体利益点，提高打开率
 
 【正文结构（AIDA，必须让人很难拒绝）】
-1. 开头 1 句：证明"我研究过你"——引用对方公司近况、渠道结构、行业趋势或其岗位职责。绝不用 "I hope this email finds you well" / "My name is"
-2. 痛点直击：只抓一个最痛的点（交期、成本、品控、MOQ、认证、售后、供应商集中度等），用对方会点头的行业语言，让他觉得"你懂我"
+1. 开头 1 句：证明"我研究过你"——必须点名询盘/招标里的具体货物、数量、型号或截止日期，并带上背调里的官网、登记地址、LEI 或法定名称之一。绝不用 "I hope this email finds you well" / "My name is"，不要写空泛的 tool supply。
+2. 痛点直击：只抓询盘正文里那一个最痛的点（交期、成本、品控、MOQ、认证、定制尺寸、物流体积等），用对方会点头的行业语言。
 3. 价值主张：用具体数字说明我们能带来什么（如 15 天交期、7 天打样、MOQ 200、CE/UL/FDA 认证、不良率 <0.3%），突出与现有供应商的差异化。不要空喊 "high quality"
 4. 社会证明：1 句提及服务过的同行业客户类型或成果（可合理泛化，不得虚构具体虚假公司名）
 5. CTA：低门槛、明确、唯一，让拒绝变得不自然——优先用 "I can send a 1-page spec + pricing for your SKU" 或 "15-min call this week, or I can just email the catalog" 这种二选一
@@ -49,7 +49,7 @@ const WRITER_SYSTEM_PROMPT = `你是一位顶尖的外贸开发信（Cold Email�
 body 中用 \\n\\n 分段，不要包含主题行。`;
 
 export async function generateEmail(customer, extraContext = '') {
-  const user = `请为以下客户撰写一封开发信。开头必须引用背调里的官网、登记地址、招标编号或法定名称之一，证明研究过这家主体，不要用名片字段编故事。
+  const user = `请为以下客户撰写一封开发信。必须同时用上「询盘/招标原文」和「公开背调」，缺一块都不合格。禁止编造决策人姓名、私人邮箱或 LinkedIn 个人主页；没有公开职务就写给角色邮箱。
 
 ${buildWriterBrief(customer)}
 ${extraContext ? `\n【补充要求】\n${extraContext}` : ''}

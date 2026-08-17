@@ -1,9 +1,10 @@
 import { config } from './config.js';
 import { generateEmail, evaluateEmail, generateFollowUp, generateReply } from './agent.js';
-import { createBatchJob, cancelPendingSends, resumeSending } from './scheduler.js';
-import { db, save, logActivity } from './store.js';
+import { createBatchJob, cancelPendingSends, resumeSending, cancelScheduledFor } from './scheduler.js';
+import { db, save, logActivity, getCustomer } from './store.js';
 import { safePollInbox } from './inbox.js';
 import { buildConversationBrief } from './context.js';
+import { hydrateInquiry } from './rfq.js';
 
 // ============================================================
 // 客户入库后的完整自动流程（人工只监控 / 停止）
@@ -161,6 +162,7 @@ async function processFirstTouch(customer) {
     detail: `正在研究 ${customer.name} / ${customer.company}（${customer.country} · ${customer.timezone}）`,
   });
 
+  await hydrateInquiry(customer);
   const { result } = await draftFirstEmail(customer);
   if (!state.enabled) {
     customer.agentPhase = 'paused';
@@ -292,6 +294,32 @@ function enqueueDraft(customer) {
   if (isOwnInbox(customer.email)) return false;
   enqueue(customer, draft, '已排期');
   return true;
+}
+
+/** 取消未发出的首封，清空草稿，让 Agent 按询盘全文 + 背调重写。已发出的不动。 */
+export function rewriteOutreach(ids = []) {
+  const targets = [];
+  const pool = ids.length ? ids.map((id) => getCustomer(id)).filter(Boolean) : db.customers.filter((c) => c.inOutreach);
+  for (const c of pool) {
+    if (!c?.inOutreach || !c.email || isBlockedOutreachEmail(c.email) || isOwnInbox(c.email)) continue;
+    const sent = (db.threads[c.id] || []).some((t) => t.type === 'outbound');
+    if (sent) continue;
+    targets.push(c);
+  }
+  const cancelled = cancelScheduledFor(targets.map((c) => c.id));
+  for (const c of targets) {
+    c.agentPhase = null;
+    if (c.status !== 'replied' && c.status !== 'following') c.status = 'uncontacted';
+    if (db.aiPanel[c.id]) db.aiPanel[c.id].draft = null;
+    logActivity({
+      customerId: c.id,
+      action: '重写开发信',
+      detail: `已撤下旧草稿，将按询盘原文 + 公开背调重写 ${c.company || c.name}。`,
+    });
+  }
+  save();
+  startAgent();
+  return { reset: targets.length, cancelled, ids: targets.map((c) => c.id), agent: getAgentState() };
 }
 
 export function startAgent() {
