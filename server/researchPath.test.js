@@ -52,7 +52,7 @@ describe('classifyResearchPath', () => {
     assert.ok(qs.every((q) => !/Abdi/i.test(q)));
   });
 
-  it('crossposts a distinctive product title without the nickname', () => {
+  it('does not google a generic product title just because it has a weight', () => {
     const customer = {
       company: 'Yash Kumar',
       name: 'Yash Kumar',
@@ -62,9 +62,8 @@ describe('classifyResearchPath', () => {
     const phrase = distinctiveSubjectPhrase(customer.publicCard.subject);
     assert.match(phrase, /Woven Sack/);
     const path = classifyResearchPath(customer, { personLike: true, clues: extractRfqClues('Need bags') });
-    assert.equal(path.key, 'crosspost');
+    assert.equal(path.key, 'import');
     const qs = crosspostQueries({}, 'Palau', customer);
-    assert.ok(qs.some((q) => q.includes(phrase)));
     assert.ok(qs.every((q) => !/Yash/i.test(q)));
   });
 

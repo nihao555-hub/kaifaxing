@@ -41,8 +41,28 @@ describe('extractCompanyHintFromText', () => {
       '',
     );
     assert.equal(
-      extractCompanyHintFromText('on behalf of the brand Fidan Novruzova'),
-      '',
+      extractCompanyHintFromText('We are contacting you on behalf of Titanlink Industrial LLC(USA) regarding sourcing.'),
+      'Titanlink Industrial LLC',
+    );
+    assert.equal(
+      extractCompanyHintFromText('Good day, I represent Eco Solutions Ltd.,focusing on sustainable operations.'),
+      'Eco Solutions Ltd',
+    );
+    assert.equal(
+      extractCompanyHintFromText('I am Roshan More from Sea Everest Co.,Ltd,established in Myanmar since 2005.'),
+      'Sea Everest Co.,Ltd',
+    );
+    assert.equal(
+      extractCompanyHintFromText('This is Reaksa from Positron Multiverse Co.,Ltd.,a leading system integrator.'),
+      'Positron Multiverse Co.,Ltd',
+    );
+    assert.equal(
+      extractCompanyHintFromText('Our company Trade Bridge Ltd is located in Trinidad and Tobago.'),
+      'Trade Bridge Ltd',
+    );
+    assert.equal(
+      extractCompanyHintFromText('Signal Technologies Inc.is currently implementing a project that requires Wi-Fi gear.'),
+      'Signal Technologies Inc',
     );
   });
 
@@ -66,6 +86,10 @@ describe('extractCompanyHintFromText', () => {
     );
     assert.equal(
       extractCompanyHintFromText('I am reaching out from XYZ Company about this RFQ.'),
+      '',
+    );
+    assert.equal(
+      extractCompanyHintFromText("I'm interested in Samsung galaxy Ltd screens"),
       '',
     );
     assert.equal(

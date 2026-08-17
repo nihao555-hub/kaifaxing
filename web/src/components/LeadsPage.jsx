@@ -119,6 +119,13 @@ function MenuOption({ active, onClick, label, count, leading }) {
   );
 }
 
+const PATH_LABEL = {
+  auto: '可自动背调',
+  clues: '正文有主体线索',
+  crosspost: '用询盘指纹交叉检索',
+  import: '需补主体',
+};
+
 function gradeStyle(grade) {
   if (grade === 'A') return 'bg-emerald-50 text-emerald-700';
   if (grade === 'B') return 'bg-amber-50 text-amber-700';
@@ -414,6 +421,12 @@ export default function LeadsPage({ onGoOutreach }) {
                   背调队列 {pipeline.queue}
                 </>
               )}
+              {pipeline?.kybPlan?.live != null && (
+                <>
+                  <span className="mx-1.5 text-[#e2e8f0]">·</span>
+                  可核主体 {pipeline.kybPlan.live.toLocaleString()} / 需补名 {(pipeline.kybPlan.import || 0).toLocaleString()}
+                </>
+              )}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -438,12 +451,26 @@ export default function LeadsPage({ onGoOutreach }) {
         </div>
 
         {showLog && pipeline && (
-          <div className="mt-3 rounded border border-[#e8edf4] bg-[#f8fafc] px-3 py-2 text-[12px] leading-relaxed text-[#64748b]">
-            北京时间 {pipeline.today}。上次同步 {formatTime(pipeline.lastDailyAt)}
-            {pipeline.lastSync ? `，抓到 ${pipeline.lastSync.fetched} / 新入库 ${pipeline.lastSync.createdCount}` : ''}
-            。队列 {pipeline.queue} · 今日已背调 {pipeline.researchedToday} · 自动写入邮箱 {pipeline.appliedToday}
-            {pipeline.researchingId ? ' · 正在背调…' : ''}
-            {pipeline.lastError ? ` · ${pipeline.lastError}` : ''}
+          <div className="mt-3 space-y-2 rounded border border-[#e8edf4] bg-[#f8fafc] px-3 py-2 text-[12px] leading-relaxed text-[#64748b]">
+            <p>
+              北京时间 {pipeline.today}。上次同步 {formatTime(pipeline.lastDailyAt)}
+              {pipeline.lastSync ? `，抓到 ${pipeline.lastSync.fetched} / 新入库 ${pipeline.lastSync.createdCount}` : ''}
+              。队列 {pipeline.queue} · 今日已背调 {pipeline.researchedToday} · 自动写入邮箱 {pipeline.appliedToday}
+              {pipeline.researchingId ? ' · 正在背调…' : ''}
+              {pipeline.lastError ? ` · ${pipeline.lastError}` : ''}
+            </p>
+            {pipeline.kybPlan && (
+              <p>
+                背调盘点：可自动 {(pipeline.kybPlan.auto || 0).toLocaleString()}
+                {' · '}正文线索 {(pipeline.kybPlan.clues || 0).toLocaleString()}
+                {' · '}型号交叉 {(pipeline.kybPlan.crosspost || 0).toLocaleString()}
+                {' · '}需补主体 {(pipeline.kybPlan.import || 0).toLocaleString()}
+                。阿里公开列表没有邮箱；只有昵称的卡核不到公司，不会猜 Gmail。
+                政府招标 {(pipeline.kybPlan.government || 0).toLocaleString()}
+                {' · '}正文已抽出公司名 {(pipeline.kybPlan.textHint || 0).toLocaleString()}
+                {' · '}已有角色邮箱 {(pipeline.kybPlan.hasEmail || 0).toLocaleString()}
+              </p>
+            )}
           </div>
         )}
 
@@ -1093,7 +1120,7 @@ function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail, onId
       {(research?.path || customer.researchPath) && (
         <div className="rounded-lg border border-[#e8edf4] bg-[#f8fafc] px-3 py-2.5">
           <div className="text-[12px] font-medium text-[#334155]">
-            背调路径 · {(research?.path?.label) || (customer.researchPath === 'import' ? '需补主体' : '可自动背调')}
+            背调路径 · {(research?.path?.label) || PATH_LABEL[customer.researchPath] || '可自动背调'}
           </div>
           <p className="mt-1 text-[12px] leading-relaxed text-[#475569]">
             {research?.path?.next || '先确认可核验主体，再查官网角色邮箱。不搜人名、不猜 Gmail。'}

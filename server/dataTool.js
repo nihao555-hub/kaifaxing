@@ -28,6 +28,16 @@ async function main() {
     return;
   }
 
+  if (command === 'promote') {
+    const { db, saveNow } = await import('./store.js');
+    const { applyTextCompanyHints, kybPlanStats } = await import('./pipeline.js');
+    const promoted = applyTextCompanyHints();
+    saveNow();
+    const plan = kybPlanStats({ force: true });
+    console.log(`[data] promote: ${JSON.stringify({ promoted, local: db.customers.length, plan })}`);
+    return;
+  }
+
   if (command === 'backup') {
     if (!fs.existsSync(DB_PATH)) throw new Error(`database not found: ${DB_PATH}`);
     const result = await uploadRemoteBackup();

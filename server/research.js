@@ -47,8 +47,6 @@ import {
   classifyResearchPath,
   crosspostLinks,
   suggestCrosspostCompany,
-  distinctiveSubjectPhrase,
-  rfqSubject,
 } from './researchPath.js';
 import { screenSanctions } from './sanctions.js';
 import { findTradeTraces } from './tradeTraces.js';
@@ -1031,7 +1029,7 @@ export async function researchLead(customer, { useAi = true } = {}) {
     website = `https://${clues.emails[0].split('@')[1]}`;
   }
 
-  if (personLike && (clues.fingerprints.length || distinctiveSubjectPhrase(rfqSubject(customer)))) {
+  if (personLike && clues.fingerprints.length) {
     crosspost = await suggestCrosspostCompany(clues, customer.country, customer);
     if (crosspost.company) {
       try {

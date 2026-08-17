@@ -5,7 +5,15 @@ import { countrySearchTerms, searchPageUrl, searchOfficialJson } from './searchD
 const PERSONAL_MAIL = /gmail|yahoo|ymail|hotmail|outlook|live\.com|icloud|proton|qq\.com|163\.com|126\.com/;
 const ROLE_LOCAL = /^(info|enquiry|inquiry|enquiries|inquiries|contact|office|sales|sale|procurement|purchasing|purchase|buying|buyer|sourcing|export|import|trade|hello)$/i;
 const MARKET_HOST = /alibaba|1688|aliexpress|amazon|ebay|facebook|linkedin|made-in-china|globalsources|tradeindia|indiamart/i;
-const GENERIC_FP = /^(20v|12v|24v|110v|220v|usb|led|oem|odm|moq|iso|ce|rohs|202[0-9]|100pcs|pcs|www)$/i;
+const GENERIC_FP = /^(20v|12v|24v|110v|220v|usb|led|oem|odm|moq|iso|ce|rohs|202[0-9]|100pcs|pcs|www|frac\d+|aug-\d{4})$/i;
+
+function usableFingerprint(token) {
+  const key = String(token || '');
+  if (!key || GENERIC_FP.test(key) || /^(frac|nbsp|ldquo|acirc|brvbar)/i.test(key)) return false;
+  if (!/[A-Za-z]/.test(key) || !/\d/.test(key)) return false;
+  if (/^\d{4}-\d{2}/.test(key) || key.length < 5 || key.length > 24) return false;
+  return true;
+}
 
 const COMPANY_IN_TEXT = /\b([A-Z][A-Za-z0-9&.'-]{2,}(?:\s+[A-Z0-9][A-Za-z0-9&.'-]{1,}){0,6}\s+(?:L\.?L\.?C\.?|Ltd\.?|Limited|GmbH|Inc\.?|PLC|Pte\.?\s*Ltd\.?|S\.?A\.?|B\.?V\.?|Pvt\.?\s*Ltd\.?))\b/g;
 const FINGERPRINT_RE = /\b(?=[A-Z0-9./-]{6,}\b)(?=[A-Z./-]*\d)(?=\d*[A-Z])[A-Z][A-Z0-9./-]{4,}\b/gi;
@@ -43,7 +51,9 @@ export function distinctiveSubjectPhrase(subject) {
     .map((w) => w.replace(/[^a-zA-Z0-9.-]/g, ''))
     .filter((w) => w.length >= 3 && !SUBJECT_STOP.has(w.toLowerCase()) && !/^\d+$/.test(w));
   if (words.length < 4) return '';
-  return words.slice(0, 8).join(' ');
+  const phrase = words.slice(0, 8).join(' ');
+  if (!/\d/.test(phrase)) return '';
+  return phrase;
 }
 
 export function extractRfqClues(text) {
@@ -77,8 +87,7 @@ export function extractRfqClues(text) {
   for (const raw of src.match(FINGERPRINT_RE) || []) {
     const token = raw.replace(/[.,;]+$/, '');
     const key = token.toUpperCase();
-    if (GENERIC_FP.test(key) || seenFp.has(key)) continue;
-    if (token.length > 28) continue;
+    if (!usableFingerprint(token) || seenFp.has(key)) continue;
     seenFp.add(key);
     fingerprints.push(token);
   }
@@ -121,14 +130,11 @@ export function classifyResearchPath(customer = {}, { personLike = false, clues 
       clues: found,
     };
   }
-  const phrase = distinctiveSubjectPhrase(rfqSubject(customer));
-  if (found.fingerprints.length || phrase) {
+  if (found.fingerprints.length) {
     return {
       key: 'crosspost',
       label: '用询盘指纹交叉检索',
-      next: found.fingerprints.length
-        ? `不搜「${customer.company || customer.name}」这个人。用型号 ${found.fingerprints.join(' / ')} 找同款公开询盘，看别的站点有没有写出公司名。`
-        : `不搜「${customer.company || customer.name}」这个人。用产品「${phrase}」在公开招标/其它 B2B 站找写出公司名的同款需求。`,
+      next: `不搜「${customer.company || customer.name}」这个人。用型号 ${found.fingerprints.join(' / ')} 找同款公开询盘，看别的站点有没有写出公司名。`,
       clues: found,
     };
   }

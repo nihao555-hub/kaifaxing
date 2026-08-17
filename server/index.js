@@ -32,6 +32,7 @@ import {
   identifyLead,
   applyPublicContact,
   promoteLeads,
+  kybPlanStats,
 } from './pipeline.js';
 import { flushRemoteBackup, objectStoreStatus } from './dataPersistence.js';
 import { cloudDbStatus, flushCloudSync, pushCloudDatabase } from './cloudDb.js';
@@ -286,6 +287,7 @@ app.post('/api/search/google/test', async (req, res) => {
   }
 });
 app.get('/api/rfq/pipeline', (req, res) => res.json(getPipelineState()));
+app.get('/api/rfq/kyb-plan', (req, res) => res.json(kybPlanStats({ force: true })));
 app.post('/api/rfq/pipeline/sync', async (req, res) => {
   try {
     const state = await runDailySync({ reason: 'manual' });

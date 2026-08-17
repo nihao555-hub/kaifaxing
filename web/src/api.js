@@ -78,5 +78,6 @@ export const api = {
   saveSearchSettings: (payload) => req('/api/search/settings', { method: 'POST', body: JSON.stringify(payload) }),
   testGoogleSearch: (payload) => req('/api/search/google/test', { method: 'POST', body: JSON.stringify(payload || {}) }),
   rfqPipeline: () => req('/api/rfq/pipeline'),
+  rfqKybPlan: () => req('/api/rfq/kyb-plan'),
   rfqPipelineSync: () => req('/api/rfq/pipeline/sync', { method: 'POST', body: '{}' }),
 };

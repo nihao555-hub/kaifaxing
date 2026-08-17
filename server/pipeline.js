@@ -3,7 +3,7 @@ import { db, save, getCustomer, isRfqLead, isDemoCustomer, logActivity } from '.
 import { crawlAllAndImport, importRfqItems } from './rfq.js';
 import { researchLead, isPersonLikeLead, isPlausibleEmail, applyLeadIdentity, compactSkippedReport } from './research.js';
 import { extractCompanyHintFromText } from './rfqHints.js';
-import { extractRfqClues, rfqCorpus, classifyResearchPath, distinctiveSubjectPhrase, rfqSubject } from './researchPath.js';
+import { extractRfqClues, rfqCorpus, classifyResearchPath } from './researchPath.js';
 import { clusterDemandKeywords, searchDemandPeers } from './demandPeers.js';
 import { VERIFIED_SOURCES } from './openSources.js';
 import { isForwarderName, isOutreachEmail } from './kyb.js';
@@ -17,6 +17,8 @@ export function researchPriority(customer = {}) {
   if (/\b(limited|ltd|inc|gmbh|plc|llc|b\.?v|sarl|pty|pvt|college|university|hospital|council|politechnika|nemocnice)\b/i.test(name)) {
     return 2;
   }
+  if (customer.researchPath === 'clues' || customer.website || customer.email) return 3;
+  if (customer.researchPath === 'crosspost') return 5;
   return 8;
 }
 
@@ -130,6 +132,7 @@ export function applyTextCompanyHints() {
     }
   }
   if (promoted || dirty) save();
+  if (promoted || dirty) invalidateKybPlan();
   return promoted;
 }
 
@@ -158,9 +161,52 @@ export function stampPersonLikeLeads() {
 }
 
 let kybPass = { status: 'idle' };
+let kybPlanCache = { at: 0, value: null };
 
 export function getKybPassState() {
   return kybPass;
+}
+
+export function summarizeKybPlan(customers = []) {
+  const counts = {
+    total: 0,
+    auto: 0,
+    clues: 0,
+    crosspost: 0,
+    import: 0,
+    government: 0,
+    hasEmail: 0,
+    hasWebsite: 0,
+    textHint: 0,
+    person: 0,
+    live: 0,
+  };
+  for (const c of customers) {
+    if (!isRfqLead(c)) continue;
+    counts.total += 1;
+    if (c.email) counts.hasEmail += 1;
+    if (c.website) counts.hasWebsite += 1;
+    if (c.identitySource === 'rfq_text') counts.textHint += 1;
+    if (/TED|Contracts Finder|USASpending|SAM/i.test(c.source || '')) counts.government += 1;
+    const person = isPersonLikeLead(c);
+    if (person) counts.person += 1;
+    const key = c.researchPath || (person ? 'import' : 'auto');
+    if (key === 'auto' || key === 'clues' || key === 'crosspost' || key === 'import') counts[key] += 1;
+    else counts.import += 1;
+  }
+  counts.live = counts.auto + counts.clues + counts.crosspost;
+  return counts;
+}
+
+export function kybPlanStats({ force = false } = {}) {
+  if (!force && kybPlanCache.value && Date.now() - kybPlanCache.at < 15000) return kybPlanCache.value;
+  const value = summarizeKybPlan(db.customers);
+  kybPlanCache = { at: Date.now(), value };
+  return value;
+}
+
+function invalidateKybPlan() {
+  kybPlanCache = { at: 0, value: null };
 }
 
 /** Promote text hints, compact-stamp nicknames/projects, queue the rest for live KYB. */
@@ -220,7 +266,8 @@ export function prepareFullKybPass() {
     live += 1;
   }
   if (promoted || stamped) save();
-  return { promoted, stamped, live };
+  invalidateKybPlan();
+  return { promoted, stamped, live, plan: summarizeKybPlan(db.customers) };
 }
 
 function isCompactNicknameReport(r) {
@@ -238,12 +285,10 @@ export function reopenSignalLeads({ limit = 2500 } = {}) {
     const text = rfqCorpus(c);
     const hint = extractCompanyHintFromText(text);
     const clues = extractRfqClues(text);
-    const phrase = distinctiveSubjectPhrase(rfqSubject(c));
     let score = 0;
     if (hint) score += 100;
     if (clues.websites[0] || clues.emails[0]) score += 80;
     if (clues.fingerprints.length) score += 40;
-    if (phrase) score += Math.min(phrase.split(' ').length * 3, 30);
     if (score < 20) continue;
     if (!hint && !canSearch && !clues.websites[0] && !clues.emails[0] && !clues.fingerprints.length) continue;
     candidates.push({ c, score, hint });
@@ -638,6 +683,7 @@ export function getPipelineState() {
     nextDaily: p.lastDailyDate === today ? `明天 ${String(config.pipeline.dailyHour).padStart(2, '0')}:00` : `今天 ${String(config.pipeline.dailyHour).padStart(2, '0')}:00 后`,
     kybPass,
     signalPass,
+    kybPlan: kybPlanStats(),
   };
 }
 

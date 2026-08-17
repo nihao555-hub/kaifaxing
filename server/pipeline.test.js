@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { beijingDate, beijingHour, pickAutoEmail, isForwarderName, researchPriority } from './pipeline.js';
+import { beijingDate, beijingHour, pickAutoEmail, isForwarderName, researchPriority, summarizeKybPlan } from './pipeline.js';
 import { compactSkippedReport } from './research.js';
 
 describe('pipeline schedule', () => {
@@ -64,6 +64,27 @@ describe('auto apply rules', () => {
       < researchPriority({ source: 'USASpending.gov', company: 'THE BOEING COMPANY' }));
     assert.ok(researchPriority({ source: 'USASpending.gov', company: 'THE BOEING COMPANY' })
       < researchPriority({ source: 'World Bank', company: 'Assam: School Education' }));
+    assert.ok(researchPriority({ source: 'Alibaba 公开询盘', researchPath: 'clues' })
+      < researchPriority({ source: 'Alibaba 公开询盘', researchPath: 'crosspost' }));
+  });
+
+  it('counts only live KYB paths as researchable', () => {
+    const plan = summarizeKybPlan([
+      { source: 'TED Europa', company: 'HOWOGE Wohnungsbaugesellschaft mbH', researchPath: 'auto' },
+      { source: 'Alibaba 公开询盘', company: 'Titanlink Industrial LLC', researchPath: 'auto', identitySource: 'rfq_text' },
+      { source: 'Alibaba 公开询盘', company: 'Abdi Muse', researchPath: 'crosspost' },
+      { source: 'Alibaba 公开询盘', company: 'Linda N', researchPath: 'import' },
+      { source: 'Alibaba 公开询盘', company: 'Jack', website: 'https://nmguae.com', researchPath: 'clues' },
+    ]);
+    assert.equal(plan.total, 5);
+    assert.equal(plan.auto, 2);
+    assert.equal(plan.clues, 1);
+    assert.equal(plan.crosspost, 1);
+    assert.equal(plan.import, 1);
+    assert.equal(plan.live, 4);
+    assert.equal(plan.government, 1);
+    assert.equal(plan.textHint, 1);
+    assert.equal(plan.hasWebsite, 1);
   });
 
   it('uses a compact C report for nickname mass KYB', () => {
