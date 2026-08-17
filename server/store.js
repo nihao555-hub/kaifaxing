@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { seedCustomers, seedThreads, seedAiPanel } from './data/seed.js';
 import { isPersonLikeLead } from './research.js';
-import { config, googleSearchStatus } from './config.js';
+import { config, googleSearchStatus, normalizeSearchEngine } from './config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.join(__dirname, 'data', 'db.json');
@@ -41,10 +41,13 @@ export function applyStoredSearchSettings() {
   if (!process.env.OPENCORPORATES_API_KEY && saved.openCorporatesKey) {
     config.openCorporates.apiKey = saved.openCorporatesKey;
   }
+  if (!process.env.SEARCH_ENGINE && saved.searchEngine) {
+    config.google.engine = normalizeSearchEngine(saved.searchEngine);
+  }
 }
 
 export function saveSearchSettings({
-  apiKey, cseId, serperKey, companiesHouseKey, openCorporatesKey, clear,
+  apiKey, cseId, serperKey, companiesHouseKey, openCorporatesKey, searchEngine, clear,
 } = {}) {
   ensureSearchSettings();
   if (clear) {
@@ -54,6 +57,7 @@ export function saveSearchSettings({
     if (!process.env.SERPER_API_KEY) config.google.serperKey = '';
     if (!process.env.COMPANIES_HOUSE_API_KEY) config.companiesHouse.apiKey = '';
     if (!process.env.OPENCORPORATES_API_KEY) config.openCorporates.apiKey = '';
+    if (!process.env.SEARCH_ENGINE) config.google.engine = 'google';
     save();
     return googleSearchStatus();
   }
@@ -76,6 +80,11 @@ export function saveSearchSettings({
   if (typeof openCorporatesKey === 'string' && openCorporatesKey.trim()) {
     db.settings.search.openCorporatesKey = openCorporatesKey.trim();
     if (!process.env.OPENCORPORATES_API_KEY) config.openCorporates.apiKey = openCorporatesKey.trim();
+  }
+  if (typeof searchEngine === 'string' && searchEngine.trim()) {
+    const engine = normalizeSearchEngine(searchEngine);
+    db.settings.search.searchEngine = engine;
+    if (!process.env.SEARCH_ENGINE) config.google.engine = engine;
   }
   save();
   return googleSearchStatus();

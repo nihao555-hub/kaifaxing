@@ -20,6 +20,7 @@ import {
   searchEngineLabel,
   addressFromSnippets,
   hoursFromSnippets,
+  searchOfficialJson,
 } from './searchDorks.js';
 import { config, googleCseReady, maskSecret } from './config.js';
 
@@ -328,5 +329,17 @@ describe('google official json', () => {
     assert.equal(googleCseReady(), true);
     config.google.apiKey = prev.apiKey;
     config.google.cseId = prev.cseId;
+  });
+
+  it('google-only search refuses to call Serper when CSE is missing', async () => {
+    const prev = { ...config.google };
+    config.google.engine = 'google';
+    config.google.apiKey = '';
+    config.google.cseId = '';
+    config.google.serperKey = 'dummy-serper';
+    const raw = await searchOfficialJson('"NMG TECHNICAL SERVICE" Dubai');
+    assert.equal(raw.engine, '');
+    assert.match(raw.error, /GOOGLE_API_KEY|GOOGLE_CSE_ID/);
+    Object.assign(config.google, prev);
   });
 });

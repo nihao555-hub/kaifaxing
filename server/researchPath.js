@@ -1,7 +1,6 @@
 /** 怎么拿到符合要求的背调：先有可核验主体，再查官网角色联系方式。不搜人名、不猜私人邮箱。 */
 import { extractCompanyHintFromText, buyerFacingText } from './rfqHints.js';
-import { countrySearchTerms, searchPageUrl, searchSerper, searchGoogleCse } from './searchDorks.js';
-import { googleCseReady, serperReady } from './config.js';
+import { countrySearchTerms, searchPageUrl, searchOfficialJson } from './searchDorks.js';
 
 const PERSONAL_MAIL = /gmail|yahoo|ymail|hotmail|outlook|live\.com|icloud|proton|qq\.com|163\.com|126\.com/;
 const ROLE_LOCAL = /^(info|enquiry|inquiry|enquiries|inquiries|contact|office|sales|sale|procurement|purchasing|purchase|buying|buyer|sourcing|export|import|trade|hello)$/i;
@@ -206,24 +205,13 @@ export async function suggestCrosspostCompany(clues, country, customer = {}) {
   let engine = '';
   let error = '';
   for (const query of queries.slice(0, 2)) {
-    if (serperReady()) {
-      const r = await searchSerper(query);
-      if (r.ok) {
-        engine = 'serper';
-        items.push(...rawSearchItems(r.json));
-        continue;
-      }
-      error = r.error || error;
+    const r = await searchOfficialJson(query);
+    if (r.engine) {
+      engine = r.engine;
+      items.push(...rawSearchItems(r.json));
+      continue;
     }
-    if (googleCseReady()) {
-      const r = await searchGoogleCse(query);
-      if (r.ok) {
-        engine = 'google-cse';
-        items.push(...rawSearchItems(r.json));
-        continue;
-      }
-      error = r.error || error;
-    }
+    error = r.error || error;
   }
   const companies = companiesFromSnippets(items, { country });
   return {

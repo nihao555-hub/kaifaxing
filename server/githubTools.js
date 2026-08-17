@@ -11,7 +11,7 @@ export const GITHUB_TOOLS = [
   { id: 'cheerio', name: 'cheerio', repo: 'https://github.com/cheeriojs/cheerio', use: '解析官网 HTML、搜索结果页、mailto、联系页链接' },
   { id: 'search-dorks', name: '外贸搜索公式', repo: 'https://github.com/cheeriojs/cheerio', use: '法定名 + contact/procurement/info@ 公开搜索，解析官网和联系页' },
   { id: 'google-cse', name: 'Google Custom Search', repo: 'https://github.com/googleapis/google-api-nodejs-client', use: '官方 Custom Search JSON API，不抓谷歌 HTML、不绕验证码' },
-  { id: 'serper', name: 'serper.dev', repo: 'https://github.com/serper-dev', use: '可选的谷歌 SERP JSON；CSE 没开通时用同一套外贸公式' },
+  { id: 'serper', name: 'serper.dev', repo: 'https://github.com/serper-dev', use: '可选备援；默认关闭，设置里选「自动」或「只用 Serper」才会走' },
   { id: 'tldts', name: 'tldts', repo: 'https://github.com/remusao/tldts', use: 'Public Suffix 域名核验' },
   { id: 'libphonenumber-js', name: 'libphonenumber-js', repo: 'https://github.com/catamphetamine/libphonenumber-js', use: '国际电话解析（Google libphonenumber）' },
   { id: 'wikibase-sdk', name: 'wikibase-sdk', repo: 'https://github.com/maxlath/wikibase-sdk', use: 'Wikidata 实体查询' },

@@ -48,11 +48,12 @@ export const config = {
     apiKey: process.env.OPENCORPORATES_API_KEY || '',
   },
 
-  // 谷歌搜索：官方 Custom Search JSON API（googleapis），或可选 Serper
+  // 谷歌搜索：默认走官方 Custom Search JSON API，不抓 google.com HTML
   google: {
     apiKey: process.env.GOOGLE_API_KEY || '',
     cseId: process.env.GOOGLE_CSE_ID || process.env.GOOGLE_CX || '',
     serperKey: process.env.SERPER_API_KEY || '',
+    engine: process.env.SEARCH_ENGINE || 'google',
   },
 
   // 阿里国际站官方开放平台（ICBU RFQ），不爬页面
@@ -98,15 +99,41 @@ export function serperReady() {
   return Boolean(config.google.serperKey);
 }
 
-export function googleSearchReady() {
+export function normalizeSearchEngine(value) {
+  const v = String(value || '').trim().toLowerCase();
+  if (v === 'serper') return 'serper';
+  if (v === 'auto') return 'auto';
+  return 'google';
+}
+
+export function preferredSearchEngine() {
+  return normalizeSearchEngine(config.google.engine);
+}
+
+config.google.engine = preferredSearchEngine();
+
+export function officialSearchReady() {
+  const pref = preferredSearchEngine();
+  if (pref === 'google') return googleCseReady();
+  if (pref === 'serper') return serperReady();
   return googleCseReady() || serperReady();
 }
 
+export function googleSearchReady() {
+  return officialSearchReady();
+}
+
 export function googleSearchStatus() {
+  const engine = preferredSearchEngine();
   return {
+    engine,
     cseReady: googleCseReady(),
     serperReady: serperReady(),
-    ready: googleSearchReady(),
+    ready: officialSearchReady(),
+    needCse: engine === 'google' && !googleCseReady(),
+    setup: engine === 'google' && !googleCseReady()
+      ? '请到 https://programmablesearchengine.google.com/ 建「搜索整个网络」引擎拿 CX，再在 Google Cloud 打开 Custom Search API 建 Key。免费约 100 次/天。不会改走 Serper，也不会抓 google.com 结果页。'
+      : '',
     apiKeySet: Boolean(config.google.apiKey),
     cseIdSet: Boolean(config.google.cseId),
     serperSet: Boolean(config.google.serperKey),

@@ -1,5 +1,5 @@
 import * as cheerio from 'cheerio';
-import { config, googleCseReady, serperReady } from './config.js';
+import { config, googleCseReady, serperReady, preferredSearchEngine, officialSearchReady } from './config.js';
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -721,26 +721,49 @@ function mergeParsed(into, extra) {
   into.snippetEmails.push(...(extra.snippetEmails || []));
 }
 
-async function searchOfficialGoogle(query, company, { siteHost, country } = {}) {
-  if (googleCseReady()) {
+export async function searchOfficialJson(query) {
+  const pref = preferredSearchEngine();
+  if (pref !== 'serper' && googleCseReady()) {
     const cse = await searchGoogleCse(query);
-    if (cse.ok) {
-      return { engine: 'google-cse', parsed: parseGoogleCse(cse.json, company, { siteHost, query, country }), error: '' };
+    if (cse.ok) return { engine: 'google-cse', json: cse.json, error: '', status: cse.status };
+    if (pref === 'google') {
+      return {
+        engine: '',
+        json: null,
+        error: `谷歌官方 API ${cse.status}：${String(cse.error || '').slice(0, 80)}`,
+        status: cse.status,
+      };
     }
-    return { engine: '', parsed: { urls: [], items: [], snippetEmails: [] }, error: `谷歌官方 API ${cse.status}：${String(cse.error || '').slice(0, 80)}` };
   }
-  if (serperReady()) {
+  if (pref !== 'google' && serperReady()) {
     const serper = await searchSerper(query);
-    if (serper.ok) {
-      return { engine: 'serper', parsed: parseSerper(serper.json, company, { siteHost, query, country }), error: '' };
-    }
-    return { engine: '', parsed: { urls: [], items: [], snippetEmails: [] }, error: `Serper ${serper.status}：${String(serper.error || '').slice(0, 80)}` };
+    if (serper.ok) return { engine: 'serper', json: serper.json, error: '', status: serper.status };
+    return {
+      engine: '',
+      json: null,
+      error: `Serper ${serper.status}：${String(serper.error || '').slice(0, 80)}`,
+      status: serper.status,
+    };
   }
-  return { engine: '', parsed: { urls: [], items: [], snippetEmails: [] }, error: '' };
+  if (pref === 'google') {
+    return { engine: '', json: null, error: '未配置 GOOGLE_API_KEY / GOOGLE_CSE_ID', status: 0 };
+  }
+  return { engine: '', json: null, error: '', status: 0 };
+}
+
+export async function searchOfficialGoogle(query, company, { siteHost, country } = {}) {
+  const raw = await searchOfficialJson(query);
+  if (!raw.engine) {
+    return { engine: '', parsed: { urls: [], items: [], snippetEmails: [] }, error: raw.error };
+  }
+  const parsed = raw.engine === 'google-cse'
+    ? parseGoogleCse(raw.json, company, { siteHost, query, country })
+    : parseSerper(raw.json, company, { siteHost, query, country });
+  return { engine: raw.engine, parsed, error: '' };
 }
 
 export async function searchCompanyPages(company, { maxQueries = 4, website, country, product } = {}) {
-  const officialReady = googleCseReady() || serperReady();
+  const officialReady = officialSearchReady();
   const queries = researchDorks(company, { website, country, product }).slice(0, officialReady ? Math.min(maxQueries, 4) : maxQueries);
   const siteHost = hostFromWebsite(website);
   const urls = [];

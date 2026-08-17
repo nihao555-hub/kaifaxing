@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { config, googleSearchReady, googleSearchStatus } from './config.js';
+import { config, googleCseReady, googleSearchReady, googleSearchStatus, preferredSearchEngine } from './config.js';
 import { alibabaReady } from './alibaba.js';
 import { db, save, getCustomer, listCustomers, leadFacets, saveSearchSettings } from './store.js';
 import { generateEmail, evaluateEmail, suggestSendTime } from './agent.js';
@@ -14,7 +14,7 @@ import { listSources, searchRfq, importRfqItems, ingestCommercial, crawlAlibabaP
 import { alibabaCrawlProgress, requestCrawlAbort } from './publicRfq.js';
 import { isPlausibleEmail, isPersonLikeLead } from './research.js';
 import { imageSearchLinks } from './rfqHints.js';
-import { buildSearchLinks, rfqProductTerms, searchGoogleCse, searchSerper, parseGoogleCse, parseSerper } from './searchDorks.js';
+import { buildSearchLinks, rfqProductTerms, searchOfficialJson, parseGoogleCse, parseSerper } from './searchDorks.js';
 import { GITHUB_TOOLS } from './githubTools.js';
 import { paidSourceStatus } from './paidSources.js';
 import { companiesHouseReady, openCorporatesReady } from './openSources.js';
@@ -222,6 +222,7 @@ app.post('/api/search/settings', (req, res) => {
     apiKey: req.body?.apiKey,
     cseId: req.body?.cseId,
     serperKey: req.body?.serperKey,
+    searchEngine: req.body?.searchEngine,
     companiesHouseKey: req.body?.companiesHouseKey,
     openCorporatesKey: req.body?.openCorporatesKey,
     clear: Boolean(req.body?.clear),
@@ -230,32 +231,33 @@ app.post('/api/search/settings', (req, res) => {
 });
 
 app.post('/api/search/google/test', async (req, res) => {
-  const query = String(req.body?.query || '"NMG TECHNICAL SERVICE" Dubai (website OR contact OR "info@")').slice(0, 240);
+  const query = String(req.body?.query || '"NMG TECHNICAL SERVICE" Dubai (website OR contact)').slice(0, 240);
   const company = String(req.body?.company || 'NMG TECHNICAL SERVICE L.L.C');
   const country = String(req.body?.country || 'United Arab Emirates');
+  const pref = preferredSearchEngine();
+  if (pref === 'google' && !googleCseReady()) {
+    return res.status(400).json({
+      error: '要用谷歌官方引擎，请先填 Google API Key + Search Engine ID（CX）。这次不会改走 Serper，也不会抓 google.com 结果页。',
+      ...googleSearchStatus(),
+    });
+  }
   if (!googleSearchReady()) {
     return res.status(400).json({
-      error: '还没接上谷歌。GitHub 上能用的是官方 Custom Search JSON API，请先填 API Key + CX；或填 Serper Key。',
+      error: '还没接上搜索。默认走谷歌官方 Custom Search：填 API Key + CX。只有选「自动」或「只用 Serper」时才用 Serper。',
       ...googleSearchStatus(),
     });
   }
   try {
-    let engine = '';
-    let parsed = { urls: [], items: [], snippetEmails: [] };
-    if (config.google.apiKey && config.google.cseId) {
-      const cse = await searchGoogleCse(query);
-      if (!cse.ok) return res.status(cse.status || 502).json({ error: cse.error || '谷歌官方 API 失败', ...googleSearchStatus() });
-      parsed = parseGoogleCse(cse.json, company, { query, country });
-      engine = 'google-cse';
-    } else {
-      const serper = await searchSerper(query);
-      if (!serper.ok) return res.status(serper.status || 502).json({ error: serper.error || 'Serper 失败', ...googleSearchStatus() });
-      parsed = parseSerper(serper.json, company, { query, country });
-      engine = 'serper';
+    const raw = await searchOfficialJson(query);
+    if (!raw.engine) {
+      return res.status(raw.status || 400).json({ error: raw.error || '搜索失败', ...googleSearchStatus() });
     }
+    const parsed = raw.engine === 'google-cse'
+      ? parseGoogleCse(raw.json, company, { query, country })
+      : parseSerper(raw.json, company, { query, country });
     res.json({
       query,
-      engine,
+      engine: raw.engine,
       urls: parsed.urls,
       items: parsed.items.slice(0, 8),
       snippetEmails: parsed.snippetEmails,

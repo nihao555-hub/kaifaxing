@@ -7,6 +7,7 @@ export default function SettingsPage() {
   const [apiKey, setApiKey] = useState('');
   const [cseId, setCseId] = useState('');
   const [serperKey, setSerperKey] = useState('');
+  const [searchEngine, setSearchEngine] = useState('google');
   const [companiesHouseKey, setCompaniesHouseKey] = useState('');
   const [openCorporatesKey, setOpenCorporatesKey] = useState('');
   const [saving, setSaving] = useState(false);
@@ -18,6 +19,7 @@ export default function SettingsPage() {
     const [data, sources] = await Promise.all([api.searchStatus(), api.paidSources().catch(() => null)]);
     setStatus(data);
     setPaid(sources);
+    if (data?.engine) setSearchEngine(data.engine);
   };
 
   useEffect(() => {
@@ -29,9 +31,10 @@ export default function SettingsPage() {
     setError('');
     try {
       const data = await api.saveSearchSettings({
-        apiKey, cseId, serperKey, companiesHouseKey, openCorporatesKey,
+        apiKey, cseId, serperKey, searchEngine, companiesHouseKey, openCorporatesKey,
       });
       setStatus(data);
+      if (data?.engine) setSearchEngine(data.engine);
       setApiKey('');
       setCseId('');
       setSerperKey('');
@@ -49,7 +52,9 @@ export default function SettingsPage() {
     setSaving(true);
     setError('');
     try {
-      setStatus(await api.saveSearchSettings({ clear: true }));
+      const data = await api.saveSearchSettings({ clear: true });
+      setStatus(data);
+      setSearchEngine(data?.engine || 'google');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -81,24 +86,52 @@ export default function SettingsPage() {
         <section className="max-w-[640px] rounded-xl border border-[#e8edf4] bg-white p-5 shadow-sm">
           <div className="text-[14px] font-medium text-[#1e293b]">谷歌搜索</div>
           <p className="mt-2 text-[12px] leading-relaxed text-[#64748b]">
-            GitHub 上能正经接的是官方
+            不走 Serper 时，用谷歌官方
             {' '}
-            <a className="text-primary hover:underline" href="https://github.com/googleapis/google-api-nodejs-client" target="_blank" rel="noreferrer">googleapis Custom Search</a>
-            。先到
-            {' '}
-            <a className="text-primary hover:underline" href="https://programmablesearchengine.google.com/" target="_blank" rel="noreferrer">Programmable Search Engine</a>
-            {' '}
-            建一个「搜索整个网络」的引擎拿到 CX，再在 Google Cloud 打开 Custom Search API 建 Key。
-            免费大约 100 次/天。新账号若已开不了 CSE，可改用
-            {' '}
-            <a className="text-primary hover:underline" href="https://serper.dev/" target="_blank" rel="noreferrer">Serper</a>
-            。
+            <a className="text-primary hover:underline" href="https://developers.google.com/custom-search/v1/overview" target="_blank" rel="noreferrer">Custom Search JSON API</a>
+            。不能抓 google.com/search 的 HTML（会被 JS/验证码挡住，这里也不绕）。
           </p>
+          <ol className="mt-2 list-decimal space-y-1 pl-5 text-[12px] leading-relaxed text-[#64748b]">
+            <li>
+              到
+              {' '}
+              <a className="text-primary hover:underline" href="https://programmablesearchengine.google.com/" target="_blank" rel="noreferrer">Programmable Search Engine</a>
+              {' '}
+              新建引擎，打开「搜索整个网络」，复制 Search engine ID（CX）。
+            </li>
+            <li>Google Cloud 打开 Custom Search API，建一个 API Key。</li>
+            <li>把 Key 和 CX 填到下面保存。免费大约 100 次/天。</li>
+          </ol>
+
+          <div className="mt-4 flex flex-wrap gap-2 text-[12px]">
+            {[
+              { id: 'google', label: '只用谷歌官方' },
+              { id: 'auto', label: '自动（先 CSE，没有再 Serper）' },
+              { id: 'serper', label: '只用 Serper' },
+            ].map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setSearchEngine(opt.id)}
+                className={`rounded-lg border px-3 py-1.5 ${
+                  searchEngine === opt.id
+                    ? 'border-primary bg-primary/5 text-primary'
+                    : 'border-[#e2e8f0] text-[#64748b]'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
 
           <div className="mt-4 rounded-lg bg-[#f8fafc] px-3 py-2 text-[12px] text-[#475569]">
-            {status?.ready
-              ? `已接通：${status.cseReady ? `官方 CSE ${status.cseIdMasked || ''}` : `Serper ${status.serperMasked || ''}`}`
-              : '还没接通。不填 Key 时背调仍走必应 / DuckDuckGo，结果只显示核到的官网和角色邮箱。'}
+            {status?.cseReady
+              ? `已接通谷歌官方 CSE ${status.cseIdMasked || ''}`
+              : status?.needCse
+                ? (status.setup || '还没接通谷歌官方 API。填 Key + CX 之前不会改走 Serper。')
+                : status?.ready
+                  ? `已接通：${status.engine === 'serper' ? `Serper ${status.serperMasked || ''}` : '自动回退到 Serper'}`
+                  : '还没接通。不填 Key 时背调仍走必应 / DuckDuckGo，结果只显示核到的官网和角色邮箱。'}
           </div>
 
           <label className="mt-4 block text-[12px] text-[#64748b]">
@@ -120,7 +153,7 @@ export default function SettingsPage() {
             />
           </label>
           <label className="mt-3 block text-[12px] text-[#64748b]">
-            Serper API Key（可选，CSE 开不了时用）
+            Serper API Key（可选；默认不用，只有上面选「自动」或「只用 Serper」才走）
             <input
               value={serperKey}
               onChange={(e) => setSerperKey(e.target.value)}
@@ -161,7 +194,7 @@ export default function SettingsPage() {
           {test && (
             <div className="mt-4 rounded-lg border border-[#e2e8f0] px-3 py-3">
               <div className="text-[12px] font-medium text-[#334155]">
-                {test.engine === 'google-cse' ? '谷歌官方 API' : 'Serper'}命中 {test.urls?.length || 0} 条
+                {test.engine === 'google-cse' ? '谷歌官方 API' : test.engine === 'serper' ? 'Serper' : '搜索'}命中 {test.urls?.length || 0} 条
               </div>
               <div className="mt-1 truncate text-[11px] text-[#94a3b8]">{test.query}</div>
               <ul className="mt-2 space-y-1">
