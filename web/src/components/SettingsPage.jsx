@@ -98,7 +98,7 @@ export default function SettingsPage() {
           <div className="mt-4 rounded-lg bg-[#f8fafc] px-3 py-2 text-[12px] text-[#475569]">
             {status?.ready
               ? `已接通：${status.cseReady ? `官方 CSE ${status.cseIdMasked || ''}` : `Serper ${status.serperMasked || ''}`}`
-              : '还没接通。不填 Key 时背调仍走必应 / DuckDuckGo，谷歌公式只在浏览器里打开。'}
+              : '还没接通。不填 Key 时背调仍走必应 / DuckDuckGo，结果只显示核到的官网和角色邮箱。'}
           </div>
 
           <label className="mt-4 block text-[12px] text-[#64748b]">
