@@ -50,6 +50,7 @@ async function main() {
     const { db, saveNow, isRfqLead } = await import('./store.js');
     const { applyTextCompanyHints, kybPlanStats, researchPriority } = await import('./pipeline.js');
     const { researchLead, isPersonLikeLead } = await import('./research.js');
+    const { bestNext } = await import('./playbook.js');
     applyTextCompanyHints();
     const limitFlag = args.find((a) => /^\d+$/.test(a));
     const limit = Math.min(Math.max(Number(limitFlag || process.env.KYB_LIMIT || 80), 1), 2000);
@@ -71,7 +72,7 @@ async function main() {
     for (const c of batch) {
       summary.tried += 1;
       try {
-        const report = await researchLead(c, { useAi: false });
+        const report = await researchLead(c, { useAi: false, inferEmail: true });
         c.research = report;
         if (report.website && !c.website) c.website = report.website;
         summary.ok += 1;
@@ -80,7 +81,9 @@ async function main() {
         else summary.gradeC += 1;
         if (report.emails?.length) summary.emails += 1;
         if (report.website) summary.websites += 1;
-        console.log(`[kyb] ${summary.tried}/${batch.length} ${report.kyb?.grade || '?'} ${c.company} emails=${report.emails?.length || 0} site=${report.website || '-'}`);
+        const next = bestNext(c);
+        const mail = (report.emails || []).map((e) => e.email).slice(0, 2).join(',') || '-';
+        console.log(`[kyb] ${summary.tried}/${batch.length} ${report.kyb?.grade || '?'} ${c.company} emails=${report.emails?.length || 0} ${mail} site=${report.website || '-'} next=${next.key}`);
       } catch (err) {
         summary.failed += 1;
         c.research = { status: 'failed', error: String(err.message || err), updatedAt: new Date().toISOString() };
