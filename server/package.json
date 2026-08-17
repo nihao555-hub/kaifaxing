@@ -11,7 +11,9 @@
     "data:backup": "node dataTool.js backup",
     "data:snapshot": "node dataTool.js snapshot",
     "data:recrawl": "node dataTool.js recrawl",
-    "test": "node --test research.test.js pipeline.test.js rfq-ingest.test.js publicRfq.test.js b2bPublic.test.js store.test.js openSources.test.js githubTools.test.js searchDorks.test.js kyb.test.js rfqHints.test.js researchPath.test.js paidSources.test.js context.test.js config.test.js dataPersistence.test.js"
+    "data:push": "node dataTool.js push",
+    "data:pull": "node dataTool.js pull",
+    "test": "node --test research.test.js pipeline.test.js rfq-ingest.test.js publicRfq.test.js b2bPublic.test.js store.test.js openSources.test.js githubTools.test.js searchDorks.test.js kyb.test.js rfqHints.test.js researchPath.test.js paidSources.test.js context.test.js config.test.js dataPersistence.test.js cloudDb.test.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1111.0",
@@ -22,6 +24,7 @@
     "imapflow": "^1.7.1",
     "libphonenumber-js": "^1.13.11",
     "mailparser": "^3.9.15",
+    "mongodb": "^7.5.0",
     "nodemailer": "^6.9.16",
     "tldts": "^7.4.10",
     "whoiser": "^2.0.0-beta.10",

@@ -194,7 +194,26 @@ function compactResearch(research) {
   };
 }
 
-function compactCustomer(customer) {
+export function compactPublicCard(card) {
+  if (!card || typeof card !== 'object') return null;
+  return {
+    rfqId: card.rfqId || '',
+    subject: card.subject || '',
+    buyerName: card.buyerName || '',
+    country: card.country || card.countrySimple || '',
+    quantity: card.quantity || '',
+    quantityUnit: card.quantityUnit || '',
+    openTimeStr: card.openTimeStr || '',
+    postedAt: card.postedAt || '',
+    url: card.url || '',
+    imageUrl: card.imageUrl || '',
+    description: String(card.description || '').slice(0, 800),
+    categoryId: card.categoryId || '',
+    categoryName: card.categoryName || '',
+  };
+}
+
+export function compactCustomer(customer) {
   const row = customer && typeof customer === 'object' ? customer : {};
   return {
     id: row.id,
@@ -205,7 +224,7 @@ function compactCustomer(customer) {
     country: row.country || '',
     timezone: row.timezone || '',
     industry: row.industry || '',
-    painPoints: row.painPoints || '',
+    painPoints: String(row.painPoints || '').slice(0, 1200),
     status: row.status || 'uncontacted',
     source: row.source || '',
     sourceType: row.sourceType || '',
@@ -214,6 +233,7 @@ function compactCustomer(customer) {
     amount: row.amount || 0,
     postedAt: row.postedAt || '',
     postedDate: row.postedDate || '',
+    categoryId: row.categoryId || '',
     categoryName: row.categoryName || '',
     imageUrl: row.imageUrl || '',
     haveAnnexes: Boolean(row.haveAnnexes),
@@ -225,7 +245,7 @@ function compactCustomer(customer) {
     lastActivity: row.lastActivity || '',
     researchPath: row.researchPath || '',
     buyerAlias: row.buyerAlias || '',
-    publicCard: row.publicCard || null,
+    publicCard: compactPublicCard(row.publicCard),
     research: compactResearch(row.research),
   };
 }

@@ -11,7 +11,9 @@
     "data:restore": "npm --prefix server run data:restore",
     "data:backup": "npm --prefix server run data:backup",
     "data:snapshot": "npm --prefix server run data:snapshot",
-    "data:recrawl": "npm --prefix server run data:recrawl"
+    "data:recrawl": "npm --prefix server run data:recrawl",
+    "data:push": "npm --prefix server run data:push",
+    "data:pull": "npm --prefix server run data:pull"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

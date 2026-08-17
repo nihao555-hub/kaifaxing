@@ -9,6 +9,7 @@ import {
   saveSecrets,
   scheduleRemoteBackup,
 } from './dataPersistence.js';
+import { cloudDbReady, scheduleCustomerPush, scheduleStatePush } from './cloudDb.js';
 
 export const db = loadLocalDatabase({
   customers: seedCustomers,
@@ -130,6 +131,32 @@ export function purgeDemoCustomers() {
 let saveTimer = null;
 let saving = false;
 let saveAgain = false;
+const dirtyCustomerIds = new Set();
+
+export function markCustomersDirty(rows = []) {
+  for (const row of rows) {
+    const id = typeof row === 'string' ? row : row?.id;
+    if (id) dirtyCustomerIds.add(id);
+  }
+}
+
+function flushCloudFromDirty() {
+  if (!cloudDbReady()) return;
+  if (dirtyCustomerIds.size) {
+    const want = new Set(dirtyCustomerIds);
+    dirtyCustomerIds.clear();
+    scheduleCustomerPush(db.customers.filter((c) => want.has(c.id)));
+  }
+  scheduleStatePush({
+    threads: db.threads,
+    aiPanel: db.aiPanel,
+    sentLog: db.sentLog,
+    activities: db.activities,
+    settings: db.settings,
+    agent: db.agent,
+    customers: { length: db.customers.length },
+  });
+}
 
 function flushSave() {
   if (saving) {
@@ -143,6 +170,7 @@ function flushSave() {
     fs.writeFileSync(tmp, JSON.stringify(db));
     fs.renameSync(tmp, DB_PATH);
     scheduleRemoteBackup(DB_PATH);
+    flushCloudFromDirty();
   } catch (err) {
     console.error('[store] save failed:', err);
   } finally {

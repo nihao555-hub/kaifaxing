@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config, googleCseReady, googleSearchReady, googleSearchStatus, preferredSearchEngine } from './config.js';
 import { alibabaReady } from './alibaba.js';
-import { db, save, getCustomer, listCustomers, leadFacets, saveSearchSettings } from './store.js';
+import { db, save, getCustomer, listCustomers, leadFacets, saveSearchSettings, markCustomersDirty } from './store.js';
 import { generateEmail, evaluateEmail, suggestSendTime } from './agent.js';
 import { createBatchJob, getJob, listJobs, cancelScheduledFor } from './scheduler.js';
 import { sentToday, logActivity } from './store.js';
@@ -34,6 +34,7 @@ import {
   promoteLeads,
 } from './pipeline.js';
 import { flushRemoteBackup } from './dataPersistence.js';
+import { cloudDbStatus, flushCloudSync, pushCloudDatabase } from './cloudDb.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -66,6 +67,7 @@ app.post('/api/customers', (req, res) => {
     lastActivity: new Date().toISOString().slice(0, 10),
   };
   db.customers.unshift(customer);
+  markCustomersDirty([customer]);
   save();
   logActivity({
     customerId: customer.id,
@@ -90,6 +92,7 @@ app.patch('/api/customers/:id', (req, res) => {
   if (title != null) customer.title = title;
   if (company != null) customer.company = company;
   if (website != null) customer.website = website;
+  markCustomersDirty([customer]);
   save();
   res.json({ customer });
 });
@@ -207,6 +210,19 @@ app.get('/api/search/status', (req, res) => {
       openCorporates: 'https://opencorporates.com/api_accounts/new',
     },
   });
+});
+
+app.get('/api/data/status', async (_req, res) => {
+  try {
+    const cloud = await cloudDbStatus();
+    res.json({
+      local: db.customers.length,
+      cloud,
+      s3Configured: Boolean(process.env.DATA_S3_BUCKET),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/rfq/leads/:id/identify', async (req, res) => {
@@ -554,6 +570,14 @@ async function shutdown(signal) {
   shuttingDown = true;
   console.log(`[OutreachAI] ${signal}: flushing durable backup`);
   server.close();
+  try {
+    await flushCloudSync();
+    if (db.customers.length && process.env.MONGODB_URI) {
+      await pushCloudDatabase(db, { customers: false, state: true });
+    }
+  } catch (error) {
+    console.error('[data] final MongoDB sync failed:', error.message);
+  }
   try {
     await flushRemoteBackup();
   } catch (error) {

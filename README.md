@@ -67,22 +67,21 @@ npm run build && npm start   # 后端 3001 端口同时托管前端构建产物
 
 ## 数据持久化
 
-运行时库是 `server/data/db.json`（已 gitignore）。新环境按这个顺序恢复，避免每次从空库开始：
+16 万条阿里公开询盘不能放进 Git（体积过大，而且会随环境一起丢掉）。**主存储是 MongoDB 云数据库**：
 
-1. **S3 / R2 备份**（可选）：配置 `DATA_S3_*` 后，保存询盘会异步上传 gzip；启动时若本地没有 `db.json` 就拉回来。搜索 Key 存在 `server/data/secrets.json`，不进 Git。
-2. **仓库快照** `server/data/public-rfq.snapshot.json.gz`：公开询盘的精简副本（去掉草稿、发信记录和 API Key），随代码提交。`npm run data:restore` 和 `install:all` 会把它展开成本地库。
-3. 都没有时从空种子库启动。
-
-刷新公开快照（政府招标；阿里公开列表请显式传入源名）：
+1. **MongoDB**（`MONGODB_URI`）：询盘主库。启动时若云端条数多于本地，就拉下来；入库/全量重爬会批量 upsert。免费 Atlas M0（512MB）够用，文档已压缩。
+2. **S3 / R2**（可选）：`db.json` gzip 备份。
+3. **仓库快照** `server/data/public-rfq.snapshot.json.gz`：只有政府招标 + 少量阿里样例，方便没配云库时也能看到界面。
 
 ```bash
-npm run data:recrawl
-npm run data:recrawl -- alibaba_public   # 少量公开卡片，不要整库 16 万条
-npm run data:snapshot                    # 从现有 db.json 重写 gzip
-npm run data:backup                      # 立刻上传 S3/R2
+# 免费建库：https://cloud.mongodb.com/  → Atlas M0 → 网络放行 0.0.0.0/0 → 把连接串写入 MONGODB_URI
+npm run data:restore          # Mongo → S3 → 仓库快照
+npm run data:push             # 把本地询盘推上 Mongo
+npm run data:pull             # 强制从 Mongo 覆盖本地
+npm run data:recrawl -- --full alibaba_public   # 重爬全部公开列表并写入 Mongo（勿提交进 Git）
 ```
 
-完整阿里公开列表有十几万条、体积过大，不要提交进 Git。日常增量用应用内爬取 + S3 备份。
+没有 `MONGODB_URI` 时，全量爬取只写在这台机器的 `server/data/db.json`，换环境仍会丢。
 
 ## 配置
 
@@ -107,6 +106,7 @@ SMTP、AI、搜索 Key **只从环境变量或本地 `secrets.json` 读取**，�
 | `PIPELINE_DAILY_HOUR` | 北京时间每日拉新询盘的整点 | 7 |
 | `PIPELINE_REFRESH_HOURS` | 当天已同步后再扫一轮的间隔（小时） | 6 |
 | `DATA_S3_BUCKET` / `DATA_S3_ENDPOINT` / `DATA_S3_ACCESS_KEY_ID` / `DATA_S3_SECRET_ACCESS_KEY` | 可选的运行时库备份（AWS S3 / Cloudflare R2 / MinIO） | 空 |
+| `MONGODB_URI` / `MONGODB_DB` | 询盘主库（MongoDB Atlas / 任何 Mongo 兼容库） | 空 / outreachai |
 
 ## 目录结构
 

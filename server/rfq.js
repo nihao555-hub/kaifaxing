@@ -1,4 +1,4 @@
-import { db, save, logActivity } from './store.js';
+import { db, save, logActivity, markCustomersDirty } from './store.js';
 import { config } from './config.js';
 import { alibabaReady, searchAlibaba } from './alibaba.js';
 import { searchAlibabaPublic, crawlAlibabaPublic, alibabaCrawlProgress, ALIBABA_PUBLIC_FIELDS, PUBLIC_SINCE_DEFAULT } from './publicRfq.js';
@@ -586,6 +586,7 @@ export function importRfqItems(items = [], { quiet = false, silent = false, pers
       });
     }
   }
+  markCustomersDirty(created);
   if (quiet && !silent && created.length) {
     const bySource = {};
     for (const c of created) bySource[c.source || '未知'] = (bySource[c.source || '未知'] || 0) + 1;
@@ -622,6 +623,7 @@ export async function crawlAllAndImport({
         alibabaCrawlProgress.created = (alibabaCrawlProgress.created || 0) + added.length;
         if ((alibabaCrawlProgress.created || 0) % 800 < added.length) save();
         if ((alibabaCrawlProgress.created || 0) % 2000 < added.length) {
+          console.log(`[alibaba] local=${db.customers.length} created=${alibabaCrawlProgress.created} pages=${alibabaCrawlProgress.pagesFetched} slice=${alibabaCrawlProgress.slice || ''}`);
           logActivity({
             action: '阿里公开列表',
             detail: `已入库 ${alibabaCrawlProgress.created} 条（${alibabaCrawlProgress.slice || ''} 第 ${alibabaCrawlProgress.page} 页）`,

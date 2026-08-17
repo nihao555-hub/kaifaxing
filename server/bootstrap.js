@@ -1,13 +1,17 @@
 import { loadDotEnv } from './loadEnv.js';
-import { restoreRemoteBackup } from './dataPersistence.js';
+import { hydrateDurableDatabase } from './hydrate.js';
 
 loadDotEnv();
 
 try {
-  const result = await restoreRemoteBackup();
-  if (result.restored) console.log(`[data] restored ${result.restored} records from remote backup`);
+  const result = await hydrateDurableDatabase();
+  if (result.restored) {
+    console.log(`[data] restored ${result.restored} records from ${result.source}`);
+  } else if (result.source) {
+    console.log(`[data] hydrate source: ${result.source}`);
+  }
 } catch (error) {
-  console.warn(`[data] remote restore unavailable: ${error.message}`);
+  console.warn(`[data] durable restore unavailable: ${error.message}`);
 }
 
 await import('./index.js');
