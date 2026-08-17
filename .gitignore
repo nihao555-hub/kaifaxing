@@ -7,6 +7,8 @@ server/data/db.json.tmp
 server/data/db.json.gz
 server/data/.oss-upload-*
 server/data/secrets.json
+server/data/yellowpages-round.json
+server/data/guess-sample-report.json
 .env
 **/.env
 !.env.example
