@@ -465,10 +465,17 @@ export default function LeadsPage({ onGoOutreach }) {
                 {' · '}正文线索 {(pipeline.kybPlan.clues || 0).toLocaleString()}
                 {' · '}型号交叉 {(pipeline.kybPlan.crosspost || 0).toLocaleString()}
                 {' · '}需补主体 {(pipeline.kybPlan.import || 0).toLocaleString()}
-                。阿里公开列表没有邮箱；只有昵称的卡核不到公司，不会猜 Gmail。
+                。阿里公开列表没有邮箱；外贸通同款情报要先在国际站报价，再导出 buyer_company_name / buyer_email 按询盘 ID 回填。
                 政府招标 {(pipeline.kybPlan.government || 0).toLocaleString()}
                 {' · '}正文已抽出公司名 {(pipeline.kybPlan.textHint || 0).toLocaleString()}
                 {' · '}已有角色邮箱 {(pipeline.kybPlan.hasEmail || 0).toLocaleString()}
+                {pipeline.kybPlan.alibaba && (
+                  <>
+                    {' · '}阿里卡 {(pipeline.kybPlan.alibaba.total || 0).toLocaleString()}
+                    （后台已解锁 {(pipeline.kybPlan.alibaba.sellerUnlocked || 0).toLocaleString()}
+                    ，重复买家 {(pipeline.kybPlan.alibaba.repeatBuyers || 0).toLocaleString()}）
+                  </>
+                )}
               </p>
             )}
           </div>
@@ -876,6 +883,7 @@ export default function LeadsPage({ onGoOutreach }) {
                   tab={drawerTab}
                   customer={customer}
                   research={research}
+                  dossier={detail?.dossier}
                   pickedEmail={pickedEmail}
                   setPickedEmail={setPickedEmail}
                   onIdentify={identifyCompany}
@@ -1046,7 +1054,7 @@ function AnnexNote({ haveAnnexes = false }) {
   return <p className="text-[11px] text-amber-700">这条列表标记有附件，但附件不在公开列表里。</p>;
 }
 
-function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail, onIdentify, identifying = false }) {
+function DrawerBody({ tab, customer, research, dossier, pickedEmail, setPickedEmail, onIdentify, identifying = false }) {
   const address = research?.address || factValue(research, /注册地址|总部|地址/);
   const industry = research?.industry || factValue(research, /行业/) || customer.industry;
   const size = research?.employees || factValue(research, /员工规模/);
@@ -1055,18 +1063,32 @@ function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail, onId
 
   if (tab === 'basic') {
     return (
-      <dl>
-        <InfoRow label="公司" value={customer.company || customer.name} />
-        <InfoRow label="国家" value={countryLabel(customer.country)} />
-        <InfoRow label="发布日期" value={customer.postedDate || (customer.postedAt || '').slice(0, 10)} />
-        <InfoRow label="采购品类" value={customer.categoryName} />
-        <InfoRow label="采购产品" value={customer.product} />
-        <InfoRow label="官网" value={website} href={website} />
-        <InfoRow label="法人名" value={research?.legalName && research.legalName !== (customer.company || customer.name) ? research.legalName : ''} />
-        <InfoRow label="行业" value={industry} />
-        <InfoRow label="地址" value={address} />
-        <InfoRow label="员工规模" value={size} />
-      </dl>
+      <div className="space-y-4">
+        {dossier && (
+          <div className="rounded-lg border border-[#e8edf4] bg-[#f8fafc] px-3 py-2.5 text-[12px] leading-relaxed text-[#475569]">
+            <div className="font-medium text-[#334155]">外贸通级档案 · {dossier.platform}</div>
+            <p className="mt-1">{dossier.next}</p>
+            {dossier.rfqCount > 1 && (
+              <p className="mt-1 text-[11px] text-[#64748b]">同一显示名还有 {dossier.rfqCount - 1} 条询盘</p>
+            )}
+          </div>
+        )}
+        <dl>
+          <InfoRow label="显示名" value={dossier?.displayName || customer.buyerAlias || customer.name} />
+          <InfoRow label="公司" value={dossier?.legalName || customer.company || customer.name} />
+          <InfoRow label="国家" value={countryLabel(customer.country)} />
+          <InfoRow label="发布日期" value={customer.postedDate || (customer.postedAt || '').slice(0, 10)} />
+          <InfoRow label="采购品类" value={customer.categoryName} />
+          <InfoRow label="采购产品" value={customer.product} />
+          <InfoRow label="官网" value={dossier?.website || website} href={dossier?.website || website} />
+          <InfoRow label="登记号" value={dossier?.regNo} />
+          <InfoRow label="LEI" value={dossier?.lei} />
+          <InfoRow label="行业" value={industry} />
+          <InfoRow label="地址" value={dossier?.address || address} />
+          <InfoRow label="员工规模" value={dossier?.employees || size} />
+          <InfoRow label="联系邮箱" value={dossier?.email || customer.email} />
+        </dl>
+      </div>
     );
   }
 

@@ -14,6 +14,7 @@ import { listSources, searchRfq, importRfqItems, ingestCommercial, crawlAlibabaP
 import { alibabaCrawlProgress, requestCrawlAbort } from './publicRfq.js';
 import { isPlausibleEmail, isPersonLikeLead } from './research.js';
 import { imageSearchLinks } from './rfqHints.js';
+import { alibabaSiblings, buildAlibabaDossier, isAlibabaLead } from './alibabaIntel.js';
 import { buildSearchLinks, rfqProductTerms, searchOfficialJson, parseGoogleCse, parseSerper } from './searchDorks.js';
 import { GITHUB_TOOLS } from './githubTools.js';
 import { paidSourceStatus } from './paidSources.js';
@@ -177,9 +178,10 @@ app.post('/api/rfq/import', (req, res) => {
 });
 app.post('/api/rfq/ingest', (req, res) => {
   try {
-    const { items, created } = ingestCommercial(req.body || {});
-    if (created.length) enqueueResearch(created);
-    res.json({ accepted: items.length, created });
+    const { items, created, updated, propagated } = ingestCommercial(req.body || {});
+    const toQueue = [...created, ...(updated || [])];
+    if (toQueue.length) enqueueResearch(toQueue);
+    res.json({ accepted: items.length, created, updated: (updated || []).length, propagated });
   } catch (err) {
     res.status(400).json({ error: `导入失败：${err.message}` });
   }
@@ -327,6 +329,9 @@ app.get('/api/rfq/leads/:id', (req, res) => {
     imageSearchLinks: imageSearchLinks(customer.imageUrl),
     searchStatus: googleSearchStatus(),
     path: customer.research?.path || null,
+    dossier: isAlibabaLead(customer)
+      ? buildAlibabaDossier(customer, { siblings: alibabaSiblings(db.customers, customer), research: customer.research })
+      : null,
   });
 });
 

@@ -237,9 +237,10 @@ export default function ImportRfqModal({ onClose, onImported }) {
 
           {tab === 'commercial' && (
             <div className="mb-4">
-              <div className="mb-1 text-[12px] font-semibold text-slate-700">付费聚合 / 卖家后台导出 → JSON 导入</div>
+              <div className="mb-1 text-[12px] font-semibold text-slate-700">阿里后台报价导出 → 按询盘 ID 回填</div>
               <p className="mb-2 text-[11px] text-slate-500">
-                适用 TendersOnTime、Tendersinfo、dgMarket、BidNet、Mercell，或中国制造网/环球资源后台导出。字段：company / name / email / country / painPoints / url。
+                公开列表没有邮箱。外贸通能拿到公司和联系方式，是因为卖家先报价，阿里才在后台打开 buyer_company_name / buyer_email。
+                把后台导出转成下面这种 JSON，按 rfq_id 回填到已入库的公开卡，同一买家的其它询盘会带上公司名。不要登录爬 Buyer profile。
               </p>
               <textarea
                 value={ingestText}

@@ -55,10 +55,11 @@ describe('commercial ingest', () => {
   it('reads Alibaba seller-backend company columns', () => {
     const items = parseIngestPayload({
       source: '阿里国际站后台导出',
-      items: [{ buyer_company_name: 'Sahel Tools Ltd', buyer_email: 'buy@sahel.example', Country: 'Burkina Faso' }],
+      items: [{ buyer_company_name: 'Sahel Tools Ltd', buyer_email: 'buy@sahel.example', Country: 'Burkina Faso', rfq_id: '1684056292' }],
     });
     assert.equal(items[0].company, 'Sahel Tools Ltd');
     assert.equal(items[0].email, 'buy@sahel.example');
+    assert.equal(items[0].awardId, '1684056292');
   });
 
   it('reads Apollo / customs-style paid export columns', () => {

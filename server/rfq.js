@@ -7,6 +7,7 @@ import { parseAlibabaExportRow } from './researchPath.js';
 import { normalizePaidExportRow } from './paidSources.js';
 import { compactPublicCard } from './dataPersistence.js';
 import { cleanOfficialBuyerName } from './research.js';
+import { findAlibabaMatch, applySellerExportToLead, isAlibabaLead, propagateAlibabaIdentity } from './alibabaIntel.js';
 
 // 聚合公开 RFQ / 采购数据源：一次请求并行打多个官方接口，结果归一化后合并。
 // 只走开放 API，不爬私人邮箱。某个源失败不影响其他源。
@@ -547,8 +548,19 @@ function alreadyImported(it) {
 
 export function importRfqItems(items = [], { quiet = false, silent = false, persist = true } = {}) {
   const created = [];
+  const updated = [];
   for (const it of items) {
     if (ownInbox(it.email)) continue;
+    const existing = (it.email || it.company) && isAlibabaLead(it)
+      ? findAlibabaMatch(db.customers, it)
+      : null;
+    if (existing && isAlibabaLead(existing)) {
+      if (applySellerExportToLead(existing, it)) {
+        updated.push(existing);
+        rememberImported(existing);
+      }
+      continue;
+    }
     if (alreadyImported(it)) continue;
     const customer = {
       id: `rfq${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -590,16 +602,17 @@ export function importRfqItems(items = [], { quiet = false, silent = false, pers
       });
     }
   }
-  markCustomersDirty(created);
-  if (quiet && !silent && created.length) {
+  markCustomersDirty([...created, ...updated]);
+  if (quiet && !silent && (created.length || updated.length)) {
     const bySource = {};
     for (const c of created) bySource[c.source || '未知'] = (bySource[c.source || '未知'] || 0) + 1;
     logActivity({
       action: 'RFQ 批量入库',
-      detail: `新入库 ${created.length} 条：${Object.entries(bySource).map(([k, v]) => `${k} ${v}`).join('，')}`,
+      detail: `新入库 ${created.length} 条${updated.length ? `，回填阿里后台 ${updated.length} 条` : ''}：${Object.entries(bySource).map(([k, v]) => `${k} ${v}`).join('，')}`,
     });
   }
-  if (persist) save();
+  if (persist && (created.length || updated.length)) save();
+  created.updated = updated;
   return created;
 }
 
@@ -746,7 +759,10 @@ export function parseIngestPayload(body = {}) {
 
 export function ingestCommercial(body = {}) {
   const items = parseIngestPayload(body);
-  return { items, created: importRfqItems(items) };
+  const created = importRfqItems(items, { persist: false });
+  const cluster = propagateAlibabaIdentity(db.customers);
+  if (created.length || (created.updated || []).length || cluster.propagated) save();
+  return { items, created, updated: created.updated || [], accepted: items.length, propagated: cluster.propagated };
 }
 
 export { crawlAlibabaPublic, ALIBABA_PUBLIC_FIELDS, PUBLIC_SINCE_DEFAULT };

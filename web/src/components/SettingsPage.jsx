@@ -276,7 +276,7 @@ export default function SettingsPage() {
             这些这里都不做。
           </p>
           <p className="mt-2 text-[12px] leading-relaxed text-[#64748b]">
-            符合要求的背调必须先有可核验主体。公开源三条路：正文 Ltd/LLC、型号交叉检索同款询盘（不搜人名）、阿里后台导出的 buyer_company_name。缩略图只给人眼以图搜图。
+            阿里询盘对齐外贸通的办法：先在国际站报价，再导出 buyer_company_name / buyer_email，按询盘 ID 回填；然后才跑工商/官网/角色邮箱。公开源另外两条路：正文 Ltd/LLC、型号交叉检索。缩略图只给人眼以图搜图。
             官方
             {' '}
             <a className="text-primary hover:underline" href="https://open.taobao.com/" target="_blank" rel="noreferrer">alibaba.icbu.rfq.search</a>

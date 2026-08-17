@@ -7,6 +7,7 @@ import { extractRfqClues, rfqCorpus, classifyResearchPath } from './researchPath
 import { clusterDemandKeywords, searchDemandPeers } from './demandPeers.js';
 import { VERIFIED_SOURCES } from './openSources.js';
 import { isForwarderName, isOutreachEmail } from './kyb.js';
+import { summarizeAlibabaPlan, propagateAlibabaIdentity } from './alibabaIntel.js';
 
 export function researchPriority(customer = {}) {
   const src = String(customer.source || '');
@@ -147,6 +148,8 @@ export function applyTextCompanyHints() {
       if (stampLeadPath(c).changed) dirty = true;
     }
   }
+  const cluster = propagateAlibabaIdentity(db.customers);
+  if (cluster.propagated) dirty = true;
   if (promoted || dirty) save();
   if (promoted || dirty) invalidateKybPlan();
   return promoted;
@@ -196,6 +199,7 @@ export function summarizeKybPlan(customers = []) {
     textHint: 0,
     person: 0,
     live: 0,
+    alibaba: null,
   };
   for (const c of customers) {
     if (!isRfqLead(c)) continue;
@@ -211,6 +215,7 @@ export function summarizeKybPlan(customers = []) {
     else counts.import += 1;
   }
   counts.live = counts.auto + counts.clues + counts.crosspost;
+  counts.alibaba = summarizeAlibabaPlan(customers);
   return counts;
 }
 
@@ -735,7 +740,15 @@ export async function promoteLeads(ids = [], { researchLimit = 6 } = {}) {
         });
       }
     }
-    if (customer.research?.kyb?.grade === 'C' || (customer.research?.kyb?.sanctions || []).length) {
+    if ((customer.research?.kyb?.sanctions || []).length) {
+      skipped.push({
+        id,
+        company: customer.company || customer.name,
+        reason: customer.research.kyb?.nextAction || '制裁名单命中，不能录入开发信',
+      });
+      continue;
+    }
+    if (customer.research?.kyb?.grade === 'C' && customer.contactSource !== 'alibaba_seller') {
       skipped.push({
         id,
         company: customer.company || customer.name,
@@ -756,7 +769,8 @@ export async function promoteLeads(ids = [], { researchLimit = 6 } = {}) {
       skipped.push({ id, company: customer.company || customer.name, reason: '不能用自己的发件箱当客户' });
       continue;
     }
-    if (/@(gmail|yahoo|ymail|hotmail|outlook|live\.com|icloud|proton|qq\.com|163\.com|126\.com|mail\.ru)/i.test(email)) {
+    const sellerUnlocked = customer.contactSource === 'alibaba_seller';
+    if (/@(gmail|yahoo|ymail|hotmail|outlook|live\.com|icloud|proton|qq\.com|163\.com|126\.com|mail\.ru)/i.test(email) && !sellerUnlocked) {
       skipped.push({ id, company: customer.company || customer.name, reason: '私人邮箱不能进开发信' });
       continue;
     }
@@ -764,7 +778,7 @@ export async function promoteLeads(ids = [], { researchLimit = 6 } = {}) {
       skipped.push({ id, company: customer.company || customer.name, reason: '撞名域名，不是这家主体的官网邮箱' });
       continue;
     }
-    if (customer.research?.kyb?.grade && customer.research.kyb.grade !== 'A') {
+    if (customer.research?.kyb?.grade && customer.research.kyb.grade !== 'A' && !sellerUnlocked) {
       skipped.push({ id, company: customer.company || customer.name, reason: '开发信只收录 A 级可发信主体' });
       continue;
     }
