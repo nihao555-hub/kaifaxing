@@ -12,7 +12,7 @@ export const PLAYBOOK_STEPS = [
   {
     key: 'kyb',
     title: '再核主体和官网',
-    detail: '公开登记库 + 搜索公式定位官网。制裁命中就停。',
+    detail: '公开登记库 + 黄页名录 + 搜索公式定位官网。制裁命中就停。',
   },
   {
     key: 'email',
@@ -58,7 +58,7 @@ export function bestNext(customer = {}, { clues } = {}) {
       title: '按公司名自动背调',
       next: found.companyHint
         ? `已有「${found.companyHint}」。走公开库和搜索公式，挖官网角色箱。`
-        : '有公司全称。走公开库和搜索公式，挖官网角色箱。',
+        : '有公司全称。走公开库、黄页名录和搜索公式，挖官网角色箱。',
     };
   }
   if (found.websites[0] || found.emails[0]) {

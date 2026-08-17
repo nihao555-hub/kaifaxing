@@ -548,7 +548,7 @@ export default function LeadsPage({ onGoOutreach }) {
           <div>
             <span className="font-medium text-[#334155]">2. 再核主体和官网</span>
             {' '}
-            公开登记库 + 搜索公式定位官网。制裁命中就停。
+            公开登记库 + 黄页名录 + 搜索公式定位官网。制裁命中就停。
           </div>
           <div>
             <span className="font-medium text-[#334155]">3. 只收角色箱</span>

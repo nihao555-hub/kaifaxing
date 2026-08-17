@@ -53,6 +53,7 @@ import { findTradeTraces } from './tradeTraces.js';
 import { companyFromBuyerName } from './rfqHints.js';
 import { probePeopleCompany } from './peopleProbe.js';
 import { inferAndVerifyEmails } from './inferEmail.js';
+import { isDirectoryHost, parseDirectoryListing } from './yellowPages.js';
 
 const UA = 'OutreachAI/1.0 (public due-diligence; +https://github.com/nihao555-hub/kaifaxing)';
 
@@ -383,7 +384,10 @@ function pageTitle(html) {
 export function selectSearchContactUrls(urls, { max = 5 } = {}) {
   return [...new Set((urls || []).filter(Boolean))]
     .filter((u) => !/\.pdf(\?|$)/i.test(u))
-    .sort((a, b) => scoreResearchUrl(b) - scoreResearchUrl(a))
+    .sort((a, b) => {
+      const boost = (u) => (isDirectoryHost(u) ? 5 : 0) + scoreResearchUrl(u);
+      return boost(b) - boost(a);
+    })
     .slice(0, max);
 }
 
@@ -802,6 +806,37 @@ async function resolveEntity(company, country = '') {
   return { website, legalName, extract, facts: facts.filter((f) => f.value), sources, relatedNote };
 }
 
+async function harvestDirectoryHits(urls, company, country) {
+  const hits = [...new Set((urls || []).filter(isDirectoryHost))].slice(0, 3);
+  const out = { website: '', emails: [], phones: [], pages: [], source: '', pageUrl: '' };
+  for (const url of hits) {
+    const r = await fetchText(url, { accept: 'text/html', timeout: 10000 });
+    if (!r.ok || !r.text) continue;
+    if (!pageMentionsCompany(r.text, company, { country, pageUrl: r.url })) continue;
+    const listing = parseDirectoryListing(r.text, { pageUrl: r.url });
+    out.pages.push({ url: r.url, title: pageTitle(r.text) || listing.source });
+    if (listing.website && !out.website) {
+      out.website = listing.website;
+      out.source = listing.source;
+      out.pageUrl = r.url;
+    }
+    for (const email of listing.emails) {
+      if (!emailBelongsToCompany(email, listing.website, company)) continue;
+      out.emails.push({
+        email,
+        role: email.split('@')[0],
+        score: scoreEmail(email, listing.website),
+        source: listing.source,
+        pages: [r.url],
+      });
+    }
+    out.phones.push(...listing.phones);
+  }
+  out.emails = mergeEmailLists([], out.emails);
+  out.phones = [...new Set(out.phones)].slice(0, 8);
+  return out;
+}
+
 async function harvestContacts(website, company, { extraUrls = [], country = '' } = {}) {
   if (!website) return { emails: [], phones: [], pages: [], verified: false };
   let homeRes = { ok: false, status: 0, url: website, text: '', error: '未请求' };
@@ -914,11 +949,29 @@ async function harvestSearchContacts({ urls = [], snippetEmails = [], company, w
     const r = await fetchText(url, { accept: 'text/html', timeout: 10000 });
     if (!r.ok || !r.text) continue;
     if (isAssetUrl(r.url) || !/<html|mailto:|contact|@/i.test(r.text.slice(0, 4000))) continue;
+    const directory = isDirectoryHost(r.url);
+    if (directory) {
+      const listing = parseDirectoryListing(r.text, { pageUrl: r.url });
+      pages.push({ url: r.url, title: pageTitle(r.text) || listing.source || url });
+      for (const email of listing.emails) {
+        if (!emailBelongsToCompany(email, listing.website || host, company)) continue;
+        emails.push({
+          email,
+          role: email.split('@')[0],
+          score: scoreEmail(email, listing.website || host),
+          source: listing.source,
+          pages: [r.url],
+        });
+      }
+      phones.push(...listing.phones);
+      continue;
+    }
     const sameHost = host ? sameRegistrableHost(r.url, host) : false;
     if (!sameHost && !pageMentionsCompany(r.text, company, { country: '', pageUrl: r.url })) continue;
     pages.push({ url: r.url, title: pageTitle(r.text) || url });
     let pageHost = host;
     try { pageHost = host || new URL(r.url).hostname; } catch { /* ignore */ }
+    if (isDirectoryHost(pageHost)) pageHost = host;
     for (const item of extractEmails(r.text, { websiteHost: pageHost })) {
       if (!emailBelongsToCompany(item.email, pageHost, company)) continue;
       emails.push({ ...item, source: '搜索结果页', pages: [r.url] });
@@ -1131,7 +1184,17 @@ export async function researchLead(customer, { useAi = true, peopleProbe = false
       product: productTerms,
     });
     notes.push(...search.notes);
-    if (search.officialGuess && !website && hostLooksLikeCompany(search.officialGuess, legalName || company)) {
+    let ypHit = { website: '', emails: [], phones: [], pages: [], source: '' };
+    if (!website) {
+      ypHit = await harvestDirectoryHits(search.urls, legalName || company, customer.country);
+      if (ypHit.website) {
+        website = ypHit.website;
+        facts.push({ label: '黄页官网', value: ypHit.website, source: ypHit.source || '黄页' });
+        notes.push(`${ypHit.source || '黄页'} 给出官网 ${ypHit.website}。名录站本身不当官网，接着核这个域名。`);
+      }
+      for (const p of ypHit.pages) sources.push({ title: p.title || '黄页', url: p.url });
+    }
+    if (search.officialGuess && !website && hostLooksLikeCompany(search.officialGuess, legalName || company) && !isDirectoryHost(search.officialGuess)) {
       website = search.officialGuess;
     }
     for (const it of (search.items || []).slice(0, 8)) {
@@ -1159,7 +1222,7 @@ export async function researchLead(customer, { useAi = true, peopleProbe = false
       ];
       for (const guess of guesses) {
         if (openWebsite && guess === openWebsite) continue;
-        if (COLLISION_HOST_RE.test(guess) || (!hostLooksLikeCompany(guess, legalName || company) && !/\.(gov|edu|mil)(\.|$)|(\.ac\.|\.go\.)/i.test(guess))) {
+        if (isDirectoryHost(guess) || COLLISION_HOST_RE.test(guess) || (!hostLooksLikeCompany(guess, legalName || company) && !/\.(gov|edu|mil)(\.|$)|(\.ac\.|\.go\.)/i.test(guess))) {
           continue;
         }
         const probe = await harvestContacts(guess, legalName || company, { extraUrls: search.urls, country: customer.country });
@@ -1218,17 +1281,21 @@ export async function researchLead(customer, { useAi = true, peopleProbe = false
       if (fromSearch.emails.length) notes.push(`搜索引擎挖到角色邮箱：${fromSearch.emails.map((e) => e.email).join('、')}`);
     }
 
-    harvestedTools = { ...(harvested.tools || {}), searchDorks: Boolean(harvested.tools?.searchDorks || search.urls.length) };
+    harvestedTools = {
+      ...(harvested.tools || {}),
+      searchDorks: Boolean(harvested.tools?.searchDorks || search.urls.length),
+      yellowPages: Boolean(ypHit.pages.length),
+    };
     if (harvested.website && (harvested.verified || openWebsite)) website = harvested.website;
-    emails = harvested.emails || [];
+    emails = mergeEmailLists(harvested.emails || [], ypHit.emails);
     siteSocials = harvested.socials || [];
     siteOfficers = harvested.officers || [];
     const wikiPhones = facts.filter((f) => f.label === '公开电话').map((f) => f.value);
-    phones = [...new Set([...(harvested.phones || []), ...snippetPhones, ...wikiPhones])].slice(0, 8);
+    phones = [...new Set([...(harvested.phones || []), ...ypHit.phones, ...snippetPhones, ...wikiPhones])].slice(0, 8);
     if (phones.length && !facts.some((f) => f.label === '公开电话')) {
-      facts.push({ label: '公开电话', value: phones.join(' · '), source: '搜索摘要' });
+      facts.push({ label: '公开电话', value: phones.join(' · '), source: ypHit.phones.length ? (ypHit.source || '黄页') : '搜索摘要' });
     }
-    pages = harvested.pages || [];
+    pages = [...(harvested.pages || []), ...ypHit.pages.filter((p) => !(harvested.pages || []).some((x) => x.url === p.url))];
     if (inferEmail && website) {
       inferred = await inferAndVerifyEmails({
         website,

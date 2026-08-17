@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import { config, googleCseReady, serperReady, preferredSearchEngine, officialSearchReady } from './config.js';
+import { isDirectoryHost, yellowPagesDorks } from './yellowPages.js';
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -220,6 +221,8 @@ export function researchDorks(company, { website, country, product } = {}) {
     out.push(place ? `${q} ${place} (official website OR homepage OR contact)` : `${q} (official website OR homepage OR contact)`);
     if (place) out.push(`${q} ${place} (contact OR email)`);
     if (tld) out.push(`${q} site:.${tld} (contact OR website)`);
+    const yp = yellowPagesDorks(company, country);
+    if (yp.length) out.splice(1, 0, ...yp.slice(0, 2));
     if (productClause && place) out.push(`${q} ${place} ${productClause} (contact OR email)`);
     if (!place) out.push(`${q} (contact OR "contact us" OR email)`);
   }
@@ -355,6 +358,7 @@ export function scoreResearchUrl(url) {
   const u = String(url).toLowerCase();
   let s = 1;
   if (/contact|impressum|kontakt|procurement|purchasing|tender|rfq|enquiry|inquiry/i.test(u)) s += 4;
+  if (isDirectoryHost(u)) s += 3;
   if (/about|official|company|profile/i.test(u)) s += 2;
   if (/\.pdf(\?|$)/i.test(u)) s += 1;
   try {
@@ -745,6 +749,7 @@ export function pickOfficialSite(urls, company, items = [], { country } = {}) {
         if (hostFitsCountry(u, country)) s += 8;
         if (placeWords.some((w) => w.length >= 3 && (title.includes(w) || desc.includes(w) || host.includes(w.replace(/\s+/g, ''))))) s += 4;
         if (isEncyclopediaHost(host)) s -= 10;
+        if (isDirectoryHost(host)) s -= 20;
         const shortBrand = tokens.filter((t) => t.length <= 4 && !WEAK_TOKENS.has(t));
         if (country && shortBrand.length && !hostFitsCountry(u, country)
           && !placeWords.some((w) => w.length >= 3 && (title.includes(w) || desc.includes(w)))) {

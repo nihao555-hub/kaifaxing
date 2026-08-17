@@ -1,0 +1,279 @@
+/** 公开企业黄页。只查有法定名的主体，不搜买家昵称，不把名录站当成官网。 */
+import * as cheerio from 'cheerio';
+
+const LOCAL = {
+  de: [
+    { host: 'gelbeseiten.de', name: 'Gelbe Seiten' },
+    { host: 'northdata.de', name: 'North Data' },
+  ],
+  at: [{ host: 'herold.at', name: 'Herold' }],
+  ch: [{ host: 'local.ch', name: 'local.ch' }],
+  fr: [{ host: 'pagesjaunes.fr', name: 'PagesJaunes' }],
+  uk: [{ host: 'yell.com', name: 'Yell' }],
+  gb: [{ host: 'yell.com', name: 'Yell' }],
+  us: [{ host: 'yellowpages.com', name: 'Yellow Pages' }],
+  ca: [{ host: 'yellowpages.ca', name: 'Yellow Pages' }],
+  au: [{ host: 'yellowpages.com.au', name: 'Yellow Pages' }],
+  ie: [{ host: 'goldenpages.ie', name: 'Golden Pages' }],
+  nl: [{ host: 'detelefoongids.nl', name: 'De Telefoongids' }],
+  be: [{ host: 'goudengids.be', name: 'Gouden Gids' }],
+  es: [{ host: 'paginasamarillas.es', name: 'Páginas Amarillas' }],
+  it: [{ host: 'paginegialle.it', name: 'PagineGialle' }],
+  pl: [{ host: 'pkt.pl', name: 'Panorama Firm' }],
+  cz: [{ host: 'zlatestranky.cz', name: 'Zlaté stránky' }],
+  fi: [{ host: 'finder.fi', name: 'Finder' }],
+  se: [{ host: 'eniro.se', name: 'Eniro' }],
+  no: [{ host: 'gulesider.no', name: 'Gule Sider' }],
+  dk: [{ host: 'degulesider.dk', name: 'De Gule Sider' }],
+  pt: [{ host: 'pai.pt', name: 'Páginas Amarelas' }],
+  ae: [{ host: 'yellowpages.ae', name: 'Yellow Pages UAE' }],
+  in: [{ host: 'justdial.com', name: 'Justdial' }],
+  sg: [{ host: 'yellowpages.com.sg', name: 'Yellow Pages' }],
+  my: [{ host: 'yellowpages.com.my', name: 'Yellow Pages' }],
+  za: [{ host: 'brabys.com', name: 'Brabys' }],
+  mx: [{ host: 'seccionamarilla.com.mx', name: 'Sección Amarilla' }],
+  br: [{ host: 'guiamais.com.br', name: 'GuiaMais' }],
+  jp: [{ host: 'itp.ne.jp', name: 'iタウンページ' }],
+};
+
+const COUNTRY_TO_TLD = {
+  germany: 'de', deutschland: 'de', 德国: 'de',
+  austria: 'at', österreich: 'at', 奥地利: 'at',
+  switzerland: 'ch', 瑞士: 'ch',
+  france: 'fr', 法国: 'fr',
+  'united kingdom': 'uk', britain: 'uk', 英国: 'uk',
+  'united states': 'us', usa: 'us', 美国: 'us',
+  canada: 'ca', 加拿大: 'ca',
+  australia: 'au', 澳大利亚: 'au',
+  ireland: 'ie', 爱尔兰: 'ie',
+  netherlands: 'nl', holland: 'nl', 荷兰: 'nl',
+  belgium: 'be', 比利时: 'be',
+  spain: 'es', 西班牙: 'es',
+  italy: 'it', 意大利: 'it',
+  poland: 'pl', 波兰: 'pl',
+  'czech republic': 'cz', czechia: 'cz', 捷克: 'cz',
+  finland: 'fi', 芬兰: 'fi',
+  sweden: 'se', 瑞典: 'se',
+  norway: 'no', 挪威: 'no',
+  denmark: 'dk', 丹麦: 'dk',
+  portugal: 'pt', 葡萄牙: 'pt',
+  'united arab emirates': 'ae', uae: 'ae', 阿联酋: 'ae',
+  india: 'in', 印度: 'in',
+  singapore: 'sg', 新加坡: 'sg',
+  malaysia: 'my', 马来西亚: 'my',
+  'south africa': 'za', 南非: 'za',
+  mexico: 'mx', 墨西哥: 'mx',
+  brazil: 'br', 巴西: 'br',
+  japan: 'jp', 日本: 'jp',
+};
+
+const GLOBAL = [
+  { host: 'europages.com', name: 'Europages' },
+  { host: 'europages.co.uk', name: 'Europages' },
+];
+
+const EXTRA_DIRECTORY_HOSTS = [
+  '11880.com',
+  'dasoertliche.de',
+  'webvalid.de',
+  'unternehmen24.info',
+  'online-handelsregister.de',
+  'handelsregister.de',
+  'unternehmensregister.de',
+  'bundesanzeiger.de',
+  'northdata.com',
+  'northdata.de',
+  'firmenwissen.de',
+  'dnb.com',
+  'bloomberg.com',
+  'opencorporates.com',
+  'kompass.com',
+  'moneyhouse.ch',
+  'creditsafe.com',
+  'peoplecheck.de',
+];
+
+const SOCIAL_OR_JUNK = /(?:^|\.)(facebook|instagram|linkedin|twitter|x\.com|youtube|tiktok|pinterest|wikipedia|google|apple|microsoft|bing)\./i;
+const EMAIL_RE = /[a-zA-Z0-9][a-zA-Z0-9._%+-]{0,63}@[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,24}/g;
+
+const ALL_HOSTS = [
+  ...Object.values(LOCAL).flat(),
+  ...GLOBAL,
+  ...EXTRA_DIRECTORY_HOSTS.map((host) => ({ host, name: host })),
+];
+
+const HOST_SET = new Set(ALL_HOSTS.map((d) => d.host.replace(/^www\./, '')));
+
+export function directoryTld(country) {
+  const key = String(country || '').trim().toLowerCase();
+  if (!key) return '';
+  if (LOCAL[key]) return key;
+  if (COUNTRY_TO_TLD[key]) return COUNTRY_TO_TLD[key];
+  const hit = Object.keys(COUNTRY_TO_TLD).find((k) => key.includes(k) && k.length >= 4);
+  return hit ? COUNTRY_TO_TLD[hit] : '';
+}
+
+export function yellowPagesForCountry(country) {
+  const tld = directoryTld(country);
+  const local = tld ? (LOCAL[tld] || []) : [];
+  const seen = new Set();
+  const out = [];
+  for (const row of [...local, ...GLOBAL]) {
+    const host = String(row.host || '').replace(/^www\./, '').toLowerCase();
+    if (!host || seen.has(host)) continue;
+    seen.add(host);
+    out.push({ ...row, host });
+  }
+  return out;
+}
+
+export function isDirectoryHost(urlOrHost) {
+  const raw = String(urlOrHost || '').trim().toLowerCase();
+  if (!raw) return false;
+  let host = raw;
+  try {
+    host = new URL(/^https?:/i.test(raw) ? raw : `https://${raw}`).hostname.toLowerCase();
+  } catch {
+    host = raw.replace(/^www\./, '').split('/')[0];
+  }
+  host = host.replace(/^www\./, '');
+  if (HOST_SET.has(host)) return true;
+  for (const known of HOST_SET) {
+    if (host === known || host.endsWith(`.${known}`)) return true;
+  }
+  return /yellowpages|gelbeseiten|pagesjaunes|paginegialle|paginasamarillas|gulesider|goudengids|zlatestranky|europages|11880\.com|yell\.com|justdial|northdata|webvalid|handelsregister|unternehmensregister|dnb\.com|opencorporates|firmenwissen/i.test(host);
+}
+
+export function yellowPagesDorks(company, country) {
+  const name = `"${String(company || '').replace(/"/g, '').replace(/\b(l\.?l\.?c\.?|limited|ltd\.?|inc\.?|gmbh|mbh)\b/gi, ' ').replace(/\s+/g, ' ').trim()}"`;
+  if (name.length < 5) return [];
+  if (!directoryTld(country)) return [];
+  const dirs = yellowPagesForCountry(country);
+  const out = [];
+  if (dirs[0]) out.push(`${name} site:${dirs[0].host}`);
+  if (dirs[1] && dirs[1].host !== 'europages.com' && dirs[1].host !== 'europages.co.uk') {
+    out.push(`${name} site:${dirs[1].host}`);
+  } else {
+    out.push(`${name} (europages OR "yellow pages" OR gelbeseiten OR "pages jaunes")`);
+  }
+  return [...new Set(out)];
+}
+
+function unwrapJsonLd(data) {
+  if (!data) return [];
+  if (Array.isArray(data)) return data.flatMap(unwrapJsonLd);
+  if (data['@graph']) return unwrapJsonLd(data['@graph']);
+  return [data];
+}
+
+function jsonLdType(row) {
+  const t = row?.['@type'];
+  return Array.isArray(t) ? t.join(' ') : String(t || '');
+}
+
+function pushUnique(list, value) {
+  const v = String(value || '').trim();
+  if (!v || list.includes(v)) return;
+  list.push(v);
+}
+
+function collectJsonLd(row, into) {
+  if (!row || typeof row !== 'object') return;
+  if (!/Organization|LocalBusiness|Place|Corporation|Government/i.test(jsonLdType(row) || 'Organization')) {
+    if (row.url || row.email || row.telephone) {
+      /* still take contact fields from typed-less blobs */
+    } else return;
+  }
+  if (row.url) pushUnique(into.websites, row.url);
+  if (row.email) {
+    const emails = Array.isArray(row.email) ? row.email : [row.email];
+    for (const e of emails) pushUnique(into.emails, String(e).replace(/^mailto:/i, '').toLowerCase());
+  }
+  if (row.telephone) {
+    const phones = Array.isArray(row.telephone) ? row.telephone : [row.telephone];
+    for (const p of phones) pushUnique(into.phones, p);
+  }
+}
+
+function plausibleListingEmail(email) {
+  const e = String(email || '').toLowerCase().trim();
+  if (!/^[a-z0-9][a-z0-9._+-]{0,48}@[a-z0-9.-]+\.[a-z]{2,24}$/.test(e)) return false;
+  if (/beispiel|example|placeholder|yourname|domainname|firma\.de|noreply|webmaster/i.test(e)) return false;
+  if (/\d{3,}/.test(e.split('@')[0] || '')) return false;
+  return true;
+}
+
+function looksLikeWebsiteLabel(text) {
+  return /website|webseite|homepage|official|www\.|站点|官网|sitio|sito web|web site/i.test(String(text || ''));
+}
+
+export function parseDirectoryListing(html, { pageUrl = '' } = {}) {
+  const $ = cheerio.load(String(html || ''));
+  const websites = [];
+  const emails = [];
+  const phones = [];
+
+  $('script[type="application/ld+json"]').each((_, el) => {
+    try {
+      const parsed = JSON.parse($(el).contents().text() || '{}');
+      for (const row of unwrapJsonLd(parsed)) collectJsonLd(row, { websites, emails, phones });
+    } catch {
+      /* ignore broken json-ld */
+    }
+  });
+
+  $('[itemprop="url"], [itemprop="email"], [itemprop="telephone"]').each((_, el) => {
+    const prop = String($(el).attr('itemprop') || '');
+    const href = String($(el).attr('href') || '');
+    const val = href || $(el).text();
+    if (prop === 'url') pushUnique(websites, val);
+    if (prop === 'email') pushUnique(emails, val.replace(/^mailto:/i, '').toLowerCase());
+    if (prop === 'telephone') pushUnique(phones, val.replace(/^tel:/i, ''));
+  });
+
+  $('a[href]').each((_, el) => {
+    const href = String($(el).attr('href') || '').trim();
+    const label = `${$(el).text()} ${$(el).attr('title') || ''} ${$(el).attr('class') || ''}`;
+    if (/^mailto:/i.test(href)) {
+      pushUnique(emails, href.replace(/^mailto:/i, '').split('?')[0].toLowerCase());
+      return;
+    }
+    if (/^tel:/i.test(href)) {
+      pushUnique(phones, href.replace(/^tel:/i, ''));
+      return;
+    }
+    if (!/^https?:\/\//i.test(href)) return;
+    if (isDirectoryHost(href) || SOCIAL_OR_JUNK.test(href)) return;
+    if (looksLikeWebsiteLabel(label) || /website|official-website|company-website/i.test(String($(el).attr('class') || ''))) {
+      pushUnique(websites, href);
+    }
+  });
+
+  for (const raw of String($.root().text() || '').match(EMAIL_RE) || []) {
+    pushUnique(emails, raw.toLowerCase());
+  }
+
+  const website = websites.find((u) => !isDirectoryHost(u) && !SOCIAL_OR_JUNK.test(u)) || '';
+  const mail = emails.filter((e) => {
+    const domain = e.split('@')[1] || '';
+    return plausibleListingEmail(e) && domain && !isDirectoryHost(domain) && !/gmail|yahoo|hotmail|outlook|icloud/i.test(domain);
+  });
+
+  let source = '黄页';
+  try {
+    const host = new URL(pageUrl || 'https://example.com').hostname.replace(/^www\./, '');
+    const hit = ALL_HOSTS.find((d) => host === d.host || host.endsWith(`.${d.host}`));
+    source = hit?.name || host || '黄页';
+  } catch {
+    /* ignore */
+  }
+
+  return {
+    website,
+    websites: websites.filter((u) => !isDirectoryHost(u)).slice(0, 4),
+    emails: mail.slice(0, 6),
+    phones: phones.slice(0, 6),
+    source,
+    pageUrl,
+  };
+}
