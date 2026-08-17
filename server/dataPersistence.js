@@ -210,6 +210,7 @@ export function compactPublicCard(card) {
     description: String(card.description || '').slice(0, 800),
     categoryId: card.categoryId || '',
     categoryName: card.categoryName || '',
+    haveAnnexes: Boolean(card.haveAnnexes),
   };
 }
 
