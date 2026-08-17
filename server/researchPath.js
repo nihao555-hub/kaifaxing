@@ -1,5 +1,5 @@
 /** 怎么拿到符合要求的背调：先有可核验主体，再查官网角色联系方式。不搜人名、不猜私人邮箱。 */
-import { extractCompanyHintFromText, buyerFacingText } from './rfqHints.js';
+import { extractCompanyHintFromText, buyerFacingText, companyFromBuyerName } from './rfqHints.js';
 import { countrySearchTerms, searchPageUrl, searchOfficialJson } from './searchDorks.js';
 
 const PERSONAL_MAIL = /gmail|yahoo|ymail|hotmail|outlook|live\.com|icloud|proton|qq\.com|163\.com|126\.com/;
@@ -56,9 +56,10 @@ export function distinctiveSubjectPhrase(subject) {
   return phrase;
 }
 
-export function extractRfqClues(text) {
+export function extractRfqClues(text, customer = {}) {
   const src = buyerFacingText(text);
-  const companyHint = extractCompanyHintFromText(src);
+  const companyHint = extractCompanyHintFromText(src)
+    || companyFromBuyerName(customer.buyerAlias || customer.publicCard?.buyerName || customer.name || customer.company);
   const websites = [];
   const seenHost = new Set();
   for (const raw of src.match(URL_RE) || []) {
@@ -101,7 +102,7 @@ export function extractRfqClues(text) {
 }
 
 export function classifyResearchPath(customer = {}, { personLike = false, clues } = {}) {
-  const found = clues || extractRfqClues(rfqCorpus(customer));
+  const found = clues || extractRfqClues(rfqCorpus(customer), customer);
   if (customer.email && customer.forceCompany) {
     return {
       key: 'auto',

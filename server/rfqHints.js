@@ -22,7 +22,19 @@ const AFTER_NAME_OK = /^(?:[,.]{0,2}\s*(?:a|an|is|are|was|'s|established|based|f
 const PRODUCT_NAME = /\b(galaxy|iphone|screen|edition|series|type|model|flavor|cotton|oem|odm|jumbo|roll|tissue|wifi|amplifier|smps)\b/i;
 const VERB_FIRST = /^(contacting|looking|seeking|reaching|interested|writing|trying|planning|hoping|sourcing|procuring|considering)$/i;
 
-const ORG_TOKEN = /\b(Ltd|Limited|LLC|Inc|GmbH|SARL|PLC|Co|Group|Holdings|Enterprises|Authority|Hospital|College|University|Services|Equipment|Supplies|Department|Ministry|Council|Agency|Institute|Foundation|Clinic|School|Bureau|Commission|Association|Designs?|Healthcare|Standard|Quality)\b/i;
+const ORG_TOKEN = /\b(Ltd|Limited|LLC|Inc|GmbH|SARL|PLC|Co|Group|Holdings|Enterprises|Authority|Hospital|College|University|Services|Equipment|Supplies|Department|Ministry|Council|Agency|Institute|Foundation|Clinic|School|Bureau|Commission|Association|Designs?|Healthcare|Standard|Quality|Boutique|Lighting|Engineering|Solutions|Products|Ecommerce|Consulting|Logistics|Trading|Technologies|Automations)\b/i;
+
+const GERMAN_ORG = /(?:kuratorium|dienstleistungen|gesellschaft|handelsgesellschaft|stiftung|verein|genossenschaft)$/i;
+
+const ORG_WORD = new Set([
+  'ltd', 'limited', 'llc', 'gmbh', 'inc', 'plc', 'company', 'group', 'holdings',
+  'enterprises', 'enterprise', 'services', 'service', 'solutions', 'products',
+  'boutique', 'lighting', 'engineering', 'ecommerce', 'projects', 'automations',
+  'designs', 'design', 'trading', 'technologies', 'consulting', 'consultants',
+  'industries', 'logistics', 'manufacturing', 'equipment', 'supplies',
+  'architectural', 'kuratorium', 'dienstleistungen', 'gesellschaft', 'verein',
+  'stiftung', 'genossenschaft',
+]);
 
 function cleanHintName(raw, { cutSentence = false } = {}) {
   let s = String(raw || '').replace(/\([^)]{0,40}$/, '');
@@ -111,10 +123,81 @@ function bareLegalHints(src) {
   return out;
 }
 
+const FROM_ORG_RE = /\b(?:i am writing from|we are writing from|writing from)\s+([A-Z][A-Za-z0-9&.'-]{2,40})\b/;
+const PAREN_BRAND_RE = /\(([A-Z][A-Za-z0-9&.' -]{2,40})\)/;
+const OWNER_BRAND_RE = /\bowner of (?:a |an )?([A-Z][A-Za-z0-9&.'-]+(?:\s+[A-Z][A-Za-z0-9&.'-]+){0,4})\b/;
+
+function casualOrgHint(src) {
+  const from = src.match(FROM_ORG_RE);
+  if (from) {
+    const name = cleanHintName(from[1]);
+    if (name.length >= 5 && !/^(India|China|Germany|France|England|America|Europe|Alibaba)$/i.test(name)) {
+      return looksLikeNamedOrg(name) || (/^[A-Z][A-Za-z0-9&.'-]{4,40}$/.test(name) ? name : '');
+    }
+  }
+  const owner = src.match(OWNER_BRAND_RE);
+  if (owner) {
+    const named = looksLikeNamedOrg(owner[1]);
+    if (named) return named;
+  }
+  const paren = src.match(PAREN_BRAND_RE);
+  if (paren) {
+    const named = looksLikeNamedOrg(paren[1]);
+    if (named) return named;
+  }
+  return '';
+}
+
+export function unsquashBuyerName(name) {
+  let s = String(name || '').replace(/[_./]+/g, ' ').trim();
+  if (!s) return '';
+  s = s.replace(/ecommerceprivatelimited/ig, 'Ecommerce Private Limited');
+  s = s.replace(/privatelimited/ig, ' Private Limited');
+  s = s.replace(/pvt\.?\s*ltd/ig, ' Pvt Ltd');
+  s = s.replace(/architecturallighting/ig, 'Architectural Lighting');
+  s = s.replace(/engineeringsolutions/ig, 'Engineering Solutions');
+  s = s.replace(/engineeringservices/ig, 'Engineering Services');
+  s = s.replace(/([a-z])([A-Z])/g, '$1 $2');
+  s = s.replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+/** 显示名其实是粘在一起的公司名，不是 Linda。不拿来猜邮箱。 */
+export function companyFromBuyerName(name) {
+  const raw = String(name || '').trim();
+  if (!raw || /alibaba buyer/i.test(raw)) return '';
+  const unsquashed = unsquashBuyerName(raw);
+  const words = unsquashed.split(/\s+/).filter(Boolean);
+  if (words.length < 2 || words.length > 10) return '';
+  const hasLegal = new RegExp(`\\b${LEGAL_SUFFIX}\\b`, 'i').test(unsquashed);
+  const german = words.some((w) => GERMAN_ORG.test(w));
+  const orgHits = words.filter((w) => ORG_WORD.has(w.toLowerCase()));
+  const camelGrew = unsquashed !== raw && words.length >= 3;
+  if (!hasLegal && !german && !(camelGrew && orgHits.length) && !(words.length >= 3 && orgHits.length)) {
+    return '';
+  }
+  const named = looksLikeNamedOrg(unsquashed);
+  if (named) return named;
+  if (hasLegal || german) return cleanHintName(unsquashed);
+  if (orgHits.length && words.length >= 3 && words.length <= 8) return cleanHintName(unsquashed);
+  return '';
+}
+
 export function extractCompanyHintFromText(text) {
   const src = buyerFacingText(text);
   if (!src) return '';
-  return attributedHint(src) || bareLegalHints(src)[0] || '';
+  return attributedHint(src) || bareLegalHints(src)[0] || casualOrgHint(src) || '';
+}
+
+/** 公开列表是 140px 货图。去掉尺寸后缀给人眼看/以图搜图，不下载登录墙附件。 */
+export function largerPublicImage(imageUrl) {
+  const raw = String(imageUrl || '').trim();
+  if (!/^https?:\/\//i.test(raw)) return '';
+  return raw.replace(/_(\d{2,4}x\d{2,4})\.(jpe?g|png|webp|gif)(\?.*)?$/i, '$3');
+}
+
+export function isAlibabaLoginRedirect(location) {
+  return /passport\.alibaba\.com|login\.alibaba\.com|login_check\.htm/i.test(String(location || ''));
 }
 
 export function imageSearchLinks(imageUrl) {
@@ -123,11 +206,13 @@ export function imageSearchLinks(imageUrl) {
   if (/alicdn\.com|alibaba\.com|aliimg\.com/i.test(raw) === false && !/\.(jpe?g|png|webp|gif)(\?|$)/i.test(raw)) {
     return [];
   }
-  const enc = encodeURIComponent(raw);
+  const target = largerPublicImage(raw) || raw;
+  const enc = encodeURIComponent(target);
   return [
     { key: 'google-image', label: 'Google 以图搜图', url: `https://www.google.com/searchbyimage?image_url=${enc}` },
     { key: 'lens', label: 'Google Lens', url: `https://lens.google.com/uploadbyurl?url=${enc}` },
     { key: 'tineye', label: 'TinEye', url: `https://tineye.com/search?url=${enc}` },
     { key: 'bing-visual', label: 'Bing 视觉', url: `https://www.bing.com/images/search?view=detailv2&iss=sbi&q=imgurl:${enc}` },
+    { key: 'yandex-image', label: 'Yandex 以图搜图', url: `https://yandex.com/images/search?rpt=imageview&url=${enc}` },
   ];
 }

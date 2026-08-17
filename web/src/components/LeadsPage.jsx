@@ -1053,7 +1053,11 @@ function IdentifyForm({ customer, onSubmit, busy = false }) {
 
 function AnnexNote({ haveAnnexes = false }) {
   if (!haveAnnexes) return null;
-  return <p className="text-[11px] text-amber-700">这条列表标记有附件，但附件不在公开列表里。</p>;
+  return (
+    <p className="text-[11px] text-amber-700">
+      列表标记有附件。实测下载地址会 302 到 passport.alibaba.com，附件在登录墙后，不爬。
+    </p>
+  );
 }
 
 function DrawerBody({ tab, customer, research, dossier, peopleSearchLinks = [], imageSearchLinks = [], pickedEmail, setPickedEmail, onIdentify, identifying = false }) {
@@ -1083,7 +1087,16 @@ function DrawerBody({ tab, customer, research, dossier, peopleSearchLinks = [], 
                 ))}
               </div>
             )}
-            <p className="mt-1 text-[11px] text-[#94a3b8]">圈内不报价挖人是一条条人工搜领英，不是 12 万条批量。这里只给人点开，不自动扒私人邮箱。</p>
+            <p className="mt-1 text-[11px] text-[#94a3b8]">
+              圈内不报价挖人是一条条人工搜领英/以图对职业照，不是 12 万条批量。这里只给人点开。不接 RocketReach / Lusha / Apollo，不猜 Gmail。
+            </p>
+            {research?.peopleProbe && (
+              <p className="mt-1 text-[11px] text-[#64748b]">
+                人名公开搜索：{research.peopleProbe.tried
+                  ? `${research.peopleProbe.namedHits || 0} 条片段出现全名${research.peopleProbe.company ? `，候选 ${research.peopleProbe.company}` : '，没有对上公司'}`
+                  : research.peopleProbe.note}
+              </p>
+            )}
           </div>
         )}
         <dl>
@@ -1119,7 +1132,10 @@ function DrawerBody({ tab, customer, research, dossier, peopleSearchLinks = [], 
         )}
         {customer.ingestedAt && <div className="text-[#94a3b8]">入库时间 {formatTime(customer.ingestedAt)}</div>}
         {customer.imageUrl && (
-          <img src={customer.imageUrl} alt="" className="mt-2 max-h-36 rounded border border-[#e8edf4] object-contain" />
+          <>
+            <img src={customer.imageUrl} alt="" className="mt-2 max-h-36 rounded border border-[#e8edf4] object-contain" />
+            <p className="text-[11px] text-[#94a3b8]">公开缩略图多半是供应商货图，以图搜图对的是货不是买家。头像对职业照要人工看。</p>
+          </>
         )}
         <AnnexNote haveAnnexes={Boolean(customer.haveAnnexes)} />
       </div>
@@ -1132,7 +1148,9 @@ function DrawerBody({ tab, customer, research, dossier, peopleSearchLinks = [], 
         {emails.length ? (
           <EmailPick emails={emails} pickedEmail={pickedEmail} setPickedEmail={setPickedEmail} name="email" />
         ) : (
-          <p className="text-[12px] text-[#94a3b8]">还没有可核验的公开角色邮箱。背调只收官网角色箱，不猜私人邮箱。</p>
+          <p className="text-[12px] text-[#94a3b8]">
+            还没有可核验的公开角色邮箱。不猜 gmail/yahoo，不用验证网站撞号，那是 Hunter 不是背调。
+          </p>
         )}
         {research?.phones?.length > 0 && (
           <div className="text-[12px] text-[#475569]">公开电话：{research.phones.join(' · ')}</div>

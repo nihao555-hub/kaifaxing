@@ -4,6 +4,7 @@ import { crawlAllAndImport, importRfqItems } from './rfq.js';
 import { researchLead, isPersonLikeLead, isPlausibleEmail, applyLeadIdentity, compactSkippedReport, cleanOfficialBuyerName } from './research.js';
 import { extractCompanyHintFromText } from './rfqHints.js';
 import { extractRfqClues, rfqCorpus, classifyResearchPath } from './researchPath.js';
+import { EMAIL_GUESS_REFUSAL, isEmailGuessRequest } from './peopleProbe.js';
 import { clusterDemandKeywords, searchDemandPeers } from './demandPeers.js';
 import { VERIFIED_SOURCES } from './openSources.js';
 import { isForwarderName, isOutreachEmail } from './kyb.js';
@@ -92,7 +93,7 @@ function ownInbox(email) {
 }
 
 export function stampLeadPath(c) {
-  const clues = extractRfqClues(rfqCorpus(c));
+  const clues = extractRfqClues(rfqCorpus(c), c);
   const path = classifyResearchPath(c, { personLike: isPersonLikeLead(c), clues });
   const changed = c.researchPath !== path.key;
   c.researchPath = path.key;
@@ -120,7 +121,7 @@ export function applyTextCompanyHints() {
         dirty = true;
       }
     }
-    const clues = extractRfqClues(rfqCorpus(c));
+    const clues = extractRfqClues(rfqCorpus(c), c);
     if (!c.website && clues.websites[0]) {
       c.website = clues.websites[0];
       dirty = true;
@@ -248,7 +249,7 @@ export function prepareFullKybPass() {
       continue;
     }
 
-    const clues = extractRfqClues(rfqCorpus(c));
+    const clues = extractRfqClues(rfqCorpus(c), c);
     if (!c.website && clues.websites[0]) c.website = clues.websites[0];
 
     if (isPersonLikeLead(c) && !c.forceCompany) {
@@ -500,6 +501,11 @@ export async function identifyLead(id, payload = {}) {
     err.status = 404;
     throw err;
   }
+  if (isEmailGuessRequest(payload)) {
+    const err = new Error(EMAIL_GUESS_REFUSAL);
+    err.status = 400;
+    throw err;
+  }
   applyLeadIdentity(customer, payload);
   save();
   logActivity({
@@ -507,7 +513,7 @@ export async function identifyLead(id, payload = {}) {
     action: '补主体',
     detail: `${customer.buyerAlias || customer.name} → ${customer.company}${customer.regNo ? `，登记号 ${customer.regNo}` : ''}`,
   });
-  const research = await runLeadResearch(customer, { useAi: false, autoApply: true });
+  const research = await runLeadResearch(customer, { useAi: false, autoApply: true, peopleProbe: true });
   return { customer, research };
 }
 
@@ -522,7 +528,7 @@ export function applyPublicContact(customer, email, extra = {}) {
   return true;
 }
 
-export async function runLeadResearch(customer, { useAi = true, autoApply = false } = {}) {
+export async function runLeadResearch(customer, { useAi = true, autoApply = false, peopleProbe = false } = {}) {
   if (researchingIds.has(customer.id)) {
     const err = new Error('正在背调中');
     err.status = 409;
@@ -532,7 +538,7 @@ export async function runLeadResearch(customer, { useAi = true, autoApply = fals
   customer.research = { ...(customer.research || {}), status: 'running', updatedAt: new Date().toISOString() };
   try {
     const personLike = isPersonLikeLead(customer);
-    const report = await researchLead(customer, { useAi: useAi && !personLike });
+    const report = await researchLead(customer, { useAi: useAi && !personLike, peopleProbe });
     customer.research = report;
     if (report.website && !customer.website) customer.website = report.website;
     if (report.legalName && report.legalName !== customer.company) customer.legalName = report.legalName;

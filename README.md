@@ -39,7 +39,7 @@ npm run dev            # 同时启动后端(3001)和前端(5173)
 
 阿里国际站：用卖家账号在开放平台创建应用，申请 `alibaba.icbu.rfq.search`，授权后写入 `ALIBABA_APP_KEY` / `ALIBABA_APP_SECRET` / `ALIBABA_SESSION`。不爬页面。
 
-符合要求的背调 = 主体已核 + 官网 + 角色邮箱 + 未制裁。拿到主体的路：政府招标/写出 Ltd 的询盘自动核；正文有型号则交叉检索同款公开询盘（不搜买家昵称）；其余导入阿里后台报价后的 `buyer_company_name`，或抽屉「补主体」。不搜人名、不猜 Gmail。官方 `alibaba.icbu.rfq.search` **未实跑证实**会返回公司名。
+符合要求的背调 = 主体已核 + 官网 + 角色邮箱 + 未制裁。拿到主体的路：政府招标/写出 Ltd 的询盘自动核；粘在一起的显示名（如 `Ecommerceprivatelimited`）拆成法定名；正文有型号则交叉检索同款公开询盘；人名+国家只给人点开谷歌/领英，单条背调才试公开搜索且必须片段出现全名。其余导入阿里后台报价后的 `buyer_company_name`。不猜 Gmail，不接 Hunter/Apollo/Lusha。公开缩略图是货图；附件下载会跳登录墙。官方 `alibaba.icbu.rfq.search` **未实跑证实**会返回公司名。
 
 谷歌搜索：不要抓 `google.com/search` HTML（会被验证码挡住）。默认引擎是官方 [`googleapis` Custom Search](https://github.com/googleapis/google-api-nodejs-client)，**不会**在缺 Key 时改走 Serper：
 

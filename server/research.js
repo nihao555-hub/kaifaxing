@@ -50,6 +50,8 @@ import {
 } from './researchPath.js';
 import { screenSanctions } from './sanctions.js';
 import { findTradeTraces } from './tradeTraces.js';
+import { companyFromBuyerName } from './rfqHints.js';
+import { probePeopleCompany } from './peopleProbe.js';
 
 const UA = 'OutreachAI/1.0 (public due-diligence; +https://github.com/nihao555-hub/kaifaxing)';
 
@@ -159,6 +161,7 @@ export function tokenOverlap(a, b) {
 export function isPersonLikeDisplayName(name) {
   const s = String(name || '').trim();
   if (!s) return false;
+  if (companyFromBuyerName(s)) return false;
   if (
     new RegExp(LEGAL_SUFFIX_RE.source, 'i').test(s)
     || /(?:^|[\s,])(?:b\.v\.?|n\.v\.?|s\.a\.?|l\.l\.c\.?|gmbh|ltd|llc|plc|inc)(?:$|[\s,])/i.test(s)
@@ -990,8 +993,8 @@ async function aiBrief(payload) {
   return parseJson(text);
 }
 
-export async function researchLead(customer, { useAi = true } = {}) {
-  const clues = extractRfqClues(rfqCorpus(customer));
+export async function researchLead(customer, { useAi = true, peopleProbe = false } = {}) {
+  const clues = extractRfqClues(rfqCorpus(customer), customer);
   let personLike = isPersonLikeLead(customer);
   const path = classifyResearchPath(customer, { personLike, clues });
   customer.researchPath = path.key;
@@ -1007,7 +1010,8 @@ export async function researchLead(customer, { useAi = true } = {}) {
   if (personLike && clues.companyHint) {
     try {
       applyLeadIdentity(customer, { company: clues.companyHint });
-      customer.identitySource = customer.identitySource || 'rfq_text';
+      customer.identitySource = customer.identitySource
+        || (companyFromBuyerName(customer.buyerAlias || customer.name) === clues.companyHint ? 'buyer_name' : 'rfq_text');
       personLike = false;
     } catch {
       /* 抽到的仍不像法定名 */
@@ -1039,6 +1043,7 @@ export async function researchLead(customer, { useAi = true } = {}) {
   let harvestedTools = {};
   let search = { queries: [], urls: [], snippetEmails: [], officialGuess: '', notes: [], engine: '' };
   let crosspost = null;
+  let people = null;
   let siteSocials = [];
   let siteOfficers = [];
 
@@ -1064,6 +1069,23 @@ export async function researchLead(customer, { useAi = true } = {}) {
   if (personLike && website) {
     personLike = false;
     notes.push(`正文里的官网/角色邮箱域名 ${website} 当作起点，不搜买家昵称。`);
+  }
+
+  if (personLike && peopleProbe) {
+    people = await probePeopleCompany(customer);
+    if (people.company) {
+      try {
+        applyLeadIdentity(customer, { company: people.company, website });
+        customer.identitySource = customer.identitySource || 'people_snippet';
+        personLike = false;
+        legalName = people.company;
+        notes.push(`人名公开搜索在同时出现全名的片段里抽到 ${people.company}。仍可能重名，先核主体，不扒私人邮箱。`);
+      } catch {
+        notes.push(people.note || '人名搜索抽到的名字仍不像法定名，未自动写入。');
+      }
+    } else {
+      notes.push(people.note || '人名+国家公开搜索没有对上公司。');
+    }
   }
 
   if (personLike) {
@@ -1437,6 +1459,7 @@ export async function researchLead(customer, { useAi = true } = {}) {
     path,
     clues,
     crosspost,
+    peopleProbe: people,
     searchPages: (search.urls || []).slice(0, 8),
     kyb,
     grade: kyb.grade,

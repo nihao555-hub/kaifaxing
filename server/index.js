@@ -377,7 +377,7 @@ app.post('/api/rfq/leads/:id/research', async (req, res) => {
   const customer = getCustomer(req.params.id);
   if (!customer) return res.status(404).json({ error: '线索不存在' });
   try {
-    const research = await runLeadResearch(customer);
+    const research = await runLeadResearch(customer, { peopleProbe: true });
     res.json({ customer, research });
   } catch (err) {
     res.status(err.status || 502).json({ error: `背调失败：${err.message}`, research: customer.research || null });

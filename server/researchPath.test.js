@@ -74,6 +74,19 @@ describe('classifyResearchPath', () => {
     );
     assert.equal(path.key, 'import');
   });
+
+  it('treats a glued company nickname as a subject, not a person search', () => {
+    const customer = {
+      company: 'Kutumb Ecommerceprivatelimited',
+      name: 'Kutumb Ecommerceprivatelimited',
+      buyerAlias: 'Kutumb Ecommerceprivatelimited',
+      country: 'India',
+    };
+    const clues = extractRfqClues('Hi, can you share more details', customer);
+    assert.equal(clues.companyHint, 'Kutumb Ecommerce Private Limited');
+    const path = classifyResearchPath(customer, { personLike: true, clues });
+    assert.equal(path.key, 'auto');
+  });
 });
 
 describe('companiesFromSnippets', () => {

@@ -158,11 +158,15 @@ export function peopleSearchLinks(customer = {}) {
   const country = String(customer.country || customer.publicCard?.country || '').trim();
   if (!name || /alibaba buyer/i.test(name) || name.length < 3) return [];
   const q = [name, country].filter(Boolean).join(' ');
+  const quoted = `"${name}"${country ? ` ${country}` : ''}`;
   const enc = encodeURIComponent(q);
+  const qenc = encodeURIComponent(quoted);
   return [
     { key: 'google-people', label: '谷歌搜人名+国家', url: `https://www.google.com/search?q=${enc}` },
+    { key: 'google-quoted', label: '谷歌精确人名', url: `https://www.google.com/search?q=${qenc}` },
     { key: 'bing-people', label: '必应搜人名+国家', url: `https://www.bing.com/search?q=${enc}` },
     { key: 'linkedin', label: '领英搜人', url: `https://www.linkedin.com/search/results/people/?keywords=${enc}` },
+    { key: 'google-skype', label: '谷歌搜 Skype 公开页', url: `https://www.google.com/search?q=${encodeURIComponent(`"${name}" skype`)}` },
   ];
 }
 

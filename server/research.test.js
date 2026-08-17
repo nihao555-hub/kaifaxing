@@ -101,6 +101,8 @@ describe('company name helpers', () => {
     assert.equal(isPersonLikeDisplayName('José Araya'), true);
     assert.equal(isPersonLikeDisplayName('@gmail.com @gmail.com'), true);
     assert.equal(isPersonLikeDisplayName('AHSN COMPANY'), false);
+    assert.equal(isPersonLikeDisplayName('Kutumb Ecommerceprivatelimited'), false);
+    assert.equal(isPersonLikeDisplayName('Rohmers Dienstleistungen'), false);
     assert.equal(isPersonLikeLead({ company: 'CHRIS', name: 'chris V' }), true);
     assert.equal(isPersonLikeLead({ company: 'L3HARRIS TECHNOLOGIES, INC.', name: 'John' }), false);
     const skipped = skippedLeadReport({ company: 'Linda N', country: 'Netherlands' });

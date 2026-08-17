@@ -77,6 +77,8 @@ describe('alibaba seller unlock', () => {
   it('builds people-search URLs and skips empty nicknames', () => {
     const links = peopleSearchLinks({ name: 'Ajay Vaishnavi', country: 'India' });
     assert.ok(links.some((l) => /google\.com\/search/.test(l.url) && /Ajay/.test(l.url)));
+    assert.ok(links.some((l) => l.key === 'google-quoted' && /%22Ajay/.test(l.url)));
+    assert.ok(links.some((l) => l.key === 'google-skype' && /skype/i.test(l.url)));
     assert.deepEqual(peopleSearchLinks({ name: 'Alibaba buyer' }), []);
   });
 });

@@ -1,6 +1,14 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { buyerFacingText, extractCompanyHintFromText, imageSearchLinks } from './rfqHints.js';
+import {
+  buyerFacingText,
+  extractCompanyHintFromText,
+  imageSearchLinks,
+  companyFromBuyerName,
+  unsquashBuyerName,
+  largerPublicImage,
+  isAlibabaLoginRedirect,
+} from './rfqHints.js';
 
 describe('extractCompanyHintFromText', () => {
   it('keeps attributed legal names in the buyer message', () => {
@@ -110,14 +118,36 @@ describe('extractCompanyHintFromText', () => {
     const text = buyerFacingText('公开询盘：Battery BMS，数量 3，Australia。I am from Perth Battery Ltd 列表页无邮箱，入库后补公司采购邮箱再发信。');
     assert.match(text, /Perth Battery Ltd/);
     assert.equal(extractCompanyHintFromText('公开询盘：Battery BMS。I am from Perth Battery Ltd'), 'Perth Battery Ltd');
+    assert.equal(
+      extractCompanyHintFromText("My name is Sylvia, owner of a children's boutique (Charming Boutique) in Reedley, CA"),
+      'Charming Boutique',
+    );
+    assert.equal(extractCompanyHintFromText('I am writing from Aquaticfish regarding our recent order.'), 'Aquaticfish');
+  });
+});
+
+describe('companyFromBuyerName', () => {
+  it('unsquashes glued company nicknames and leaves real people alone', () => {
+    assert.match(unsquashBuyerName('Kutumb Ecommerceprivatelimited'), /Private Limited/i);
+    assert.equal(companyFromBuyerName('Kutumb Ecommerceprivatelimited'), 'Kutumb Ecommerce Private Limited');
+    assert.equal(companyFromBuyerName('NIVAN ARCHITECTURALLIGHTING'), 'NIVAN Architectural Lighting');
+    assert.equal(companyFromBuyerName('Rohmers Dienstleistungen'), 'Rohmers Dienstleistungen');
+    assert.equal(companyFromBuyerName('Deutsches Polizeisportkuratorium'), 'Deutsches Polizeisportkuratorium');
+    assert.equal(companyFromBuyerName('Steve WineCellarDesignersGroup'), 'Steve Wine Cellar Designers Group');
+    assert.equal(companyFromBuyerName('Linda N'), '');
+    assert.equal(companyFromBuyerName('Ajay Vaishnavi'), '');
+    assert.equal(companyFromBuyerName('Angela Borja'), '');
   });
 });
 
 describe('imageSearchLinks', () => {
   it('builds browser reverse-image links and skips empty urls', () => {
     const links = imageSearchLinks('https://sc04.alicdn.com/kf/A77a.jpg_140x140.jpg');
-    assert.equal(links.length, 4);
-    assert.ok(links.every((l) => l.url.includes(encodeURIComponent('https://sc04.alicdn.com/kf/A77a.jpg_140x140.jpg'))));
+    assert.equal(links.length, 5);
+    assert.ok(links.every((l) => l.url.includes(encodeURIComponent('https://sc04.alicdn.com/kf/A77a.jpg'))));
+    assert.equal(largerPublicImage('https://sc04.alicdn.com/kf/A77a.jpg_140x140.jpg'), 'https://sc04.alicdn.com/kf/A77a.jpg');
+    assert.equal(isAlibabaLoginRedirect('https://passport.alibaba.com/login_check.htm?site=4'), true);
+    assert.equal(isAlibabaLoginRedirect('https://sourcing.alibaba.com/rfq_detail.htm'), false);
     assert.deepEqual(imageSearchLinks(''), []);
     assert.deepEqual(imageSearchLinks('javascript:alert(1)'), []);
   });
