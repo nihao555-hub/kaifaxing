@@ -47,25 +47,34 @@ async function main() {
   }
 
   if (command === 'yp' || command === 'yellowpages') {
-    const { db, saveNow, isRfqLead } = await import('./store.js');
+    const { db, saveNow, isRfqLead, isDemoCustomer } = await import('./store.js');
     const { applyTextCompanyHints } = await import('./pipeline.js');
     const { isPersonLikeLead } = await import('./research.js');
     const { lookupYellowPages, directoryTld } = await import('./yellowPages.js');
     applyTextCompanyHints();
     const limit = Math.min(Math.max(Number(args[0] || 12), 1), 40);
-    const commercial = /\b(gmbh|mbh|ltd|limited|llc|oy|plc|ag|srl|spa|b\.?v|sarl|pvt|inc)\b/i;
+    const junkName = /^(abc|acme|test|demo|sample|foo|bar)\b/i;
     const pending = db.customers.filter((c) => {
       if (!isRfqLead(c)) return false;
+      if (isDemoCustomer(c)) return false;
       if (c.email) return false;
       if (!directoryTld(c.country)) return false;
       if (isPersonLikeLead(c) && !c.forceCompany) return false;
+      const name = String(c.company || c.name || '').trim();
+      if (name.length < 10 || junkName.test(name)) return false;
       return true;
     });
     pending.sort((a, b) => {
-      const ac = commercial.test(a.company || '') ? 0 : 1;
-      const bc = commercial.test(b.company || '') ? 0 : 1;
-      if (ac !== bc) return ac - bc;
-      return String(a.company || '').localeCompare(String(b.company || ''));
+      const geo = (c) => {
+        const tld = directoryTld(c.country);
+        if (tld === 'de') return 0;
+        if (tld === 'fi' || tld === 'fr' || tld === 'uk' || tld === 'at' || tld === 'ch') return 1;
+        return 2;
+      };
+      if (geo(a) !== geo(b)) return geo(a) - geo(b);
+      const gov = (c) => (/TED|Contracts Finder/i.test(c.source || '') ? 0 : 1);
+      if (gov(a) !== gov(b)) return gov(a) - gov(b);
+      return String(b.company || '').length - String(a.company || '').length;
     });
     const batch = pending.slice(0, limit);
     const summary = { tried: 0, phones: 0, emails: 0, websites: 0, addresses: 0 };
