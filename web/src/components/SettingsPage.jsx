@@ -277,6 +277,7 @@ export default function SettingsPage() {
           </p>
           <p className="mt-2 text-[12px] leading-relaxed text-[#64748b]">
             阿里询盘对齐外贸通的办法：先在国际站报价，再导出 buyer_company_name / buyer_email，按询盘 ID 回填；然后才跑工商/官网/角色邮箱。公开源另外两条路：正文 Ltd/LLC、型号交叉检索。缩略图只给人眼以图搜图。
+            邦阅/米课「不报价挖联系方式」是：人名+国家去领英，再用 RocketReach/Lusha 扒私人邮箱，或猜 Gmail。那是一条询盘人工 10 分钟，不是 12 万条批量；这里不自动做。
             官方
             {' '}
             <a className="text-primary hover:underline" href="https://open.taobao.com/" target="_blank" rel="noreferrer">alibaba.icbu.rfq.search</a>

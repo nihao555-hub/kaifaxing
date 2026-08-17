@@ -152,6 +152,20 @@ export function alibabaSiblings(customers = [], customer = {}) {
   return customers.filter((c) => c !== customer && isAlibabaLead(c) && buyerClusterKey(c) === key);
 }
 
+/** 人工打开，不自动抓。邦阅/米课的第一步是人名+国家去谷歌/领英，不是批量撞库。 */
+export function peopleSearchLinks(customer = {}) {
+  const name = String(customer.buyerAlias || customer.publicCard?.buyerName || customer.name || '').trim();
+  const country = String(customer.country || customer.publicCard?.country || '').trim();
+  if (!name || /alibaba buyer/i.test(name) || name.length < 3) return [];
+  const q = [name, country].filter(Boolean).join(' ');
+  const enc = encodeURIComponent(q);
+  return [
+    { key: 'google-people', label: '谷歌搜人名+国家', url: `https://www.google.com/search?q=${enc}` },
+    { key: 'bing-people', label: '必应搜人名+国家', url: `https://www.bing.com/search?q=${enc}` },
+    { key: 'linkedin', label: '领英搜人', url: `https://www.linkedin.com/search/results/people/?keywords=${enc}` },
+  ];
+}
+
 export function buildAlibabaDossier(customer = {}, { siblings = [], research = null } = {}) {
   const report = research || customer.research || {};
   const unlocked = isSellerUnlocked(customer);
@@ -196,6 +210,7 @@ export function buildAlibabaDossier(customer = {}, { siblings = [], research = n
     subjects,
     grade: report.kyb?.grade || report.grade || '',
     next,
+    peopleSearchLinks: peopleSearchLinks(customer),
   };
 }
 

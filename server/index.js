@@ -14,7 +14,7 @@ import { listSources, searchRfq, importRfqItems, ingestCommercial, crawlAlibabaP
 import { alibabaCrawlProgress, requestCrawlAbort } from './publicRfq.js';
 import { isPlausibleEmail, isPersonLikeLead } from './research.js';
 import { imageSearchLinks } from './rfqHints.js';
-import { alibabaSiblings, buildAlibabaDossier, isAlibabaLead } from './alibabaIntel.js';
+import { alibabaSiblings, buildAlibabaDossier, isAlibabaLead, peopleSearchLinks } from './alibabaIntel.js';
 import { buildSearchLinks, rfqProductTerms, searchOfficialJson, parseGoogleCse, parseSerper } from './searchDorks.js';
 import { GITHUB_TOOLS } from './githubTools.js';
 import { paidSourceStatus } from './paidSources.js';
@@ -327,6 +327,7 @@ app.get('/api/rfq/leads/:id', (req, res) => {
     research: customer.research || null,
     searchLinks,
     imageSearchLinks: imageSearchLinks(customer.imageUrl),
+    peopleSearchLinks: isPersonLikeLead(customer) ? peopleSearchLinks(customer) : [],
     searchStatus: googleSearchStatus(),
     path: customer.research?.path || null,
     dossier: isAlibabaLead(customer)

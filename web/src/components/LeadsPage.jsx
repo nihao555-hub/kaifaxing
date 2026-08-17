@@ -884,6 +884,8 @@ export default function LeadsPage({ onGoOutreach }) {
                   customer={customer}
                   research={research}
                   dossier={detail?.dossier}
+                  peopleSearchLinks={detail?.peopleSearchLinks || detail?.dossier?.peopleSearchLinks || []}
+                  imageSearchLinks={detail?.imageSearchLinks || []}
                   pickedEmail={pickedEmail}
                   setPickedEmail={setPickedEmail}
                   onIdentify={identifyCompany}
@@ -1054,7 +1056,7 @@ function AnnexNote({ haveAnnexes = false }) {
   return <p className="text-[11px] text-amber-700">这条列表标记有附件，但附件不在公开列表里。</p>;
 }
 
-function DrawerBody({ tab, customer, research, dossier, pickedEmail, setPickedEmail, onIdentify, identifying = false }) {
+function DrawerBody({ tab, customer, research, dossier, peopleSearchLinks = [], imageSearchLinks = [], pickedEmail, setPickedEmail, onIdentify, identifying = false }) {
   const address = research?.address || factValue(research, /注册地址|总部|地址/);
   const industry = research?.industry || factValue(research, /行业/) || customer.industry;
   const size = research?.employees || factValue(research, /员工规模/);
@@ -1071,6 +1073,17 @@ function DrawerBody({ tab, customer, research, dossier, pickedEmail, setPickedEm
             {dossier.rfqCount > 1 && (
               <p className="mt-1 text-[11px] text-[#64748b]">同一显示名还有 {dossier.rfqCount - 1} 条询盘</p>
             )}
+            {(peopleSearchLinks.length > 0 || imageSearchLinks.length > 0) && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {peopleSearchLinks.map((l) => (
+                  <a key={l.key} href={l.url} target="_blank" rel="noreferrer" className="text-[11px] text-primary hover:underline">{l.label}</a>
+                ))}
+                {imageSearchLinks.map((l) => (
+                  <a key={l.key} href={l.url} target="_blank" rel="noreferrer" className="text-[11px] text-primary hover:underline">{l.label}</a>
+                ))}
+              </div>
+            )}
+            <p className="mt-1 text-[11px] text-[#94a3b8]">圈内不报价挖人是一条条人工搜领英，不是 12 万条批量。这里只给人点开，不自动扒私人邮箱。</p>
           </div>
         )}
         <dl>

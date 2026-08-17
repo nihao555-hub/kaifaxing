@@ -8,6 +8,7 @@ import {
   propagateAlibabaIdentity,
   buildAlibabaDossier,
   summarizeAlibabaPlan,
+  peopleSearchLinks,
 } from './alibabaIntel.js';
 
 describe('alibaba seller unlock', () => {
@@ -70,6 +71,13 @@ describe('alibaba seller unlock', () => {
     assert.match(dossier.next, /报价|后台导出/);
     assert.equal(dossier.unlocked, false);
     assert.equal(dossier.legalName, '');
+    assert.ok(dossier.peopleSearchLinks.some((l) => /linkedin\.com/.test(l.url)));
+  });
+
+  it('builds people-search URLs and skips empty nicknames', () => {
+    const links = peopleSearchLinks({ name: 'Ajay Vaishnavi', country: 'India' });
+    assert.ok(links.some((l) => /google\.com\/search/.test(l.url) && /Ajay/.test(l.url)));
+    assert.deepEqual(peopleSearchLinks({ name: 'Alibaba buyer' }), []);
   });
 });
 
