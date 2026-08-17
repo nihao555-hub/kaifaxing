@@ -182,9 +182,15 @@ function flushSave({ remote = true } = {}) {
   }
 }
 
+let saveRemote = true;
+
+export function setSaveRemote(enabled) {
+  saveRemote = Boolean(enabled);
+}
+
 export function save() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(flushSave, 200);
+  saveTimer = setTimeout(() => flushSave({ remote: saveRemote }), 200);
 }
 
 export function saveNow({ remote = true } = {}) {

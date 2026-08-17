@@ -16,14 +16,15 @@ describe('bestNext playbook', () => {
     assert.match(step.next, /询盘 ID|后台导出/);
   });
 
-  it('researches a legal name and harvests when a website exists', () => {
-    const research = bestNext({
+  it('finds the official site and phone before harvesting role mail', () => {
+    const site = bestNext({
       company: 'NMG TECHNICAL SERVICE L.L.C',
       name: 'NMG TECHNICAL SERVICE L.L.C',
       country: 'United Arab Emirates',
       forceCompany: true,
     });
-    assert.equal(research.key, 'research');
+    assert.equal(site.key, 'site');
+    assert.match(site.next, /官网|电话|黄页/);
     const harvest = bestNext({
       company: 'NMG TECHNICAL SERVICE L.L.C',
       forceCompany: true,
@@ -31,6 +32,13 @@ describe('bestNext playbook', () => {
     });
     assert.equal(harvest.key, 'harvest');
     assert.match(harvest.next, /SMTP|角色/);
+  });
+  it('lists site-then-email before Alibaba seller export', () => {
+    assert.ok(PLAYBOOK_STEPS.some((s) => s.key === 'site'));
+    assert.ok(PLAYBOOK_STEPS.some((s) => s.key === 'email'));
+    const keys = PLAYBOOK_STEPS.map((s) => s.key);
+    assert.ok(keys.indexOf('site') < keys.indexOf('email'));
+    assert.ok(keys.indexOf('email') < keys.indexOf('seller'));
   });
 
   it('uses seller-unlocked mail then KYB, and stops on sanctions', () => {

@@ -393,12 +393,12 @@ export default function LeadsPage({ onGoOutreach }) {
     setErr('');
     setOkMsg('');
     try {
-      const data = await api.rfqPlaybookRun({ limit: 400 });
+      const data = await api.rfqPlaybookRun({ all: true });
       if (data.pipeline) setPipeline(data.pipeline);
       await load();
       setOkMsg(data.skipped
-        ? '最佳路径正在跑，先抽法定名再排队可核主体，不跑 12 万昵称交叉检索。'
-        : '已提交最佳路径：先抽法定名，再核官网角色箱。完成后看同步记录里的排队数。');
+        ? '全量流水线已在跑：先官网和电话，再角色箱。阿里昵称等后台导出，不搜人名。'
+        : '已启动全量流水线：所有可核主体先找官网/电话并背调，有官网后再挖角色箱。同步记录里看队列。');
     } catch (e) {
       setErr(String(e.message || e));
     } finally {
@@ -464,7 +464,7 @@ export default function LeadsPage({ onGoOutreach }) {
               className="flex h-8 items-center gap-1.5 rounded border border-primary bg-white px-3 text-[12px] font-medium text-primary hover:bg-primary-light disabled:opacity-50"
             >
               {playbookBusy ? <Spinner className="h-3! w-3!" /> : <ShieldCheck size={13} />}
-              按最佳路径跑一轮
+              跑全量流水线
             </button>
             <button
               type="button"
@@ -508,10 +508,22 @@ export default function LeadsPage({ onGoOutreach }) {
             )}
             {pipeline.playbook && (
               <p>
-                最佳路径 {pipeline.playbook.status === 'running' ? '正在跑' : formatTime(pipeline.playbook.lastRunAt || pipeline.playbook.finishedAt)}
-                {pipeline.playbook.status === 'done' ? `：提升主体 ${pipeline.playbook.promoted || 0}，排队 ${pipeline.playbook.queued || 0}` : ''}
+                联系流水线 {pipeline.playbook.wave ? `${pipeline.playbook.wave} 波` : ''} {pipeline.playbook.status === 'running' ? '正在跑' : formatTime(pipeline.playbook.lastRunAt || pipeline.playbook.finishedAt)}
+                {pipeline.playbook.queuedSite != null ? `：官网/电话 ${pipeline.playbook.queuedSite}` : ''}
+                {pipeline.playbook.queuedEmail ? ` · 角色箱 ${pipeline.playbook.queuedEmail}` : ''}
+                {pipeline.playbook.queuedCrosspost ? ` · 型号交叉 ${pipeline.playbook.queuedCrosspost}` : ''}
+                {pipeline.playbook.promoted ? ` · 提升主体 ${pipeline.playbook.promoted}` : ''}
                 {pipeline.playbook.error ? ` · ${pipeline.playbook.error}` : ''}
-                。只跑可核公司名和正文线索，不跑型号交叉。
+                。先官网和电话，再邮箱；阿里昵称不搜人名。
+              </p>
+            )}
+            {pipeline.contactLine && (
+              <p>
+                流水线盘点：待官网/电话 {(pipeline.contactLine.site || 0).toLocaleString()}
+                {' · '}待角色箱 {(pipeline.contactLine.email || 0).toLocaleString()}
+                {' · '}型号交叉 {(pipeline.contactLine.crosspost || 0).toLocaleString()}
+                {' · '}阿里导出 {(pipeline.contactLine.seller || 0).toLocaleString()}
+                {' · '}已齐 {(pipeline.contactLine.done || 0).toLocaleString()}
               </p>
             )}
           </div>
@@ -546,14 +558,14 @@ export default function LeadsPage({ onGoOutreach }) {
             政府招标、正文 Ltd、粘连显示名拆开。阿里昵称靠后台导出或补主体，不搜人名。
           </div>
           <div>
-            <span className="font-medium text-[#334155]">2. 再核主体和官网</span>
+            <span className="font-medium text-[#334155]">2. 先找官网和电话</span>
             {' '}
-            公开登记库 + 黄页名录 + 搜索公式定位官网。制裁命中就停。
+            黄页名录 + 公开登记库 + 搜索公式。顺带制裁筛查。名录站不当官网。
           </div>
           <div>
-            <span className="font-medium text-[#334155]">3. 只收角色箱</span>
+            <span className="font-medium text-[#334155]">3. 再收角色箱</span>
             {' '}
-            联系页 info@ / procurement@；没有明文就对已核域名做 SMTP。不猜 Gmail。
+            官网 Impressum/联系页 info@ / procurement@；没有明文才对已核域名做 SMTP。不猜 Gmail。
           </div>
           <div>
             <span className="font-medium text-[#334155]">4. 阿里拿邮箱</span>

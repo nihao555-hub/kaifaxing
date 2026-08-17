@@ -286,8 +286,8 @@ app.get('/api/rfq/playbook', (_req, res) => {
   });
 });
 app.post('/api/rfq/playbook/run', (req, res) => {
-  const limit = Math.max(1, Math.min(Number(req.body?.limit) || 400, 2000));
-  const result = startBestPass({ limit });
+  const includeCrosspost = req.body?.includeCrosspost !== false;
+  const result = startBestPass({ includeCrosspost });
   res.json({
     ok: true,
     ...result,

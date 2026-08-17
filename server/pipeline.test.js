@@ -97,6 +97,10 @@ describe('auto apply rules', () => {
     assert.equal(best.has(leadQueuePath({ researchPath: 'crosspost' })), false);
   });
 
+  it('puts the contact line on site/phone before email', () => {
+    assert.equal(leadQueuePath({ company: 'HOWOGE Wohnungsbaugesellschaft mbH', researchPath: 'auto' }), 'auto');
+  });
+
   it('uses a compact C report for nickname mass KYB', () => {
     const report = compactSkippedReport({ company: 'Linda N', country: 'Netherlands' });
     assert.equal(report.grade, 'C');

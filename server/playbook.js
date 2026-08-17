@@ -2,6 +2,7 @@
 import { extractRfqClues, rfqCorpus } from './researchPath.js';
 import { isPersonLikeLead } from './research.js';
 import { isAlibabaLead, isSellerUnlocked } from './alibabaIntel.js';
+import { contactGap } from './contactLine.js';
 
 export const PLAYBOOK_STEPS = [
   {
@@ -10,14 +11,14 @@ export const PLAYBOOK_STEPS = [
     detail: '政府招标、正文 Ltd、粘连显示名拆开、型号交叉检索。阿里昵称靠后台导出或补主体。',
   },
   {
-    key: 'kyb',
-    title: '再核主体和官网',
-    detail: '公开登记库 + 黄页名录 + 搜索公式定位官网。制裁命中就停。',
+    key: 'site',
+    title: '先找官网和电话',
+    detail: '黄页名录 + 公开登记库 + 搜索公式定位官网和电话。顺带制裁筛查。名录站本身不当官网。',
   },
   {
     key: 'email',
-    title: '只收角色箱',
-    detail: '联系页上的 info@ / procurement@；没有明文就对已核域名做 SMTP。买家报价留下的邮箱可以是 Gmail。',
+    title: '再收角色箱',
+    detail: '官网 Impressum/联系页的 info@ / procurement@；没有明文才对已核域名做 SMTP。不猜 Gmail。',
   },
   {
     key: 'seller',
@@ -31,8 +32,9 @@ export function bestNext(customer = {}, { clues } = {}) {
   const person = isPersonLikeLead(customer);
   const grade = customer.research?.kyb?.grade || customer.research?.grade || '';
   const sanctions = customer.research?.kyb?.sanctions || [];
+  const gap = contactGap(customer);
 
-  if (sanctions.length) {
+  if (sanctions.length || gap === 'stop') {
     return { key: 'stop', title: '制裁命中，停', next: '不要发开发信。换主体或丢掉这条。' };
   }
   if (isSellerUnlocked(customer) && customer.email) {
@@ -45,20 +47,20 @@ export function bestNext(customer = {}, { clues } = {}) {
   if (grade === 'A' && customer.email) {
     return { key: 'send', title: '可以写开发信', next: '主体、官网、角色箱都齐。按收件人时区发，不要改成私人邮箱。' };
   }
-  if (!person && (customer.website || found.websites[0])) {
+  if (gap === 'email' || (!person && (customer.website || found.websites[0]) && gap !== 'site')) {
     return {
       key: 'harvest',
       title: '挖官网角色箱',
-      next: `主体已有。从 ${customer.website || found.websites[0]} 联系页收 info@ / procurement@；没有明文再对这个域名做 SMTP，不猜 Gmail。`,
+      next: `官网已定位。从 ${customer.website || found.websites[0]} 联系页收 info@ / procurement@；没有明文再对这个域名做 SMTP，不猜 Gmail。`,
     };
   }
-  if (!person || customer.forceCompany || customer.regNo || found.companyHint) {
+  if (gap === 'site' || (!person || customer.forceCompany || customer.regNo || found.companyHint)) {
     return {
-      key: 'research',
-      title: '按公司名自动背调',
+      key: 'site',
+      title: '找官网和电话',
       next: found.companyHint
-        ? `已有「${found.companyHint}」。走公开库和搜索公式，挖官网角色箱。`
-        : '有公司全称。走公开库、黄页名录和搜索公式，挖官网角色箱。',
+        ? `已有「${found.companyHint}」。先走黄页和公开库找官网、电话，背调顺带做完；有官网再挖角色箱。`
+        : '有公司全称。先走公开库、黄页名录和搜索公式找官网和电话，不要先撞 SMTP。',
     };
   }
   if (found.websites[0] || found.emails[0]) {
@@ -70,14 +72,14 @@ export function bestNext(customer = {}, { clues } = {}) {
         : `正文出现 ${found.websites[0]}，从联系页挖角色邮箱。`,
     };
   }
-  if (found.fingerprints.length) {
+  if (gap === 'crosspost' || found.fingerprints.length) {
     return {
       key: 'crosspost',
       title: '用型号交叉检索',
-      next: `不搜「${customer.company || customer.name}」。用 ${found.fingerprints.slice(0, 2).join(' / ')} 找同款公开询盘是否写出公司名。`,
+      next: `不搜「${customer.company || customer.name}」。用 ${found.fingerprints.slice(0, 2).join(' / ') || '型号'} 找同款公开询盘是否写出公司名。`,
     };
   }
-  if (isAlibabaLead(customer)) {
+  if (gap === 'seller' || isAlibabaLead(customer)) {
     return {
       key: 'seller',
       title: '导入卖家后台导出',

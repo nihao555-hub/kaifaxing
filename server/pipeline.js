@@ -1,5 +1,5 @@
 import { config, googleSearchReady } from './config.js';
-import { db, save, getCustomer, isRfqLead, isDemoCustomer, logActivity } from './store.js';
+import { db, save, saveNow, setSaveRemote, getCustomer, isRfqLead, isDemoCustomer, logActivity } from './store.js';
 import { crawlAllAndImport, importRfqItems } from './rfq.js';
 import { researchLead, isPersonLikeLead, isPlausibleEmail, applyLeadIdentity, compactSkippedReport, cleanOfficialBuyerName } from './research.js';
 import { extractCompanyHintFromText } from './rfqHints.js';
@@ -10,6 +10,7 @@ import { VERIFIED_SOURCES } from './openSources.js';
 import { isForwarderName, isOutreachEmail } from './kyb.js';
 import { summarizeAlibabaPlan, propagateAlibabaIdentity } from './alibabaIntel.js';
 import { PLAYBOOK_STEPS, bestNext } from './playbook.js';
+import { contactGap, summarizeContactLine } from './contactLine.js';
 
 export function researchPriority(customer = {}) {
   const src = String(customer.source || '');
@@ -31,7 +32,7 @@ let researchLoop = false;
 let saveLock = Promise.resolve();
 
 function saveExclusive() {
-  saveLock = saveLock.then(() => save(), () => save());
+  saveLock = saveLock.then(() => saveNow({ remote: false }), () => saveNow({ remote: false }));
   return saveLock;
 }
 
@@ -228,8 +229,18 @@ export function kybPlanStats({ force = false } = {}) {
   return value;
 }
 
+let contactLineCache = { at: 0, value: null };
+
+export function contactLineStats({ force = false } = {}) {
+  if (!force && contactLineCache.value && Date.now() - contactLineCache.at < 15000) return contactLineCache.value;
+  const value = summarizeContactLine(db.customers);
+  contactLineCache = { at: Date.now(), value };
+  return value;
+}
+
 function invalidateKybPlan() {
   kybPlanCache = { at: 0, value: null };
+  contactLineCache = { at: 0, value: null };
 }
 
 /** Promote text hints, compact-stamp nicknames/projects, queue the rest for live KYB. */
@@ -396,29 +407,7 @@ export function startSignalPass({ limit = 800 } = {}) {
 }
 
 export function startFullKybPass() {
-  if (kybPass.status === 'running') return kybPass;
-  kybPass = { status: 'running', startedAt: new Date().toISOString() };
-  setImmediate(() => {
-    try {
-      const prep = prepareFullKybPass();
-      const added = enqueuePendingResearch({ limit: 50000 });
-      kickResearch();
-      kybPass = {
-        status: 'done',
-        startedAt: kybPass.startedAt,
-        finishedAt: new Date().toISOString(),
-        ...prep,
-        added,
-      };
-    } catch (err) {
-      kybPass = {
-        status: 'error',
-        startedAt: kybPass.startedAt,
-        error: String(err.message || err),
-      };
-    }
-  });
-  return kybPass;
+  return startContactLine({ includeCrosspost: true });
 }
 
 export function pruneResearchQueue() {
@@ -429,7 +418,13 @@ export function pruneResearchQueue() {
     if (!c) return false;
     if (isPersonLikeLead(c) && c.researchPath !== 'clues' && c.researchPath !== 'crosspost') return false;
     if (/World Bank/i.test(c.source || '')) return false;
-    if (c.research?.status === 'done') return false;
+    if (c.research?.status === 'done') {
+      if (p.playbook?.line === 'contact') {
+        const gap = contactGap(c);
+        return gap === 'email' || gap === 'site' || gap === 'crosspost';
+      }
+      return false;
+    }
     return true;
   });
   if (p.queue.length !== before) save();
@@ -438,6 +433,114 @@ export function pruneResearchQueue() {
 
 export function leadQueuePath(customer = {}) {
   return customer.researchPath || (isPersonLikeLead(customer) ? 'import' : 'auto');
+}
+
+export function enqueueContactLine({ wave = 'site', limit = 50000 } = {}) {
+  pruneResearchQueue();
+  const pending = [];
+  for (const c of db.customers) {
+    if (!isRfqLead(c)) continue;
+    if (c.research?.status === 'running') continue;
+    if (/World Bank/i.test(c.source || '')) continue;
+    const gap = contactGap(c);
+    if (gap !== wave) continue;
+    pending.push(c);
+  }
+  pending.sort((a, b) => researchPriority(a) - researchPriority(b));
+  const cap = Math.min(Math.max(Number(limit) || 50000, 1), 50000);
+  return enqueueResearch(pending.slice(0, cap), { reopen: wave === 'email' || wave === 'site' });
+}
+
+function finishContactLine(p, extra = {}) {
+  setSaveRemote(true);
+  p.playbook = {
+    ...(p.playbook || {}),
+    status: 'done',
+    finishedAt: new Date().toISOString(),
+    lastRunAt: new Date().toISOString(),
+    ...extra,
+  };
+  kybPass = {
+    status: 'done',
+    startedAt: p.playbook.startedAt,
+    finishedAt: p.playbook.finishedAt,
+    via: 'contact-line',
+    promoted: p.playbook.promoted,
+    queued: p.playbook.queued,
+  };
+  saveNow({ remote: true });
+}
+
+export function startContactLine({ wait = false, includeCrosspost = true } = {}) {
+  const p = ensurePipeline();
+  if (p.playbook?.status === 'running' && p.playbook?.line === 'contact') {
+    kickResearch();
+    return { ...p.playbook, steps: PLAYBOOK_STEPS, skipped: true };
+  }
+  setSaveRemote(false);
+  p.playbook = {
+    status: 'running',
+    line: 'contact',
+    wave: 'site',
+    startedAt: new Date().toISOString(),
+    lastRunAt: new Date().toISOString(),
+    promoted: 0,
+    stamped: 0,
+    queued: 0,
+    queuedSite: 0,
+    queuedEmail: 0,
+    queuedCrosspost: 0,
+    includeCrosspost: Boolean(includeCrosspost),
+    armed: false,
+    paths: ['auto', 'clues', includeCrosspost ? 'crosspost' : null].filter(Boolean),
+  };
+  kybPass = { status: 'running', startedAt: p.playbook.startedAt, via: 'contact-line' };
+  saveNow({ remote: false });
+
+  const run = () => {
+    try {
+      const promoted = applyTextCompanyHints();
+      const prep = prepareFullKybPass();
+      const queuedSite = enqueueContactLine({ wave: 'site' });
+      p.playbook = {
+        ...p.playbook,
+        status: 'running',
+        wave: 'site',
+        lastRunAt: new Date().toISOString(),
+        promoted: promoted + prep.promoted,
+        stamped: prep.stamped,
+        live: prep.live,
+        queued: queuedSite,
+        queuedSite,
+        plan: prep.plan,
+        armed: true,
+      };
+      saveNow({ remote: false });
+      invalidateKybPlan();
+      kickResearch();
+    } catch (err) {
+      p.playbook = {
+        ...p.playbook,
+        status: 'error',
+        lastRunAt: new Date().toISOString(),
+        error: String(err.message || err),
+      };
+      kybPass = { status: 'error', startedAt: kybPass.startedAt, error: String(err.message || err) };
+      setSaveRemote(true);
+      saveNow({ remote: false });
+    }
+  };
+  if (wait) run();
+  else setImmediate(run);
+  return { ...p.playbook, steps: PLAYBOOK_STEPS, kyb: kybPass };
+}
+
+/**
+ * Best next-step pass: every researchable lead on the site → phone → email line.
+ * Nickname cards stay on seller/identity; SKU crosspost runs after email.
+ */
+export function startBestPass({ wait = false, includeCrosspost = true } = {}) {
+  return startContactLine({ wait, includeCrosspost });
 }
 
 export function enqueuePendingResearch({ limit = 800, paths } = {}) {
@@ -457,65 +560,12 @@ export function enqueuePendingResearch({ limit = 800, paths } = {}) {
   return enqueueResearch(pending.slice(0, cap));
 }
 
-/**
- * Best next-step pass: promote text hints, then research only official-search +
- * clue harvest (no 12k SKU crosspost). Humans still unlock Alibaba seller emails.
- */
-export function startBestPass({ limit = 400, wait = false } = {}) {
-  const cap = Math.min(Math.max(Number(limit) || 400, 1), 2000);
-  const p = ensurePipeline();
-  if (p.playbook?.status === 'running') {
-    return { ...p.playbook, limit: cap, steps: PLAYBOOK_STEPS, skipped: true };
-  }
-  p.playbook = {
-    status: 'running',
-    startedAt: new Date().toISOString(),
-    lastRunAt: new Date().toISOString(),
-    promoted: 0,
-    queued: 0,
-    limit: cap,
-    paths: ['auto', 'clues'],
-  };
-  save();
-  const run = () => {
-    try {
-      const promoted = applyTextCompanyHints();
-      const queued = enqueuePendingResearch({ limit: cap, paths: ['auto', 'clues'] });
-      p.playbook = {
-        status: 'done',
-        startedAt: p.playbook.startedAt,
-        lastRunAt: new Date().toISOString(),
-        finishedAt: new Date().toISOString(),
-        promoted,
-        queued,
-        limit: cap,
-        paths: ['auto', 'clues'],
-      };
-      save();
-      kickResearch();
-    } catch (err) {
-      p.playbook = {
-        status: 'error',
-        startedAt: p.playbook?.startedAt,
-        lastRunAt: new Date().toISOString(),
-        error: String(err.message || err),
-        limit: cap,
-        paths: ['auto', 'clues'],
-      };
-      save();
-    }
-  };
-  if (wait) run();
-  else setImmediate(run);
-  return { ...p.playbook, steps: PLAYBOOK_STEPS };
-}
-
 export function kickResearch() {
   pumpResearch();
   return getPipelineState();
 }
 
-export function enqueueResearch(customers = []) {
+export function enqueueResearch(customers = [], { reopen = false } = {}) {
   const p = ensurePipeline();
   const seen = new Set(p.queue);
   let added = 0;
@@ -524,7 +574,8 @@ export function enqueueResearch(customers = []) {
     if (!id || seen.has(id)) continue;
     const row = typeof c === 'object' ? c : getCustomer(id);
     if (!row) continue;
-    if (row.research?.status === 'done' || row.research?.status === 'running') continue;
+    if (row.research?.status === 'running') continue;
+    if (!reopen && row.research?.status === 'done') continue;
     p.queue.push(id);
     seen.add(id);
     added += 1;
@@ -588,7 +639,7 @@ export function applyPublicContact(customer, email, extra = {}) {
   return true;
 }
 
-export async function runLeadResearch(customer, { useAi = true, autoApply = false, peopleProbe = false } = {}) {
+export async function runLeadResearch(customer, { useAi = true, autoApply = false, peopleProbe = false, stage, inferEmail } = {}) {
   if (researchingIds.has(customer.id)) {
     const err = new Error('正在背调中');
     err.status = 409;
@@ -598,7 +649,15 @@ export async function runLeadResearch(customer, { useAi = true, autoApply = fals
   customer.research = { ...(customer.research || {}), status: 'running', updatedAt: new Date().toISOString() };
   try {
     const personLike = isPersonLikeLead(customer);
-    const report = await researchLead(customer, { useAi: useAi && !personLike, peopleProbe });
+    const gap = contactGap({ ...customer, research: { ...(customer.research || {}), status: customer.research?.status } });
+    const resolvedStage = peopleProbe ? 'full' : (stage || (gap === 'email' ? 'email' : 'site'));
+    const wantSmtp = inferEmail ?? (resolvedStage === 'email' || resolvedStage === 'full' || peopleProbe);
+    const report = await researchLead(customer, {
+      useAi: useAi && !personLike,
+      peopleProbe,
+      inferEmail: wantSmtp,
+      stage: resolvedStage,
+    });
     customer.research = report;
     if (report.website && !customer.website) customer.website = report.website;
     if (report.legalName && report.legalName !== customer.company) customer.legalName = report.legalName;
@@ -647,10 +706,36 @@ export async function runLeadResearch(customer, { useAi = true, autoApply = fals
   }
 }
 
+function refillContactWave() {
+  const p = ensurePipeline();
+  if (p.playbook?.line !== 'contact' || p.playbook?.status !== 'running' || !p.playbook.armed) return null;
+  if (p.queue.length) return p.queue.shift();
+  if (p.playbook.wave === 'site') {
+    const added = enqueueContactLine({ wave: 'email' });
+    p.playbook.wave = 'email';
+    p.playbook.queuedEmail = added;
+    p.playbook.queued = (p.playbook.queued || 0) + added;
+    p.playbook.lastRunAt = new Date().toISOString();
+    saveNow({ remote: false });
+    if (added) return p.queue.shift();
+  }
+  if (p.playbook.wave === 'email' && p.playbook.includeCrosspost !== false) {
+    const added = enqueueContactLine({ wave: 'crosspost' });
+    p.playbook.wave = 'crosspost';
+    p.playbook.queuedCrosspost = added;
+    p.playbook.queued = (p.playbook.queued || 0) + added;
+    p.playbook.lastRunAt = new Date().toISOString();
+    saveNow({ remote: false });
+    if (added) return p.queue.shift();
+  }
+  finishContactLine(p);
+  return null;
+}
+
 async function pumpOne() {
   while (true) {
     const p = ensurePipeline();
-    const id = p.queue.shift();
+    const id = p.queue.shift() || refillContactWave();
     if (!id) break;
     const customer = getCustomer(id);
     if (!customer || /World Bank/i.test(customer.source || '')) continue;
@@ -669,7 +754,7 @@ async function pumpResearch() {
   if (researchLoop) return;
   researchLoop = true;
   try {
-    const n = Math.min(Math.max(Number(config.pipeline.researchConcurrency) || 1, 1), 4);
+    const n = Math.min(Math.max(Number(config.pipeline.researchConcurrency) || 1, 1), 6);
     await Promise.all(Array.from({ length: n }, () => pumpOne()));
   } finally {
     researchLoop = false;
@@ -771,6 +856,7 @@ export function getPipelineState() {
     kybPass,
     signalPass,
     kybPlan: kybPlanStats(),
+    contactLine: contactLineStats(),
     playbook: p.playbook || null,
   };
 }
@@ -867,22 +953,8 @@ export async function promoteLeads(ids = [], { researchLimit = 6 } = {}) {
 
 export function startLeadPipeline() {
   const p = ensurePipeline();
-  setImmediate(() => {
-    try {
-      applyTextCompanyHints();
-      enqueuePendingResearch({
-        limit: Math.min(config.pipeline.backlogPerDay || 80, 400),
-        paths: ['auto', 'clues'],
-      });
-      if (!researchLoop && p.queue.length) pumpResearch();
-    } catch (err) {
-      p.lastError = String(err.message || err);
-      save();
-    }
-  });
+  startContactLine({ wait: false, includeCrosspost: true });
   pruneResearchQueue();
-  enqueueDailyBacklog();
-  pumpResearch();
   if (tickTimer) clearInterval(tickTimer);
   const tick = () => {
     if (dueForDaily()) {
@@ -899,6 +971,9 @@ export function startLeadPipeline() {
       });
     }
     if (!researchLoop && p.queue.length) pumpResearch();
+    if (!researchLoop && p.playbook?.line === 'contact' && p.playbook?.status === 'running') {
+      pumpResearch();
+    }
   };
   tickTimer = setInterval(tick, 60 * 1000);
   setTimeout(tick, 4000);

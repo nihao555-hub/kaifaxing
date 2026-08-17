@@ -833,9 +833,9 @@ async function harvestDirectoryHits(urls, company, country) {
     }
     out.phones.push(...listing.phones);
   }
-  if (!out.phones.length && !out.website && !out.emails.length) {
+  if (!out.phones.length) {
     const direct = await lookupYellowPages(company, country);
-    if (direct.website) out.website = direct.website;
+    if (direct.website && !out.website) out.website = direct.website;
     if (direct.address) out.address = direct.address;
     if (direct.source) {
       out.source = direct.source;
@@ -1069,7 +1069,106 @@ async function aiBrief(payload) {
   return parseJson(text);
 }
 
-export async function researchLead(customer, { useAi = true, peopleProbe = false, inferEmail = peopleProbe } = {}) {
+async function enrichLeadEmails(customer, { inferEmail = true } = {}) {
+  const prior = customer.research || {};
+  const website = customer.website || prior.website || '';
+  const company = prior.legalName || customer.company || customer.name || '';
+  const notes = [...(prior.notes || [])];
+  const steps = [...(prior.steps || [])];
+  if (!website) {
+    return {
+      ...prior,
+      status: 'done',
+      contactStage: 'need-site',
+      updatedAt: new Date().toISOString(),
+      notes: [...notes, '还没有已核官网，不能推断角色邮箱。'],
+    };
+  }
+  const harvested = await harvestContacts(website, company, { country: customer.country });
+  let emails = mergeEmailLists(prior.emails || [], harvested.emails || []);
+  let inferred = prior.inferredEmail || null;
+  if (inferEmail && !filterOutreachEmails(emails).length) {
+    inferred = await inferAndVerifyEmails({
+      website,
+      company,
+      customer,
+      knownEmails: emails,
+    });
+    notes.push(...(inferred.notes || []));
+    if (inferred.accepted?.length) emails = mergeEmailLists(emails, inferred.accepted);
+  }
+  const phones = [...new Set([...(prior.phones || []), ...(harvested.phones || [])])].slice(0, 8);
+  const pages = [...(prior.pages || []), ...(harvested.pages || []).filter((p) => !(prior.pages || []).some((x) => x.url === p.url))];
+  emails = attachEmailEvidence(emails, {
+    website,
+    country: customer.country,
+    verifiedEntity: hasVerifiedEntity(prior.facts || []),
+    sameDomainFn: (item) => emailBelongsToCompany(item.email, hostFromWebsite(website), company),
+  });
+  const readyMails = emails.filter((e) => e.evidence?.ready);
+  const kyb = {
+    ...gradeKyb({
+      personLike: false,
+      forwarder: isForwarderName(company),
+      verified: hasVerifiedEntity(prior.facts || []),
+      website,
+      emails: readyMails,
+      sanctions: prior.kyb?.sanctions || [],
+      procurement: hasProcurementTrace(customer, prior.kyb?.traces || []),
+      legalName: company,
+    }),
+    sanctions: prior.kyb?.sanctions || [],
+    traces: prior.kyb?.traces || [],
+    screened: prior.kyb?.screened,
+  };
+  const contactOk = emails.length > 0;
+  const contactIdx = steps.findIndex((s) => s.key === 'contact');
+  const contactStep = {
+    key: 'contact',
+    label: '公开联系方式',
+    ok: contactOk,
+    detail: contactOk ? emailSourceLabel(emails) : '官网和 SMTP 都没有可发的角色箱',
+  };
+  if (contactIdx >= 0) steps[contactIdx] = contactStep;
+  else steps.push(contactStep);
+  notes.push('第二波：已按官网挖角色箱（明文优先，没有再 SMTP）。');
+  return {
+    ...prior,
+    status: 'done',
+    contactStage: filterOutreachEmails(emails).length ? 'done' : 'email',
+    updatedAt: new Date().toISOString(),
+    website,
+    emails,
+    phones,
+    pages,
+    steps,
+    notes,
+    inferredEmail: inferred,
+    kyb,
+    grade: kyb.grade,
+    nextAction: kyb.nextAction,
+    canApplyEmail: readyMails.length > 0 && kyb.grade === 'A',
+    outreach: {
+      ready: kyb.grade === 'A' && readyMails.length > 0,
+      email: readyMails[0]?.email || '',
+      score: readyMails[0]?.evidence?.score || 0,
+      website,
+      reason: kyb.nextAction,
+      greetingTitle: prior.outreach?.greetingTitle || '',
+      greetingName: prior.outreach?.greetingName || '',
+    },
+  };
+}
+
+export async function researchLead(customer, {
+  useAi = true,
+  peopleProbe = false,
+  inferEmail = peopleProbe,
+  stage = 'full',
+} = {}) {
+  if (stage === 'email') {
+    return enrichLeadEmails(customer, { inferEmail: inferEmail !== false });
+  }
   const clues = extractRfqClues(rfqCorpus(customer), customer);
   let personLike = isPersonLikeLead(customer);
   const path = classifyResearchPath(customer, { personLike, clues });
@@ -1207,7 +1306,7 @@ export async function researchLead(customer, { useAi = true, peopleProbe = false
     });
     notes.push(...search.notes);
     let ypHit = { website: '', emails: [], phones: [], pages: [], source: '' };
-    if (!website) {
+    if (!website || !phones.length) {
       ypHit = await harvestDirectoryHits(search.urls, legalName || company, customer.country);
       if (ypHit.website) {
         website = ypHit.website;
@@ -1267,7 +1366,7 @@ export async function researchLead(customer, { useAi = true, peopleProbe = false
     }
 
     const haveOutreach = filterOutreachEmails(harvested.emails || []).length > 0;
-    if (!haveOutreach && !(harvested.emails || []).length && website && hostFromWebsite(website) !== hostFromWebsite(searchedWebsite)) {
+    if (stage !== 'site' && !haveOutreach && !(harvested.emails || []).length && website && hostFromWebsite(website) !== hostFromWebsite(searchedWebsite)) {
       const siteSearch = await searchCompanyPages(legalName || company, {
         maxQueries: 3,
         website,
@@ -1293,7 +1392,7 @@ export async function researchLead(customer, { useAi = true, peopleProbe = false
       snippetEmails: search.snippetEmails,
       company: legalName || company,
       website,
-      fetchPages: !haveOutreach && !(snippetAddress && snippetPhones.length && (harvested.emails?.length || search.snippetEmails?.length)),
+      fetchPages: stage !== 'site' && !haveOutreach && !(snippetAddress && snippetPhones.length && (harvested.emails?.length || search.snippetEmails?.length)),
     });
     if (fromSearch.emails.length || fromSearch.pages.length) {
       harvested = {
@@ -1309,7 +1408,7 @@ export async function researchLead(customer, { useAi = true, peopleProbe = false
     harvestedTools = {
       ...(harvested.tools || {}),
       searchDorks: Boolean(harvested.tools?.searchDorks || search.urls.length),
-      yellowPages: Boolean(ypHit.pages.length),
+      yellowPages: Boolean(ypHit.pages.length || ypHit.phones.length || ypHit.website),
     };
     if (harvested.website && (harvested.verified || openWebsite)) website = harvested.website;
     emails = mergeEmailLists(harvested.emails || [], ypHit.emails);
@@ -1321,7 +1420,8 @@ export async function researchLead(customer, { useAi = true, peopleProbe = false
       facts.push({ label: '公开电话', value: phones.join(' · '), source: ypHit.phones.length ? (ypHit.source || '黄页') : '搜索摘要' });
     }
     pages = [...(harvested.pages || []), ...ypHit.pages.filter((p) => !(harvested.pages || []).some((x) => x.url === p.url))];
-    if (inferEmail && website) {
+    const wantSmtp = stage !== 'site' && inferEmail && website && !filterOutreachEmails(emails).length;
+    if (wantSmtp) {
       inferred = await inferAndVerifyEmails({
         website,
         company: legalName || company,
@@ -1330,6 +1430,8 @@ export async function researchLead(customer, { useAi = true, peopleProbe = false
       });
       notes.push(...(inferred.notes || []));
       if (inferred.accepted?.length) emails = mergeEmailLists(emails, inferred.accepted);
+    } else if (stage === 'site') {
+      notes.push('第一波只找官网和电话，角色箱留到官网确认后再挖。');
     }
     if (harvested.error && !website) notes.push(`官网抓取：${harvested.error}`);
     if (harvested.whois?.created) {
@@ -1529,8 +1631,18 @@ export async function researchLead(customer, { useAi = true, peopleProbe = false
     officers,
   });
 
+  const hasRole = filterOutreachEmails(emails).length > 0;
+  const contactStage = personLike
+    ? (path.key === 'crosspost' ? 'crosspost' : 'identity')
+    : hasRole
+      ? 'done'
+      : !website
+        ? 'need-site'
+        : (stage !== 'site' && inferEmail ? 'email' : 'await_email');
+
   return {
     status: 'done',
+    contactStage,
     updatedAt: new Date().toISOString(),
     confidence,
     legalName,
@@ -1591,6 +1703,7 @@ export async function researchLead(customer, { useAi = true, peopleProbe = false
         || (t.id === 'waybackurls' && Boolean(harvestedTools.wayback))
         || (t.id === 'subfinder' && Boolean(harvestedTools.crtsh))
         || (t.id === 'search-dorks' && Boolean(harvestedTools.searchDorks))
+        || (t.id === 'search-dorks' && Boolean(harvestedTools.yellowPages))
         || (t.id === 'google-cse' && search.engine === 'google-cse')
         || (t.id === 'serper' && search.engine === 'serper'),
     })),

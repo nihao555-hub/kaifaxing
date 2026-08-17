@@ -38,11 +38,10 @@ async function main() {
     return;
   }
 
-  if (command === 'playbook') {
-    const { startBestPass, getPipelineState } = await import('./pipeline.js');
-    const limit = Math.min(Math.max(Number(args[0] || 400), 1), 2000);
-    const result = startBestPass({ limit, wait: true });
-    console.log(`[data] playbook: ${JSON.stringify({ ...result, pipeline: getPipelineState() })}`);
+  if (command === 'playbook' || command === 'line') {
+    const { startContactLine, getPipelineState } = await import('./pipeline.js');
+    const result = startContactLine({ wait: true, includeCrosspost: !flags.has('--no-crosspost') });
+    console.log(`[data] line: ${JSON.stringify({ ...result, pipeline: getPipelineState() })}`);
     return;
   }
 
