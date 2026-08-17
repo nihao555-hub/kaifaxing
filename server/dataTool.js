@@ -88,6 +88,21 @@ async function main() {
     return;
   }
 
+  if (command === 'guess-sample') {
+    const { db } = await import('./store.js');
+    const { runGuessSample } = await import('./guessSample.js');
+    const size = Math.min(Math.max(Number(args[0] || 10000), 1), 20000);
+    const smtpLimit = Math.min(Math.max(Number(process.env.GUESS_SMTP_LIMIT || 20), 0), 100);
+    const started = Date.now();
+    const report = await runGuessSample(db.customers, { size, smtpLimit });
+    report.ms = Date.now() - started;
+    report.pool = db.customers.length;
+    const out = new URL('./data/guess-sample-report.json', import.meta.url);
+    fs.writeFileSync(out, JSON.stringify(report, null, 2));
+    console.log(`[data] guess-sample: ${JSON.stringify({ file: out.pathname, ...report.counts, ms: report.ms })}`);
+    return;
+  }
+
   if (command === 'backup') {
     if (!fs.existsSync(DB_PATH)) throw new Error(`database not found: ${DB_PATH}`);
     const result = await uploadRemoteBackup();
