@@ -53,7 +53,7 @@ import { findTradeTraces } from './tradeTraces.js';
 import { companyFromBuyerName } from './rfqHints.js';
 import { probePeopleCompany } from './peopleProbe.js';
 import { inferAndVerifyEmails } from './inferEmail.js';
-import { isDirectoryHost, parseDirectoryListing } from './yellowPages.js';
+import { isDirectoryHost, parseDirectoryListing, lookupYellowPages } from './yellowPages.js';
 
 const UA = 'OutreachAI/1.0 (public due-diligence; +https://github.com/nihao555-hub/kaifaxing)';
 
@@ -808,7 +808,7 @@ async function resolveEntity(company, country = '') {
 
 async function harvestDirectoryHits(urls, company, country) {
   const hits = [...new Set((urls || []).filter(isDirectoryHost))].slice(0, 3);
-  const out = { website: '', emails: [], phones: [], pages: [], source: '', pageUrl: '' };
+  const out = { website: '', emails: [], phones: [], address: '', pages: [], source: '', pageUrl: '' };
   for (const url of hits) {
     const r = await fetchText(url, { accept: 'text/html', timeout: 10000 });
     if (!r.ok || !r.text) continue;
@@ -820,6 +820,7 @@ async function harvestDirectoryHits(urls, company, country) {
       out.source = listing.source;
       out.pageUrl = r.url;
     }
+    if (listing.address && !out.address) out.address = listing.address;
     for (const email of listing.emails) {
       if (!emailBelongsToCompany(email, listing.website, company)) continue;
       out.emails.push({
@@ -831,6 +832,27 @@ async function harvestDirectoryHits(urls, company, country) {
       });
     }
     out.phones.push(...listing.phones);
+  }
+  if (!out.phones.length && !out.website && !out.emails.length) {
+    const direct = await lookupYellowPages(company, country);
+    if (direct.website) out.website = direct.website;
+    if (direct.address) out.address = direct.address;
+    if (direct.source) {
+      out.source = direct.source;
+      out.pageUrl = direct.pageUrl;
+    }
+    out.pages.push(...direct.pages);
+    out.phones.push(...direct.phones);
+    for (const email of direct.emails) {
+      if (!emailBelongsToCompany(email, direct.website, company)) continue;
+      out.emails.push({
+        email,
+        role: email.split('@')[0],
+        score: scoreEmail(email, direct.website),
+        source: direct.source || '黄页',
+        pages: direct.pageUrl ? [direct.pageUrl] : [],
+      });
+    }
   }
   out.emails = mergeEmailLists([], out.emails);
   out.phones = [...new Set(out.phones)].slice(0, 8);
@@ -1191,6 +1213,9 @@ export async function researchLead(customer, { useAi = true, peopleProbe = false
         website = ypHit.website;
         facts.push({ label: '黄页官网', value: ypHit.website, source: ypHit.source || '黄页' });
         notes.push(`${ypHit.source || '黄页'} 给出官网 ${ypHit.website}。名录站本身不当官网，接着核这个域名。`);
+      }
+      if (ypHit.address && !facts.some((f) => f.label === '公开地址')) {
+        facts.push({ label: '公开地址', value: ypHit.address, source: ypHit.source || '黄页' });
       }
       for (const p of ypHit.pages) sources.push({ title: p.title || '黄页', url: p.url });
     }

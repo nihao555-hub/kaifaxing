@@ -46,6 +46,70 @@ async function main() {
     return;
   }
 
+  if (command === 'yp' || command === 'yellowpages') {
+    const { db, saveNow, isRfqLead } = await import('./store.js');
+    const { applyTextCompanyHints } = await import('./pipeline.js');
+    const { isPersonLikeLead } = await import('./research.js');
+    const { lookupYellowPages, directoryTld } = await import('./yellowPages.js');
+    applyTextCompanyHints();
+    const limit = Math.min(Math.max(Number(args[0] || 12), 1), 40);
+    const commercial = /\b(gmbh|mbh|ltd|limited|llc|oy|plc|ag|srl|spa|b\.?v|sarl|pvt|inc)\b/i;
+    const pending = db.customers.filter((c) => {
+      if (!isRfqLead(c)) return false;
+      if (c.email) return false;
+      if (!directoryTld(c.country)) return false;
+      if (isPersonLikeLead(c) && !c.forceCompany) return false;
+      return true;
+    });
+    pending.sort((a, b) => {
+      const ac = commercial.test(a.company || '') ? 0 : 1;
+      const bc = commercial.test(b.company || '') ? 0 : 1;
+      if (ac !== bc) return ac - bc;
+      return String(a.company || '').localeCompare(String(b.company || ''));
+    });
+    const batch = pending.slice(0, limit);
+    const summary = { tried: 0, phones: 0, emails: 0, websites: 0, addresses: 0 };
+    const rows = [];
+    for (const c of batch) {
+      summary.tried += 1;
+      const hit = await lookupYellowPages(c.company || c.name, c.country);
+      if (hit.phones.length) summary.phones += 1;
+      if (hit.emails.length) summary.emails += 1;
+      if (hit.website) summary.websites += 1;
+      if (hit.address) summary.addresses += 1;
+      if (hit.website && !c.website) c.website = hit.website;
+      c.research = {
+        ...(c.research || {}),
+        yellowPages: hit,
+        updatedAt: new Date().toISOString(),
+      };
+      if (hit.phones.length) {
+        c.research.phones = [...new Set([...(c.research.phones || []), ...hit.phones])].slice(0, 8);
+      }
+      if (hit.emails.length) {
+        const extra = hit.emails.map((email) => ({ email, role: email.split('@')[0], source: hit.source || '黄页' }));
+        const seen = new Set((c.research.emails || []).map((e) => e.email));
+        c.research.emails = [...(c.research.emails || []), ...extra.filter((e) => !seen.has(e.email))].slice(0, 8);
+      }
+      rows.push({
+        company: c.company,
+        country: c.country,
+        source: hit.source || '-',
+        phones: hit.phones,
+        emails: hit.emails,
+        website: hit.website || '',
+        address: hit.address || '',
+      });
+      console.log(`[yp] ${summary.tried}/${batch.length} ${c.company} tel=${hit.phones[0] || '-'} mail=${hit.emails[0] || '-'} site=${hit.website || '-'} src=${hit.source || '-'}`);
+      if (summary.tried % 4 === 0) saveNow({ remote: false });
+    }
+    saveNow({ remote: false });
+    const out = new URL('./data/yellowpages-round.json', import.meta.url);
+    fs.writeFileSync(out, JSON.stringify({ summary, rows }, null, 2));
+    console.log(`[data] yp: ${JSON.stringify({ ...summary, file: out.pathname })}`);
+    return;
+  }
+
   if (command === 'kyb') {
     const { db, saveNow, isRfqLead } = await import('./store.js');
     const { applyTextCompanyHints, kybPlanStats, researchPriority } = await import('./pipeline.js');

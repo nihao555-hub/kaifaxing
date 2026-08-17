@@ -180,7 +180,7 @@ function pushUnique(list, value) {
 function collectJsonLd(row, into) {
   if (!row || typeof row !== 'object') return;
   if (!/Organization|LocalBusiness|Place|Corporation|Government/i.test(jsonLdType(row) || 'Organization')) {
-    if (row.url || row.email || row.telephone) {
+    if (row.url || row.email || row.telephone || row.address) {
       /* still take contact fields from typed-less blobs */
     } else return;
   }
@@ -192,6 +192,13 @@ function collectJsonLd(row, into) {
   if (row.telephone) {
     const phones = Array.isArray(row.telephone) ? row.telephone : [row.telephone];
     for (const p of phones) pushUnique(into.phones, p);
+  }
+  if (row.address && typeof row.address === 'object') {
+    const line = [row.address.streetAddress, row.address.postalCode, row.address.addressLocality, row.address.addressCountry]
+      .flat()
+      .filter(Boolean)
+      .join(', ');
+    if (line.length >= 8) pushUnique(into.addresses, line);
   }
 }
 
@@ -212,11 +219,12 @@ export function parseDirectoryListing(html, { pageUrl = '' } = {}) {
   const websites = [];
   const emails = [];
   const phones = [];
+  const addresses = [];
 
   $('script[type="application/ld+json"]').each((_, el) => {
     try {
       const parsed = JSON.parse($(el).contents().text() || '{}');
-      for (const row of unwrapJsonLd(parsed)) collectJsonLd(row, { websites, emails, phones });
+      for (const row of unwrapJsonLd(parsed)) collectJsonLd(row, { websites, emails, phones, addresses });
     } catch {
       /* ignore broken json-ld */
     }
@@ -273,7 +281,145 @@ export function parseDirectoryListing(html, { pageUrl = '' } = {}) {
     websites: websites.filter((u) => !isDirectoryHost(u)).slice(0, 4),
     emails: mail.slice(0, 6),
     phones: phones.slice(0, 6),
+    address: addresses[0] || '',
     source,
     pageUrl,
   };
+}
+
+export function searchName(company) {
+  return String(company || '')
+    .replace(/\b(l\.?l\.?c\.?|limited|ltd\.?|inc\.?|incorporated|gmbh|mbh|s\.?a\.?|b\.?v\.?)\b/gi, ' ')
+    .replace(/[(),]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
+}
+
+export function directorySearchUrls(company, country) {
+  const q = searchName(company);
+  if (q.length < 3) return [];
+  const enc = encodeURIComponent(q);
+  const tld = directoryTld(country);
+  const out = [];
+  if (tld === 'de') {
+    out.push(`https://www.gelbeseiten.de/suche/${enc}/bundesweit`);
+    out.push(`https://www.northdata.de/?q=${enc}`);
+  } else if (tld === 'fr') {
+    out.push(`https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=${enc}`);
+  } else if (tld === 'uk' || tld === 'gb') {
+    out.push(`https://www.yell.com/ucs/UcsSearchAction.do?keywords=${enc}`);
+  } else if (tld === 'us') {
+    out.push(`https://www.yellowpages.com/search?search_terms=${enc}`);
+  } else if (tld === 'fi') {
+    out.push(`https://www.finder.fi/search?what=${enc}`);
+  } else if (tld === 'it') {
+    out.push(`https://www.paginegialle.it/ricerca/${enc}`);
+  } else if (tld === 'es') {
+    out.push(`https://www.paginasamarillas.es/search?qc=${enc}`);
+  } else if (tld === 'nl') {
+    out.push(`https://www.detelefoongids.nl/zoek/${enc}`);
+  } else if (tld === 'cz') {
+    out.push(`https://www.zlatestranky.cz/hledani/${enc}`);
+  } else if (tld === 'ae') {
+    out.push(`https://www.yellowpages.ae/search?q=${enc}`);
+  } else if (tld === 'in') {
+    out.push(`https://www.justdial.com/${enc}`);
+  }
+  if (tld && !out.some((u) => /europages/i.test(u))) {
+    out.push(`https://www.europages.co.uk/companies/csearch.html?q=${enc}`);
+  }
+  return [...new Set(out)].slice(0, 3);
+}
+
+const LISTING_PATH = /\/gsbiz\/[a-z0-9-]+|\/eintrag\/|\/fiche\/|\/biz\/|\/mip\/|\/yp\/[a-z0-9]|\/firma\/|\/company\/[^/?#]+|\/companies\/[^/?#]+/i;
+
+export function listingLinksFromHtml(html, pageUrl = '') {
+  const $ = cheerio.load(String(html || ''));
+  const out = [];
+  const seen = new Set();
+  $('a[href]').each((_, el) => {
+    const href = String($(el).attr('href') || '').trim();
+    if (!href || href.startsWith('#') || /surveymonkey|consentmanager|facebook|instagram/i.test(href)) return;
+    let abs = href;
+    try {
+      abs = new URL(href, pageUrl || 'https://example.com').toString();
+    } catch {
+      return;
+    }
+    if (!isDirectoryHost(abs)) return;
+    let path = '';
+    try { path = new URL(abs).pathname; } catch { return; }
+    if (!LISTING_PATH.test(path) && !/\/gsbiz\//i.test(abs)) return;
+    if (/\/suche\/|\/search|\/ricerca|\/hledani|\/csearch/i.test(path) && !/\/gsbiz\//i.test(path)) return;
+    if (seen.has(abs)) return;
+    seen.add(abs);
+    out.push(abs);
+  });
+  return out.slice(0, 8);
+}
+
+function listingMentionsCompany(html, company) {
+  const tokens = String(company || '')
+    .toLowerCase()
+    .split(/[^a-z0-9äöüßáéíóúčďěňřšťž]+/i)
+    .filter((t) => t.length >= 4);
+  if (!tokens.length) return false;
+  const text = String(html || '').toLowerCase().slice(0, 12000);
+  const hits = tokens.filter((t) => text.includes(t));
+  return hits.some((t) => t.length >= 6) || hits.length >= 2;
+}
+
+const DIR_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+async function fetchDirectoryPage(url) {
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': DIR_UA, Accept: 'text/html,application/xhtml+xml' },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(12000),
+    });
+    const text = await res.text();
+    return { ok: res.ok, status: res.status, url: res.url, text };
+  } catch (err) {
+    return { ok: false, status: 0, url, text: '', error: String(err.message || err) };
+  }
+}
+
+/** Directly open national yellow-page search pages and read listing cards. */
+export async function lookupYellowPages(company, country, { fetchPage = fetchDirectoryPage } = {}) {
+  const out = {
+    website: '',
+    emails: [],
+    phones: [],
+    address: '',
+    pages: [],
+    source: '',
+    pageUrl: '',
+  };
+  const listingUrls = [];
+  for (const url of directorySearchUrls(company, country)) {
+    const r = await fetchPage(url);
+    if (!r.ok || !r.text) continue;
+    listingUrls.push(...listingLinksFromHtml(r.text, r.url));
+  }
+  const unique = [...new Set(listingUrls)].slice(0, 3);
+  for (const url of unique) {
+    const r = await fetchPage(url);
+    if (!r.ok || !r.text) continue;
+    if (!listingMentionsCompany(r.text, company)) continue;
+    const listing = parseDirectoryListing(r.text, { pageUrl: r.url });
+    out.pages.push({ url: r.url, title: listing.source || url });
+    if (listing.website && !out.website) out.website = listing.website;
+    if (listing.address && !out.address) out.address = listing.address;
+    if (listing.source && !out.source) {
+      out.source = listing.source;
+      out.pageUrl = r.url;
+    }
+    out.emails.push(...listing.emails);
+    out.phones.push(...listing.phones);
+  }
+  out.emails = [...new Set(out.emails)].slice(0, 6);
+  out.phones = [...new Set(out.phones)].slice(0, 8);
+  return out;
 }

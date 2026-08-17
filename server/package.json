@@ -11,6 +11,7 @@
     "data:promote": "node --max-old-space-size=8192 dataTool.js promote",
     "data:kyb": "node --max-old-space-size=8192 dataTool.js kyb",
     "data:playbook": "node --max-old-space-size=8192 dataTool.js playbook",
+    "data:yp": "node --max-old-space-size=8192 dataTool.js yp",
     "data:guess-sample": "node --max-old-space-size=8192 dataTool.js guess-sample",
     "data:backup": "node --max-old-space-size=8192 dataTool.js backup",
     "data:snapshot": "node --max-old-space-size=8192 dataTool.js snapshot",

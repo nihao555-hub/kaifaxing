@@ -6,6 +6,8 @@ import {
   isDirectoryHost,
   yellowPagesDorks,
   parseDirectoryListing,
+  directorySearchUrls,
+  listingLinksFromHtml,
 } from './yellowPages.js';
 import { researchDorks, pickOfficialSite, scoreResearchUrl } from './searchDorks.js';
 import { selectSearchContactUrls } from './research.js';
@@ -62,6 +64,7 @@ describe('yellow pages directories', () => {
     assert.equal(listing.website, 'https://www.dornhan.de');
     assert.ok(listing.emails.includes('info@dornhan.de'));
     assert.ok(!listing.emails.includes('info@gelbeseiten.de'));
+    assert.match(listing.phones.join(' '), /\+49|07455|123/);
     const junk = parseDirectoryListing('<p>ihre@firma.de example@example.com</p>', { pageUrl: 'https://www.gelbeseiten.de/x' });
     assert.equal(junk.emails.length, 0);
     assert.equal(listing.source, 'Gelbe Seiten');
@@ -70,5 +73,16 @@ describe('yellow pages directories', () => {
       'https://www.gelbeseiten.de/gsbiz/stadt-dornhan',
     ]);
     assert.equal(picked[0], 'https://www.gelbeseiten.de/gsbiz/stadt-dornhan');
+  });
+
+  it('builds national directory search URLs and listing card links', () => {
+    const urls = directorySearchUrls('Stadt Dornhan', 'Germany');
+    assert.ok(urls.some((u) => /gelbeseiten\.de\/suche/i.test(u)));
+    const links = listingLinksFromHtml(
+      '<a href="/gsbiz/be98e8aa-18c2-478f-a836-ceaad10e0bfb">Stadt Dornhan</a><a href="https://www.surveymonkey.de/r/x">survey</a>',
+      'https://www.gelbeseiten.de/suche/stadt%20dornhan/bundesweit',
+    );
+    assert.equal(links.length, 1);
+    assert.match(links[0], /\/gsbiz\/be98e8aa/);
   });
 });
