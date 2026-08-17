@@ -1,4 +1,8 @@
-// 全局配置：优先读环境变量，未设置时使用默认值（用户提供的账号）
+import { loadDotEnv } from './loadEnv.js';
+
+loadDotEnv();
+
+// 全局配置：凭据只从环境变量 / 本地 secrets 读取，不写入 Git。
 export const config = {
   port: Number(process.env.PORT || 3001),
 
@@ -7,8 +11,8 @@ export const config = {
     host: process.env.SMTP_HOST || 'smtp.163.com',
     port: Number(process.env.SMTP_PORT || 465),
     secure: true,
-    user: process.env.SMTP_USER || '15571870062@163.com',
-    pass: process.env.SMTP_PASS || 'PB8dPj25kfvGVitE',
+    user: process.env.SMTP_USER || '',
+    pass: process.env.SMTP_PASS || '',
     senderName: process.env.SENDER_NAME || 'Alice | OutreachAI',
   },
 
@@ -16,7 +20,7 @@ export const config = {
   ai: {
     // 海外 Host：https://grsaiapi.com  国内直连：https://grsai.dakka.com.cn
     baseUrl: process.env.AI_BASE_URL || 'https://grsaiapi.com',
-    apiKey: process.env.AI_API_KEY || 'sk-70f67a051b1848f094cf270410772c81',
+    apiKey: process.env.AI_API_KEY || '',
     model: process.env.AI_MODEL || 'gpt-5.6-sol',
   },
 
@@ -79,8 +83,8 @@ export const config = {
   imap: {
     host: process.env.IMAP_HOST || 'imap.163.com',
     port: Number(process.env.IMAP_PORT || 993),
-    user: process.env.SMTP_USER || '15571870062@163.com',
-    pass: process.env.SMTP_PASS || 'PB8dPj25kfvGVitE',
+    user: process.env.SMTP_USER || '',
+    pass: process.env.SMTP_PASS || '',
   },
 };
 

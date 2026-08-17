@@ -4,10 +4,14 @@
   "version": "1.0.0",
   "description": "OutreachAI - AI 批量开发信助手（外贸获客）",
   "scripts": {
-    "install:all": "npm install && npm --prefix server install && npm --prefix web install",
+    "install:all": "npm install && npm --prefix server install && npm --prefix web install && npm run data:restore",
     "dev": "concurrently -n server,web -c blue,green \"npm --prefix server run dev\" \"npm --prefix web run dev\"",
     "build": "npm --prefix web run build",
-    "start": "node server/index.js"
+    "start": "node server/bootstrap.js",
+    "data:restore": "npm --prefix server run data:restore",
+    "data:backup": "npm --prefix server run data:backup",
+    "data:snapshot": "npm --prefix server run data:snapshot",
+    "data:recrawl": "npm --prefix server run data:recrawl"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

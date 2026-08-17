@@ -33,6 +33,7 @@ import {
   applyPublicContact,
   promoteLeads,
 } from './pipeline.js';
+import { flushRemoteBackup } from './dataPersistence.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -542,7 +543,24 @@ app.get(/^\/(?!api\/).*/, (req, res, next) => {
   res.sendFile(path.join(dist, 'index.html'), (err) => err && next());
 });
 
-app.listen(config.port, '0.0.0.0', () => {
+const server = app.listen(config.port, '0.0.0.0', () => {
   console.log(`[OutreachAI] server listening on http://0.0.0.0:${config.port}`);
   startLeadPipeline();
 });
+
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[OutreachAI] ${signal}: flushing durable backup`);
+  server.close();
+  try {
+    await flushRemoteBackup();
+  } catch (error) {
+    console.error('[data] final backup failed:', error.message);
+  }
+  process.exit(0);
+}
+
+process.once('SIGINT', () => shutdown('SIGINT'));
+process.once('SIGTERM', () => shutdown('SIGTERM'));

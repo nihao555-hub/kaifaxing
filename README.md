@@ -30,8 +30,9 @@
 ## 快速开始
 
 ```bash
-npm run install:all   # 安装根目录 + server + web 依赖
-npm run dev           # 同时启动后端(3001)和前端(5173)
+cp .env.example .env   # 填 SMTP / AI / Google CSE，不要提交 .env
+npm run install:all    # 安装依赖，并从仓库快照或 S3 恢复询盘库
+npm run dev            # 同时启动后端(3001)和前端(5173)
 ```
 
 打开 http://localhost:5173 即可使用。客户名单旁的数据库图标分两栏：政府招标（已接通官方接口）和商业询盘（阿里官方 API + JSON 导入）。
@@ -40,13 +41,13 @@ npm run dev           # 同时启动后端(3001)和前端(5173)
 
 符合要求的背调 = 主体已核 + 官网 + 角色邮箱 + 未制裁。拿到主体的路：政府招标/写出 Ltd 的询盘自动核；正文有型号则交叉检索同款公开询盘（不搜买家昵称）；其余导入阿里后台报价后的 `buyer_company_name`，或抽屉「补主体」。不搜人名、不猜 Gmail。官方 `alibaba.icbu.rfq.search` **未实跑证实**会返回公司名。
 
-谷歌搜索：不要抓 `google.com/search` HTML（会被验证码挡住）。GitHub 上能接的是官方 [`googleapis` Custom Search](https://github.com/googleapis/google-api-nodejs-client)：
+谷歌搜索：不要抓 `google.com/search` HTML（会被验证码挡住）。默认引擎是官方 [`googleapis` Custom Search](https://github.com/googleapis/google-api-nodejs-client)，**不会**在缺 Key 时改走 Serper：
 
 1. 打开 [Programmable Search Engine](https://programmablesearchengine.google.com/) 新建搜索引擎，勾选 Search the entire web，记下 CX
 2. 在 Google Cloud 启用 Custom Search API，创建 API Key
 3. 写入 `GOOGLE_API_KEY` / `GOOGLE_CSE_ID`，或在应用「设置」页保存后点「试跑」
 
-免费额度约 100 次/天。新账号若已无法开通 CSE，可改用 Serper（同一套外贸公式，返回谷歌结果 JSON）。公共 SearXNG / 直接扒谷歌页在服务器上会被 403/验证码挡住，不会去绕。
+免费额度约 100 次/天。只有把 `SEARCH_ENGINE` 设为 `auto` 或 `serper` 时才会用 Serper。公共 SearXNG / 直接扒谷歌页在服务器上会被 403/验证码挡住，不会去绕。
 
 付费源能查到公司名/联系方式，是因为买了平台解锁或授权库，不是公开列表多了字段。对齐方式：阿里卖家报价/后台导出、`COMPANIES_HOUSE_API_KEY`（英国工商免费 Key）、`OPENCORPORATES_API_KEY`、或把 Apollo/海关导出转成带公司名的 JSON 导入。不接 Hunter/Apollo 扒私人邮箱。
 
@@ -64,37 +65,59 @@ curl -X POST http://localhost:3001/api/rfq/ingest \
 npm run build && npm start   # 后端 3001 端口同时托管前端构建产物
 ```
 
+## 数据持久化
+
+运行时库是 `server/data/db.json`（已 gitignore）。新环境按这个顺序恢复，避免每次从空库开始：
+
+1. **S3 / R2 备份**（可选）：配置 `DATA_S3_*` 后，保存询盘会异步上传 gzip；启动时若本地没有 `db.json` 就拉回来。搜索 Key 存在 `server/data/secrets.json`，不进 Git。
+2. **仓库快照** `server/data/public-rfq.snapshot.json.gz`：公开询盘的精简副本（去掉草稿、发信记录和 API Key），随代码提交。`npm run data:restore` 和 `install:all` 会把它展开成本地库。
+3. 都没有时从空种子库启动。
+
+刷新公开快照（政府招标；阿里公开列表请显式传入源名）：
+
+```bash
+npm run data:recrawl
+npm run data:recrawl -- alibaba_public   # 少量公开卡片，不要整库 16 万条
+npm run data:snapshot                    # 从现有 db.json 重写 gzip
+npm run data:backup                      # 立刻上传 S3/R2
+```
+
+完整阿里公开列表有十几万条、体积过大，不要提交进 Git。日常增量用应用内爬取 + S3 备份。
+
 ## 配置
 
-默认配置写在 `server/config.js`（含 163 SMTP 账号与 grsai API Key），可用环境变量覆盖：
+SMTP、AI、搜索 Key **只从环境变量或本地 `secrets.json` 读取**，仓库里没有默认账号。复制 `.env.example` 为 `.env`（已 gitignore），或在 Cloud Agent 环境里填同名 Secrets。
 
 | 变量 | 说明 | 默认值 |
 | --- | --- | --- |
 | `SMTP_HOST` / `SMTP_PORT` | SMTP 服务器 | smtp.163.com / 465 |
-| `SMTP_USER` / `SMTP_PASS` | 发信邮箱 / SMTP 授权码 | 15571870062@163.com |
+| `SMTP_USER` / `SMTP_PASS` | 发信邮箱 / SMTP 授权码 | 空 |
+| `IMAP_HOST` / `IMAP_PORT` | 收信（与 SMTP 账号相同） | imap.163.com / 993 |
 | `AI_BASE_URL` | grsai 接口地址（国内可换 https://grsai.dakka.com.cn） | https://grsaiapi.com |
-| `AI_API_KEY` / `AI_MODEL` | API Key / 模型 | gpt-5.6-sol |
+| `AI_API_KEY` / `AI_MODEL` | API Key / 模型 | 空 / gpt-5.6-sol |
 | `SEND_MIN_INTERVAL` / `SEND_MAX_INTERVAL` | 发信间隔（秒） | 45 / 120 |
 | `SEND_DAILY_LIMIT` | 单日发送上限 | 50 |
 | `SAM_API_KEY` | SAM.gov Public API Key（可选） | 空 |
 | `ALIBABA_APP_KEY` / `ALIBABA_APP_SECRET` / `ALIBABA_SESSION` | 阿里国际站开放平台（可选） | 空 |
 | `GOOGLE_API_KEY` / `GOOGLE_CSE_ID` | 谷歌官方 Custom Search JSON API（也可在「设置」里填） | 空 |
-| `SERPER_API_KEY` | 可选，[serper.dev](https://serper.dev/) 谷歌 SERP JSON；CSE 没开通时用 | 空 |
+| `SEARCH_ENGINE` | `google`（默认，不回退 Serper）/ `auto` / `serper` | google |
+| `SERPER_API_KEY` | 仅 `auto` 或 `serper` 时使用 | 空 |
 | `COMPANIES_HOUSE_API_KEY` | 英国 Companies House 官方 API（[免费申请](https://developer.company-information.service.gov.uk/)），也可在「设置」里填 | 空 |
 | `OPENCORPORATES_API_KEY` | OpenCorporates 多国工商聚合（可选；没 Key 仍打各国免费登记口） | 空 |
 | `PIPELINE_DAILY_HOUR` | 北京时间每日拉新询盘的整点 | 7 |
 | `PIPELINE_REFRESH_HOURS` | 当天已同步后再扫一轮的间隔（小时） | 6 |
-
-> ⚠️ 安全提示：仓库默认值中包含真实凭据，仅适合私有仓库使用；对外部署请改用环境变量并轮换密钥。
+| `DATA_S3_BUCKET` / `DATA_S3_ENDPOINT` / `DATA_S3_ACCESS_KEY_ID` / `DATA_S3_SECRET_ACCESS_KEY` | 可选的运行时库备份（AWS S3 / Cloudflare R2 / MinIO） | 空 |
 
 ## 目录结构
 
 ```
 server/            Express 后端
+  bootstrap.js     启动前恢复 S3 / 仓库快照
+  dataPersistence.js  本地库、gzip 快照、可选远程备份
   agent.js         AI Agent（生成/评分/最佳发送时间）
   scheduler.js     批量任务调度（时区 + 频率控制）
-  mailer.js        163 SMTP 发信
-  data/seed.js     种子客户数据（与设计稿一致）
+  mailer.js        SMTP 发信
+  data/seed.js     空种子；公开询盘在 snapshot gzip 里
 web/               React + Vite + Tailwind 前端
   src/components/  侧边栏 / 客户名单 / 沟通历史 / AI 面板 / 批量发送向导
 ```

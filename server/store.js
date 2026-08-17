@@ -1,28 +1,22 @@
 import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { seedCustomers, seedThreads, seedAiPanel } from './data/seed.js';
 import { isPersonLikeLead } from './research.js';
 import { config, googleSearchStatus, normalizeSearchEngine } from './config.js';
+import {
+  DB_PATH,
+  loadLocalDatabase,
+  loadSecrets,
+  saveSecrets,
+  scheduleRemoteBackup,
+} from './dataPersistence.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = path.join(__dirname, 'data', 'db.json');
-
-function load() {
-  try {
-    return JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
-  } catch {
-    return {
-      customers: seedCustomers,
-      threads: seedThreads,
-      aiPanel: seedAiPanel,
-      sentLog: [], // { customerId, sentAt } 用于每日发送上限统计
-      activities: [], // 写入现有「活动记录」Tab，供人工监控
-    };
-  }
-}
-
-export const db = load();
+export const db = loadLocalDatabase({
+  customers: seedCustomers,
+  threads: seedThreads,
+  aiPanel: seedAiPanel,
+  sentLog: [], // { customerId, sentAt } 用于每日发送上限统计
+  activities: [], // 写入现有「活动记录」Tab，供人工监控
+});
 
 function ensureSearchSettings() {
   if (!db.settings) db.settings = {};
@@ -31,7 +25,7 @@ function ensureSearchSettings() {
 
 export function applyStoredSearchSettings() {
   ensureSearchSettings();
-  const saved = db.settings.search;
+  const saved = { ...loadSecrets(), ...db.settings.search };
   if (!process.env.GOOGLE_API_KEY && saved.apiKey) config.google.apiKey = saved.apiKey;
   if (!process.env.GOOGLE_CSE_ID && !process.env.GOOGLE_CX && saved.cseId) config.google.cseId = saved.cseId;
   if (!process.env.SERPER_API_KEY && saved.serperKey) config.google.serperKey = saved.serperKey;
@@ -44,6 +38,9 @@ export function applyStoredSearchSettings() {
   if (!process.env.SEARCH_ENGINE && saved.searchEngine) {
     config.google.engine = normalizeSearchEngine(saved.searchEngine);
   }
+  for (const key of ['apiKey', 'cseId', 'serperKey', 'companiesHouseKey', 'openCorporatesKey']) {
+    delete db.settings.search[key];
+  }
 }
 
 export function saveSearchSettings({
@@ -52,6 +49,14 @@ export function saveSearchSettings({
   ensureSearchSettings();
   if (clear) {
     db.settings.search = {};
+    saveSecrets({
+      apiKey: '',
+      cseId: '',
+      serperKey: '',
+      companiesHouseKey: '',
+      openCorporatesKey: '',
+      searchEngine: 'google',
+    });
     if (!process.env.GOOGLE_API_KEY) config.google.apiKey = '';
     if (!process.env.GOOGLE_CSE_ID && !process.env.GOOGLE_CX) config.google.cseId = '';
     if (!process.env.SERPER_API_KEY) config.google.serperKey = '';
@@ -61,31 +66,34 @@ export function saveSearchSettings({
     save();
     return googleSearchStatus();
   }
+  const secretPatch = {};
   if (typeof apiKey === 'string' && apiKey.trim()) {
-    db.settings.search.apiKey = apiKey.trim();
+    secretPatch.apiKey = apiKey.trim();
     if (!process.env.GOOGLE_API_KEY) config.google.apiKey = apiKey.trim();
   }
   if (typeof cseId === 'string' && cseId.trim()) {
-    db.settings.search.cseId = cseId.trim();
+    secretPatch.cseId = cseId.trim();
     if (!process.env.GOOGLE_CSE_ID && !process.env.GOOGLE_CX) config.google.cseId = cseId.trim();
   }
   if (typeof serperKey === 'string' && serperKey.trim()) {
-    db.settings.search.serperKey = serperKey.trim();
+    secretPatch.serperKey = serperKey.trim();
     if (!process.env.SERPER_API_KEY) config.google.serperKey = serperKey.trim();
   }
   if (typeof companiesHouseKey === 'string' && companiesHouseKey.trim()) {
-    db.settings.search.companiesHouseKey = companiesHouseKey.trim();
+    secretPatch.companiesHouseKey = companiesHouseKey.trim();
     if (!process.env.COMPANIES_HOUSE_API_KEY) config.companiesHouse.apiKey = companiesHouseKey.trim();
   }
   if (typeof openCorporatesKey === 'string' && openCorporatesKey.trim()) {
-    db.settings.search.openCorporatesKey = openCorporatesKey.trim();
+    secretPatch.openCorporatesKey = openCorporatesKey.trim();
     if (!process.env.OPENCORPORATES_API_KEY) config.openCorporates.apiKey = openCorporatesKey.trim();
   }
   if (typeof searchEngine === 'string' && searchEngine.trim()) {
     const engine = normalizeSearchEngine(searchEngine);
     db.settings.search.searchEngine = engine;
+    secretPatch.searchEngine = engine;
     if (!process.env.SEARCH_ENGINE) config.google.engine = engine;
   }
+  if (Object.keys(secretPatch).length) saveSecrets(secretPatch);
   save();
   return googleSearchStatus();
 }
@@ -134,6 +142,7 @@ function flushSave() {
     // Compact JSON: pretty-printing 160k+ leads overflows V8 string length.
     fs.writeFileSync(tmp, JSON.stringify(db));
     fs.renameSync(tmp, DB_PATH);
+    scheduleRemoteBackup(DB_PATH);
   } catch (err) {
     console.error('[store] save failed:', err);
   } finally {
@@ -148,6 +157,12 @@ function flushSave() {
 export function save() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flushSave, 200);
+}
+
+export function saveNow() {
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  flushSave();
 }
 
 purgeDemoCustomers();

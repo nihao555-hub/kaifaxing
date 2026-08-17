@@ -1,13 +1,16 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { config } from './config.js';
 import { leadFacets, listCustomers, isDemoCustomer } from './store.js';
 
 describe('demo customers', () => {
-  it('flags seed example.com rows', () => {
+  it('flags seed example.com rows and the configured SMTP inbox', () => {
     assert.equal(isDemoCustomer({ id: 'c1', email: 'a@acme-corp.example.com' }), true);
     assert.equal(isDemoCustomer({ id: 'rfq1', email: 'info@stc.ac.uk' }), false);
     assert.equal(isDemoCustomer({ id: 'x', email: 'procurement@acme.example' }), true);
-    assert.equal(isDemoCustomer({ id: 'x', email: '15571870062@163.com' }), true);
+    assert.equal(isDemoCustomer({ id: 'x', email: 'buyer@stc.ac.uk' }), false);
+    const own = String(config.smtp?.user || '').toLowerCase();
+    if (own) assert.equal(isDemoCustomer({ id: 'x', email: own }), true);
   });
 });
 
