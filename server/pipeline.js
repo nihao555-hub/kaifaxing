@@ -9,6 +9,7 @@ import { clusterDemandKeywords, searchDemandPeers } from './demandPeers.js';
 import { VERIFIED_SOURCES } from './openSources.js';
 import { isForwarderName, isOutreachEmail } from './kyb.js';
 import { summarizeAlibabaPlan, propagateAlibabaIdentity } from './alibabaIntel.js';
+import { PLAYBOOK_STEPS, bestNext } from './playbook.js';
 
 export function researchPriority(customer = {}) {
   const src = String(customer.source || '');
@@ -435,19 +436,78 @@ export function pruneResearchQueue() {
   return before - p.queue.length;
 }
 
-export function enqueuePendingResearch({ limit = 800 } = {}) {
+export function leadQueuePath(customer = {}) {
+  return customer.researchPath || (isPersonLikeLead(customer) ? 'import' : 'auto');
+}
+
+export function enqueuePendingResearch({ limit = 800, paths } = {}) {
   pruneResearchQueue();
+  const allow = Array.isArray(paths) && paths.length ? new Set(paths) : null;
   const pending = [];
   for (const c of db.customers) {
     if (!isRfqLead(c)) continue;
     if (c.research?.status === 'done' || c.research?.status === 'running') continue;
     if (isPersonLikeLead(c) && c.researchPath !== 'clues' && c.researchPath !== 'crosspost') continue;
     if (/World Bank/i.test(c.source || '')) continue;
+    if (allow && !allow.has(leadQueuePath(c))) continue;
     pending.push(c);
   }
   pending.sort((a, b) => researchPriority(a) - researchPriority(b));
   const cap = Math.min(Math.max(Number(limit) || 800, 1), 50000);
   return enqueueResearch(pending.slice(0, cap));
+}
+
+/**
+ * Best next-step pass: promote text hints, then research only official-search +
+ * clue harvest (no 12k SKU crosspost). Humans still unlock Alibaba seller emails.
+ */
+export function startBestPass({ limit = 400, wait = false } = {}) {
+  const cap = Math.min(Math.max(Number(limit) || 400, 1), 2000);
+  const p = ensurePipeline();
+  if (p.playbook?.status === 'running') {
+    return { ...p.playbook, limit: cap, steps: PLAYBOOK_STEPS, skipped: true };
+  }
+  p.playbook = {
+    status: 'running',
+    startedAt: new Date().toISOString(),
+    lastRunAt: new Date().toISOString(),
+    promoted: 0,
+    queued: 0,
+    limit: cap,
+    paths: ['auto', 'clues'],
+  };
+  save();
+  const run = () => {
+    try {
+      const promoted = applyTextCompanyHints();
+      const queued = enqueuePendingResearch({ limit: cap, paths: ['auto', 'clues'] });
+      p.playbook = {
+        status: 'done',
+        startedAt: p.playbook.startedAt,
+        lastRunAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        promoted,
+        queued,
+        limit: cap,
+        paths: ['auto', 'clues'],
+      };
+      save();
+      kickResearch();
+    } catch (err) {
+      p.playbook = {
+        status: 'error',
+        startedAt: p.playbook?.startedAt,
+        lastRunAt: new Date().toISOString(),
+        error: String(err.message || err),
+        limit: cap,
+        paths: ['auto', 'clues'],
+      };
+      save();
+    }
+  };
+  if (wait) run();
+  else setImmediate(run);
+  return { ...p.playbook, steps: PLAYBOOK_STEPS };
 }
 
 export function kickResearch() {
@@ -514,7 +574,7 @@ export async function identifyLead(id, payload = {}) {
     detail: `${customer.buyerAlias || customer.name} → ${customer.company}${customer.regNo ? `，登记号 ${customer.regNo}` : ''}`,
   });
   const research = await runLeadResearch(customer, { useAi: false, autoApply: true, peopleProbe: true });
-  return { customer, research };
+  return { customer, research, playbook: bestNext(customer) };
 }
 
 export function applyPublicContact(customer, email, extra = {}) {
@@ -711,6 +771,7 @@ export function getPipelineState() {
     kybPass,
     signalPass,
     kybPlan: kybPlanStats(),
+    playbook: p.playbook || null,
   };
 }
 
@@ -806,7 +867,19 @@ export async function promoteLeads(ids = [], { researchLimit = 6 } = {}) {
 
 export function startLeadPipeline() {
   const p = ensurePipeline();
-  if ((db.customers?.length || 0) < 5000) applyTextCompanyHints();
+  setImmediate(() => {
+    try {
+      applyTextCompanyHints();
+      enqueuePendingResearch({
+        limit: Math.min(config.pipeline.backlogPerDay || 80, 400),
+        paths: ['auto', 'clues'],
+      });
+      if (!researchLoop && p.queue.length) pumpResearch();
+    } catch (err) {
+      p.lastError = String(err.message || err);
+      save();
+    }
+  });
   pruneResearchQueue();
   enqueueDailyBacklog();
   pumpResearch();

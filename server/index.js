@@ -28,6 +28,7 @@ import {
   enqueuePendingResearch,
   kickResearch,
   applyTextCompanyHints,
+  startBestPass,
   startFullKybPass,
   startSignalPass,
   identifyLead,
@@ -35,6 +36,7 @@ import {
   promoteLeads,
   kybPlanStats,
 } from './pipeline.js';
+import { PLAYBOOK_STEPS, bestNext } from './playbook.js';
 import { flushRemoteBackup, objectStoreStatus } from './dataPersistence.js';
 import { cloudDbStatus, flushCloudSync, pushCloudDatabase } from './cloudDb.js';
 
@@ -276,6 +278,22 @@ app.post('/api/search/google/test', async (req, res) => {
   }
 });
 app.get('/api/rfq/pipeline', (req, res) => res.json(getPipelineState()));
+app.get('/api/rfq/playbook', (_req, res) => {
+  res.json({
+    ok: true,
+    steps: PLAYBOOK_STEPS,
+    pipeline: getPipelineState(),
+  });
+});
+app.post('/api/rfq/playbook/run', (req, res) => {
+  const limit = Math.max(1, Math.min(Number(req.body?.limit) || 400, 2000));
+  const result = startBestPass({ limit });
+  res.json({
+    ok: true,
+    ...result,
+    pipeline: getPipelineState(),
+  });
+});
 app.get('/api/rfq/kyb-plan', (req, res) => res.json(kybPlanStats({ force: true })));
 app.post('/api/rfq/pipeline/sync', async (req, res) => {
   try {
@@ -330,6 +348,7 @@ app.get('/api/rfq/leads/:id', (req, res) => {
     peopleSearchLinks: isPersonLikeLead(customer) ? peopleSearchLinks(customer) : [],
     searchStatus: googleSearchStatus(),
     path: customer.research?.path || null,
+    playbook: bestNext(customer),
     dossier: isAlibabaLead(customer)
       ? buildAlibabaDossier(customer, { siblings: alibabaSiblings(db.customers, customer), research: customer.research })
       : null,
@@ -378,7 +397,7 @@ app.post('/api/rfq/leads/:id/research', async (req, res) => {
   if (!customer) return res.status(404).json({ error: '线索不存在' });
   try {
     const research = await runLeadResearch(customer, { peopleProbe: true });
-    res.json({ customer, research });
+    res.json({ customer, research, playbook: bestNext(customer) });
   } catch (err) {
     res.status(err.status || 502).json({ error: `背调失败：${err.message}`, research: customer.research || null });
   }

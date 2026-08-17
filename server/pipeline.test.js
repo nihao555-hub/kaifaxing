@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { beijingDate, beijingHour, pickAutoEmail, isForwarderName, researchPriority, summarizeKybPlan } from './pipeline.js';
+import { beijingDate, beijingHour, pickAutoEmail, isForwarderName, researchPriority, summarizeKybPlan, leadQueuePath } from './pipeline.js';
 import { compactSkippedReport } from './research.js';
 
 describe('pipeline schedule', () => {
@@ -85,6 +85,16 @@ describe('auto apply rules', () => {
     assert.equal(plan.government, 1);
     assert.equal(plan.textHint, 1);
     assert.equal(plan.hasWebsite, 1);
+  });
+
+  it('keeps the best pass on legal-name and clue paths', () => {
+    assert.equal(leadQueuePath({ company: 'NMG TECHNICAL SERVICE L.L.C', researchPath: 'auto' }), 'auto');
+    assert.equal(leadQueuePath({ company: 'Jack', website: 'https://nmguae.com', researchPath: 'clues' }), 'clues');
+    assert.equal(leadQueuePath({ company: 'Abdi Muse', researchPath: 'crosspost' }), 'crosspost');
+    assert.equal(leadQueuePath({ company: 'Linda N', name: 'Linda N' }), 'import');
+    const best = new Set(['auto', 'clues']);
+    assert.equal(best.has(leadQueuePath({ researchPath: 'auto' })), true);
+    assert.equal(best.has(leadQueuePath({ researchPath: 'crosspost' })), false);
   });
 
   it('uses a compact C report for nickname mass KYB', () => {

@@ -172,6 +172,7 @@ export default function LeadsPage({ onGoOutreach }) {
   const [showLog, setShowLog] = useState(false);
   const [checked, setChecked] = useState([]);
   const [okMsg, setOkMsg] = useState('');
+  const [playbookBusy, setPlaybookBusy] = useState(false);
 
   const countryGroups = useMemo(() => groupCountryFacets(facets.countries), [facets.countries]);
   const selectedNames = useMemo(
@@ -387,6 +388,24 @@ export default function LeadsPage({ onGoOutreach }) {
   const hasFilters = countryKeys.length > 0 || quality || researchFilter || postedOn || category;
 
   const allChecked = rows.length > 0 && rows.every((r) => checked.includes(r.id));
+  const runPlaybook = async () => {
+    setPlaybookBusy(true);
+    setErr('');
+    setOkMsg('');
+    try {
+      const data = await api.rfqPlaybookRun({ limit: 400 });
+      if (data.pipeline) setPipeline(data.pipeline);
+      await load();
+      setOkMsg(data.skipped
+        ? '最佳路径正在跑，先抽法定名再排队可核主体，不跑 12 万昵称交叉检索。'
+        : '已提交最佳路径：先抽法定名，再核官网角色箱。完成后看同步记录里的排队数。');
+    } catch (e) {
+      setErr(String(e.message || e));
+    } finally {
+      setPlaybookBusy(false);
+    }
+  };
+
   const batchResearch = async () => {
     const ids = checked.slice(0, 5);
     if (!ids.length) return;
@@ -440,6 +459,15 @@ export default function LeadsPage({ onGoOutreach }) {
             </button>
             <button
               type="button"
+              onClick={runPlaybook}
+              disabled={playbookBusy || busy || pipeline?.playbook?.status === 'running'}
+              className="flex h-8 items-center gap-1.5 rounded border border-primary bg-white px-3 text-[12px] font-medium text-primary hover:bg-primary-light disabled:opacity-50"
+            >
+              {playbookBusy ? <Spinner className="h-3! w-3!" /> : <ShieldCheck size={13} />}
+              按最佳路径跑一轮
+            </button>
+            <button
+              type="button"
               onClick={syncToday}
               disabled={syncing || pipeline?.syncStatus === 'running'}
               className="flex h-8 items-center gap-1.5 rounded bg-primary px-3.5 text-[12px] font-medium text-white hover:bg-blue-600 disabled:opacity-50"
@@ -478,6 +506,14 @@ export default function LeadsPage({ onGoOutreach }) {
                 )}
               </p>
             )}
+            {pipeline.playbook && (
+              <p>
+                最佳路径 {pipeline.playbook.status === 'running' ? '正在跑' : formatTime(pipeline.playbook.lastRunAt || pipeline.playbook.finishedAt)}
+                {pipeline.playbook.status === 'done' ? `：提升主体 ${pipeline.playbook.promoted || 0}，排队 ${pipeline.playbook.queued || 0}` : ''}
+                {pipeline.playbook.error ? ` · ${pipeline.playbook.error}` : ''}
+                。只跑可核公司名和正文线索，不跑型号交叉。
+              </p>
+            )}
           </div>
         )}
 
@@ -503,21 +539,26 @@ export default function LeadsPage({ onGoOutreach }) {
           </button>
         </form>
 
-        <div className="mt-3 grid gap-2 rounded-lg border border-[#e8edf4] bg-[#f8fafc] px-3 py-2.5 text-[11px] leading-relaxed text-[#64748b] sm:grid-cols-3">
+        <div className="mt-3 grid gap-2 rounded-lg border border-[#e8edf4] bg-[#f8fafc] px-3 py-2.5 text-[11px] leading-relaxed text-[#64748b] sm:grid-cols-2 lg:grid-cols-4">
           <div>
-            <span className="font-medium text-[#334155]">1. 可自动背调</span>
+            <span className="font-medium text-[#334155]">1. 先有法定名</span>
             {' '}
-            政府招标、写出 Ltd/LLC 的询盘：公开库 + 搜索公式挖官网角色邮箱。
+            政府招标、正文 Ltd、粘连显示名拆开。阿里昵称靠后台导出或补主体，不搜人名。
           </div>
           <div>
-            <span className="font-medium text-[#334155]">2. 询盘指纹</span>
+            <span className="font-medium text-[#334155]">2. 再核主体和官网</span>
             {' '}
-            有型号/SKU 时搜同款公开询盘，不搜买家昵称。命中公司名再核主体。
+            公开登记库 + 搜索公式定位官网。制裁命中就停。
           </div>
           <div>
-            <span className="font-medium text-[#334155]">3. 需补主体</span>
+            <span className="font-medium text-[#334155]">3. 只收角色箱</span>
             {' '}
-            只有 Linda N 这种：导入阿里后台报价后的公司名，或填「补主体」。
+            联系页 info@ / procurement@；没有明文就对已核域名做 SMTP。不猜 Gmail。
+          </div>
+          <div>
+            <span className="font-medium text-[#334155]">4. 阿里拿邮箱</span>
+            {' '}
+            公开列表没有邮箱。国际站报价后导出 buyer_company_name / buyer_email，按询盘 ID 回填。
           </div>
         </div>
 
@@ -883,6 +924,7 @@ export default function LeadsPage({ onGoOutreach }) {
                   tab={drawerTab}
                   customer={customer}
                   research={research}
+                  playbook={detail?.playbook}
                   dossier={detail?.dossier}
                   peopleSearchLinks={detail?.peopleSearchLinks || detail?.dossier?.peopleSearchLinks || []}
                   imageSearchLinks={detail?.imageSearchLinks || []}
@@ -1065,7 +1107,7 @@ function AnnexNote({ haveAnnexes = false }) {
   );
 }
 
-function DrawerBody({ tab, customer, research, dossier, peopleSearchLinks = [], imageSearchLinks = [], pickedEmail, setPickedEmail, onIdentify, identifying = false }) {
+function DrawerBody({ tab, customer, research, playbook, dossier, peopleSearchLinks = [], imageSearchLinks = [], pickedEmail, setPickedEmail, onIdentify, identifying = false }) {
   const address = research?.address || factValue(research, /注册地址|总部|地址/);
   const industry = research?.industry || factValue(research, /行业/) || customer.industry;
   const size = research?.employees || factValue(research, /员工规模/);
@@ -1180,6 +1222,13 @@ function DrawerBody({ tab, customer, research, dossier, peopleSearchLinks = [], 
       {research?.status === 'failed' && <p className="text-[12px] text-rose-500">{research.error || '背调失败'}</p>}
       {!research?.status && (
         <p className="text-[12px] leading-relaxed text-[#64748b]">排队自动背调中。只查公开主体库和官网联系页，不扒私人邮箱。</p>
+      )}
+
+      {playbook && (
+        <div className="rounded-lg border border-primary/20 bg-primary-light px-3 py-2.5">
+          <div className="text-[12px] font-medium text-primary">下一步 · {playbook.title}</div>
+          <p className="mt-1 text-[12px] leading-relaxed text-[#334155]">{playbook.next}</p>
+        </div>
       )}
 
       {(research?.path || customer.researchPath) && (

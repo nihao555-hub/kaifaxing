@@ -38,6 +38,14 @@ async function main() {
     return;
   }
 
+  if (command === 'playbook') {
+    const { startBestPass, getPipelineState } = await import('./pipeline.js');
+    const limit = Math.min(Math.max(Number(args[0] || 400), 1), 2000);
+    const result = startBestPass({ limit, wait: true });
+    console.log(`[data] playbook: ${JSON.stringify({ ...result, pipeline: getPipelineState() })}`);
+    return;
+  }
+
   if (command === 'kyb') {
     const { db, saveNow, isRfqLead } = await import('./store.js');
     const { applyTextCompanyHints, kybPlanStats, researchPriority } = await import('./pipeline.js');
