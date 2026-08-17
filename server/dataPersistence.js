@@ -157,7 +157,7 @@ function ossClient(cfg) {
     accessKeyId: cfg.accessKeyId,
     accessKeySecret: cfg.accessKeySecret,
     bucket: cfg.bucket,
-    timeout: 180_000,
+    timeout: Number(process.env.OSS_TIMEOUT_MS || 600_000),
   };
   if (cfg.endpoint) options.endpoint = cfg.endpoint;
   else options.region = cfg.region || 'oss-cn-hangzhou';
@@ -199,9 +199,24 @@ async function storeGet(cfg, key) {
 
 async function storePut(cfg, key, body, contentType) {
   if (cfg.kind === 'oss') {
-    await ossClient(cfg).put(key, body, {
-      headers: { 'Content-Type': contentType || 'application/octet-stream' },
-    });
+    const client = ossClient(cfg);
+    const headers = { 'Content-Type': contentType || 'application/octet-stream' };
+    if (body.length < 5 * 1024 * 1024) {
+      await client.put(key, body, { headers, timeout: Number(process.env.OSS_TIMEOUT_MS || 600_000) });
+      return;
+    }
+    const tmp = path.join(DATA_DIR, `.oss-upload-${process.pid}`);
+    ensureParent(tmp);
+    fs.writeFileSync(tmp, body);
+    try {
+      await client.multipartUpload(key, tmp, {
+        timeout: Number(process.env.OSS_TIMEOUT_MS || 600_000),
+        partSize: 2 * 1024 * 1024,
+        mime: contentType || 'application/octet-stream',
+      });
+    } finally {
+      fs.rmSync(tmp, { force: true });
+    }
     return;
   }
   await s3Client(cfg).send(new PutObjectCommand({
