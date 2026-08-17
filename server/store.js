@@ -158,7 +158,7 @@ function flushCloudFromDirty() {
   });
 }
 
-function flushSave() {
+function flushSave({ remote = true } = {}) {
   if (saving) {
     saveAgain = true;
     return;
@@ -169,7 +169,7 @@ function flushSave() {
     // Compact JSON: pretty-printing 160k+ leads overflows V8 string length.
     fs.writeFileSync(tmp, JSON.stringify(db));
     fs.renameSync(tmp, DB_PATH);
-    scheduleRemoteBackup(DB_PATH);
+    if (remote) scheduleRemoteBackup(DB_PATH);
     flushCloudFromDirty();
   } catch (err) {
     console.error('[store] save failed:', err);
@@ -187,10 +187,10 @@ export function save() {
   saveTimer = setTimeout(flushSave, 200);
 }
 
-export function saveNow() {
+export function saveNow({ remote = true } = {}) {
   clearTimeout(saveTimer);
   saveTimer = null;
-  flushSave();
+  flushSave({ remote });
 }
 
 purgeDemoCustomers();

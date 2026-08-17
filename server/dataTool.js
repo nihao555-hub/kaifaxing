@@ -78,9 +78,9 @@ async function main() {
         c.research = { status: 'failed', error: String(err.message || err), updatedAt: new Date().toISOString() };
         console.log(`[kyb] ${summary.tried}/${batch.length} FAIL ${c.company}: ${err.message || err}`);
       }
-      if (summary.tried % 5 === 0) saveNow();
+      if (summary.tried % 5 === 0) saveNow({ remote: false });
     }
-    saveNow();
+    saveNow({ remote: false });
     summary.ms = Date.now() - started;
     summary.pendingLeft = pending.length - batch.length;
     summary.plan = kybPlanStats({ force: true });
