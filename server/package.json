@@ -5,14 +5,14 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "dev": "node --watch bootstrap.js",
-    "start": "node bootstrap.js",
-    "data:restore": "node dataTool.js restore",
-    "data:backup": "node dataTool.js backup",
-    "data:snapshot": "node dataTool.js snapshot",
-    "data:recrawl": "node dataTool.js recrawl",
-    "data:push": "node dataTool.js push",
-    "data:pull": "node dataTool.js pull",
+    "dev": "node --watch --max-old-space-size=8192 bootstrap.js",
+    "start": "node --max-old-space-size=8192 bootstrap.js",
+    "data:restore": "node --max-old-space-size=8192 dataTool.js restore",
+    "data:backup": "node --max-old-space-size=8192 dataTool.js backup",
+    "data:snapshot": "node --max-old-space-size=8192 dataTool.js snapshot",
+    "data:recrawl": "node --max-old-space-size=8192 dataTool.js recrawl",
+    "data:push": "node --max-old-space-size=8192 dataTool.js push",
+    "data:pull": "node --max-old-space-size=8192 dataTool.js pull",
     "test": "node --test research.test.js pipeline.test.js rfq-ingest.test.js publicRfq.test.js b2bPublic.test.js store.test.js openSources.test.js githubTools.test.js searchDorks.test.js kyb.test.js rfqHints.test.js researchPath.test.js paidSources.test.js context.test.js config.test.js dataPersistence.test.js cloudDb.test.js"
   },
   "dependencies": {

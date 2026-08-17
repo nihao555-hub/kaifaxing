@@ -1,5 +1,6 @@
 // 只拉免登录就能看到的公开询盘列表，不登录、不绕验证码、不收集隐藏邮箱。
 import { extractCompanyHintFromText } from './rfqHints.js';
+import { compactPublicCard } from './dataPersistence.js';
 
 export const PUBLIC_SINCE_DEFAULT = '2026-07-01';
 
@@ -183,7 +184,7 @@ export function toLead(row) {
     categoryId: row.categoryId || '',
     categoryName: row.categoryName || '',
     product: row.subject || '',
-    publicCard: { ...row },
+    publicCard: compactPublicCard(row),
     painPoints: `公开询盘：${row.subject || ''}${qty ? `，数量 ${qty}` : ''}${row.country ? `，${row.country}` : ''}${when ? `，发布 ${when}` : ''}${row.categoryName ? `，品类 ${row.categoryName}` : ''}。${(row.description || '').slice(0, 400)} 列表页无邮箱。${extras}`,
   };
 }

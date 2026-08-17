@@ -5,6 +5,7 @@ import { searchAlibabaPublic, crawlAlibabaPublic, alibabaCrawlProgress, ALIBABA_
 import { searchGoldSupplier, searchTradeIndia } from './b2bPublic.js';
 import { parseAlibabaExportRow } from './researchPath.js';
 import { normalizePaidExportRow } from './paidSources.js';
+import { compactPublicCard } from './dataPersistence.js';
 
 // 聚合公开 RFQ / 采购数据源：一次请求并行打多个官方接口，结果归一化后合并。
 // 只走开放 API，不爬私人邮箱。某个源失败不影响其他源。
@@ -555,7 +556,7 @@ export function importRfqItems(items = [], { quiet = false, silent = false, pers
       country: it.country || '',
       timezone: it.timezone || guessTimezone(it.country, 'America/New_York'),
       industry: it.industry || '',
-      painPoints: it.painPoints || it.title || '',
+      painPoints: String(it.painPoints || it.title || '').slice(0, 1200),
       status: 'uncontacted',
       lastActivity: new Date().toISOString().slice(0, 10),
       ingestedAt: new Date().toISOString(),
@@ -571,7 +572,7 @@ export function importRfqItems(items = [], { quiet = false, silent = false, pers
       categoryId: it.categoryId || it.publicCard?.categoryId || '',
       categoryName: it.categoryName || it.publicCard?.categoryName || '',
       product: it.product || it.title || it.publicCard?.subject || '',
-      publicCard: it.publicCard || null,
+      publicCard: compactPublicCard(it.publicCard) || it.publicCard || null,
     };
     db.customers.unshift(customer);
     rememberImported(customer);
