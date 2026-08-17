@@ -1,5 +1,6 @@
 import { chat, parseJson } from './ai.js';
 import { config } from './config.js';
+import { buildWriterBrief } from './context.js';
 
 // ============================================================
 // 外贸开发信 AI Agent
@@ -48,15 +49,10 @@ const WRITER_SYSTEM_PROMPT = `你是一位顶尖的外贸开发信（Cold Email�
 body 中用 \\n\\n 分段，不要包含主题行。`;
 
 export async function generateEmail(customer, extraContext = '') {
-  const user = `请为以下客户撰写一封开发信：
+  const user = `请为以下客户撰写一封开发信。开头必须引用背调里的官网、登记地址、招标编号或法定名称之一，证明研究过这家主体，不要用名片字段编故事。
 
-- 姓名：${customer.name}
-- 公司：${customer.company}
-- 职位：${customer.title}
-- 国家/地区：${customer.country}（时区 ${customer.timezone}）
-- 所在行业：${customer.industry || '未知'}
-- 已知痛点/背景：${customer.painPoints || '未知，请根据行业和职位合理推断'}
-${extraContext ? `- 补充要求：${extraContext}` : ''}
+${buildWriterBrief(customer)}
+${extraContext ? `\n【补充要求】\n${extraContext}` : ''}
 
 输出 JSON。`;
 
@@ -102,7 +98,8 @@ const EVALUATOR_SYSTEM_PROMPT = `你是一位外贸开发信质量评估专家�
 {"dimensions": [{"key": "主题吸引力", "score": 85}, {"key": "内容相关性", "score": 90}, {"key": "个性化程度", "score": 80}, {"key": "行动号召", "score": 86}, {"key": "整体可读性", "score": 88}], "suggestion": "一段中文改进建议（60 字以内）"}`;
 
 export async function evaluateEmail({ subject, body, customer }) {
-  const user = `客户背景：${customer ? `${customer.name}，${customer.company}，${customer.title}，${customer.industry || ''}` : '未知'}
+  const user = `客户背景：
+${customer ? buildWriterBrief(customer) : '未知'}
 
 主题：${subject}
 
