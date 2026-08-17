@@ -814,7 +814,10 @@ async function harvestContacts(website, company, { extraUrls = [], country = '' 
     }
   }).sort((a, b) => scoreResearchUrl(b) - scoreResearchUrl(a)).slice(0, 3);
   const discovered = discoverContactLinks(homeRes.text, homeRes.url);
-  const commonPaths = ['/contact', '/contact-us', '/impressum', '/kontakt', '/procurement'].map((p) => {
+  const commonPaths = [
+    '/contact', '/contact-us', '/contactus', '/en/contact', '/nl/contact', '/fr/contact',
+    '/contactez-nous', '/impressum', '/kontakt', '/procurement',
+  ].map((p) => {
     try { return new URL(p, homeRes.url).toString(); } catch { return ''; }
   }).filter(Boolean);
   const extra = [
@@ -1083,7 +1086,7 @@ export async function researchLead(customer, { useAi = true } = {}) {
     const productTerms = rfqProductTerms(`${customer.title || ''} ${customer.painPoints || ''}`);
     const openWebsite = website;
     search = await searchCompanyPages(legalName || company, {
-      maxQueries: openWebsite ? 1 : 3,
+      maxQueries: openWebsite ? 2 : 4,
       website: searchedWebsite,
       country: customer.country,
       product: productTerms,

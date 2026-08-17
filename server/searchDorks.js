@@ -147,7 +147,9 @@ export function countrySearchTerms(country) {
   const tld = countryTld(country);
   const aliases = COUNTRY_ALIASES[tld] || [];
   const raw = String(country || '').replace(/"/g, '').trim();
-  const extra = raw && raw.length >= 3 ? [`"${raw}"`] : [];
+  const extra = raw && raw.length >= 3 && !aliases.some((a) => a.replace(/"/g, '').toLowerCase() === raw.toLowerCase())
+    ? [`"${raw}"`]
+    : [];
   return [...new Set([...aliases, ...extra])];
 }
 
@@ -195,7 +197,9 @@ export function searchLabel(company) {
     .trim();
 }
 
-/** 外贸找联系方式的搜索公式：公司名+国家/产品，再 site:域名 / PDF，不是扒私人邮箱 */
+const DACH = new Set(['de', 'at', 'ch']);
+
+/** 给谷歌/Serper 用的短公式。不搜 "info@"——索引里几乎没有这个字面量。 */
 export function researchDorks(company, { website, country, product } = {}) {
   const q = quotedName(searchLabel(company) || company);
   if (q.length < 5) return [];
@@ -206,28 +210,20 @@ export function researchDorks(company, { website, country, product } = {}) {
     ? product.filter(Boolean).slice(0, 3)
     : rfqProductTerms(product);
   const productClause = products.length ? `(${products.map((p) => `"${String(p).replace(/"/g, '')}"`).join(' OR ')})` : '';
+  const impressum = DACH.has(tld) ? ' OR impressum OR kontakt' : '';
   const out = [];
   if (host) {
-    out.push(`site:${host} (contact OR "contact us" OR impressum OR kontakt OR "info@" OR "sales@" OR "procurement@")`);
-    out.push(`site:${host} (address OR "P.O. Box" OR "P.O Box" OR phone OR tel OR mobile OR "info@")`);
-    out.push(`${q} ("@${host}" OR "info@" OR "sales@") site:${host}`);
-    out.push(`site:${host} (inurl:impressum OR inurl:privacy OR inurl:legal OR "privacy policy")`);
-    out.push(`${q} (contact OR "info@" OR procurement) filetype:pdf`);
+    out.push(`site:${host} (contact OR "contact us" OR "get in touch" OR email${impressum})`);
+    out.push(`site:${host} (inurl:contact OR inurl:about${DACH.has(tld) ? ' OR inurl:impressum' : ''})`);
+    out.push(place ? `${q} ${place} (official OR website OR contact)` : `${q} (official website OR contact)`);
   } else {
-    if (place) {
-      const aliases = countrySearchTerms(country).filter((t) => !t.includes(' ')).slice(0, 2);
-      for (const city of aliases) out.push(`${q} ${city} (website OR contact OR "info@")`);
-      if (aliases[0]) out.push(`${q} ${aliases[0]} (address OR "P.O. Box" OR "P.O Box" OR phone OR tel OR mobile)`);
-      if (productClause) out.push(`${q} ${place} ${productClause} (contact OR email OR "info@")`);
-      if (tld) out.push(`${q} site:.${tld} (contact OR impressum OR "info@" OR inurl:contact)`);
-    }
-    out.push(`${q} (contact OR "contact us" OR impressum OR kontakt OR procurement OR purchasing)`);
-    out.push(`${q} (info@ OR sales@ OR procurement@ OR purchasing@ OR enquiry@ OR inquiry@ OR contact@)`);
-    if (!place) out.push(`${q} (contact OR "info@" OR procurement OR impressum) filetype:pdf`);
-    if (!place) out.push(`${q} (intitle:contact OR intitle:impressum OR "email us" OR "e-mail")`);
-    else out.push(`${q} ${place} (contact OR "info@") filetype:pdf`);
+    out.push(place ? `${q} ${place} (official website OR homepage OR contact)` : `${q} (official website OR homepage OR contact)`);
+    if (place) out.push(`${q} ${place} (contact OR email)`);
+    if (tld) out.push(`${q} site:.${tld} (contact OR website)`);
+    if (productClause && place) out.push(`${q} ${place} ${productClause} (contact OR email)`);
+    if (!place) out.push(`${q} (contact OR "contact us" OR email)`);
   }
-  return out;
+  return [...new Set(out)];
 }
 
 export function searchPageUrl(engine, query) {
@@ -641,7 +637,14 @@ export async function searchGoogleCse(query) {
   return { ok: true, status: res.status, error: '', json };
 }
 
+let serperDisabled = '';
+
+export function serperBlockedReason() {
+  return serperDisabled;
+}
+
 export async function searchSerper(query) {
+  if (serperDisabled) return { ok: false, status: 400, error: serperDisabled, json: null };
   if (!serperReady()) return { ok: false, status: 0, error: '未配置 SERPER_API_KEY', json: null };
   const res = await fetch('https://google.serper.dev/search', {
     method: 'POST',
@@ -653,7 +656,11 @@ export async function searchSerper(query) {
     signal: AbortSignal.timeout(15000),
   });
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) return { ok: false, status: res.status, error: googleApiError(json, res.status), json };
+  if (!res.ok) {
+    const error = googleApiError(json, res.status);
+    if (/credit|quota|limit/i.test(error)) serperDisabled = error;
+    return { ok: false, status: res.status, error, json };
+  }
   return { ok: true, status: res.status, error: '', json };
 }
 
@@ -760,7 +767,7 @@ export async function searchCompanyPages(company, { maxQueries = 4, website, cou
     try {
       if (officialReady) {
         const official = await searchOfficialGoogle(query, company, { siteHost, country });
-        if (official.error) notes.push(official.error);
+        if (official.error && !notes.includes(official.error)) notes.push(official.error);
         mergeParsed(parsed, official.parsed);
         if (official.engine && (official.parsed.urls.length || official.parsed.snippetEmails.length)) {
           engine = engine || official.engine;

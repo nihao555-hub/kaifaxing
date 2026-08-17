@@ -69,14 +69,12 @@ const TYNE_JUNK_RSS = `
 `;
 
 describe('research dorks', () => {
-  it('builds quoted contact / role-email / pdf formulas without a known site', () => {
+  it('builds quoted company+contact formulas without a known site', () => {
     const q = researchDorks('Tyne Coast College');
-    assert.ok(q.length >= 4);
+    assert.ok(q.length >= 2);
     assert.ok(q[0].startsWith('"Tyne Coast College"'));
-    assert.ok(/contact us|procurement|impressum/i.test(q[0]));
-    assert.ok(/info@|procurement@/i.test(q[1]));
-    assert.ok(q.some((s) => /filetype:pdf/i.test(s)));
-    assert.ok(q.some((s) => /intitle:contact|email us/i.test(s)));
+    assert.ok(/official website|contact/i.test(q[0]));
+    assert.ok(!q.some((s) => /info@|sales@|procurement@/i.test(s)));
     assert.deepEqual(researchDorks(''), []);
   });
 
@@ -90,20 +88,20 @@ describe('research dorks', () => {
     assert.ok(q[0].includes('UAE') || q[0].includes('Dubai'));
     assert.ok(q[0].startsWith('"NMG TECHNICAL SERVICE"'));
     assert.ok(q.some((s) => /site:\.ae/i.test(s)));
-    assert.ok(q.some((s) => /P\.O\. Box|phone OR tel/i.test(s)));
     assert.ok(q.some((s) => /Chiller|Compressor/i.test(s)));
+    assert.ok(!q.some((s) => /info@/i.test(s)));
     assert.deepEqual(rfqProductTerms('公开询盘：Chiller Compressor Refrigeration Spare Parts，数量 100 Piece'), ['Chiller', 'Compressor', 'Refrigeration']);
     assert.equal(hostFitsCountry('https://nmguae.com/', 'United Arab Emirates'), true);
     assert.equal(hostFitsCountry('https://www.nmggeo.com/', 'United Arab Emirates'), false);
   });
 
-  it('adds site: and @domain formulas when the official website is known', () => {
+  it('adds simple site:contact formulas when the official website is known', () => {
     const q = researchDorks('Tyne Coast College', { website: 'https://www.stc.ac.uk' });
     assert.ok(q.some((s) => /site:stc\.ac\.uk/i.test(s)));
-    assert.ok(q.some((s) => /"info@"|"sales@"/i.test(s)));
-    assert.ok(!q.some((s) => /info@stc\.ac\.uk/i.test(s)));
+    assert.ok(q.some((s) => /inurl:contact/i.test(s)));
+    assert.ok(q.some((s) => /"Tyne Coast College"/i.test(s) && /official|website|contact/i.test(s)));
+    assert.ok(!q.some((s) => /info@|sales@|impressum/i.test(s)));
     assert.ok(q[0].startsWith('site:stc.ac.uk'));
-    assert.ok(q.some((s) => /filetype:pdf/i.test(s)));
   });
 
   it('builds clickable Google links for the same formulas', () => {
