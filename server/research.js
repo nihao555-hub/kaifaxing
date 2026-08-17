@@ -52,6 +52,7 @@ import { screenSanctions } from './sanctions.js';
 import { findTradeTraces } from './tradeTraces.js';
 import { companyFromBuyerName } from './rfqHints.js';
 import { probePeopleCompany } from './peopleProbe.js';
+import { inferAndVerifyEmails } from './inferEmail.js';
 
 const UA = 'OutreachAI/1.0 (public due-diligence; +https://github.com/nihao555-hub/kaifaxing)';
 
@@ -993,7 +994,7 @@ async function aiBrief(payload) {
   return parseJson(text);
 }
 
-export async function researchLead(customer, { useAi = true, peopleProbe = false } = {}) {
+export async function researchLead(customer, { useAi = true, peopleProbe = false, inferEmail = peopleProbe } = {}) {
   const clues = extractRfqClues(rfqCorpus(customer), customer);
   let personLike = isPersonLikeLead(customer);
   const path = classifyResearchPath(customer, { personLike, clues });
@@ -1044,6 +1045,7 @@ export async function researchLead(customer, { useAi = true, peopleProbe = false
   let search = { queries: [], urls: [], snippetEmails: [], officialGuess: '', notes: [], engine: '' };
   let crosspost = null;
   let people = null;
+  let inferred = null;
   let siteSocials = [];
   let siteOfficers = [];
 
@@ -1227,6 +1229,16 @@ export async function researchLead(customer, { useAi = true, peopleProbe = false
       facts.push({ label: '公开电话', value: phones.join(' · '), source: '搜索摘要' });
     }
     pages = harvested.pages || [];
+    if (inferEmail && website) {
+      inferred = await inferAndVerifyEmails({
+        website,
+        company: legalName || company,
+        customer,
+        knownEmails: emails,
+      });
+      notes.push(...(inferred.notes || []));
+      if (inferred.accepted?.length) emails = mergeEmailLists(emails, inferred.accepted);
+    }
     if (harvested.error && !website) notes.push(`官网抓取：${harvested.error}`);
     if (harvested.whois?.created) {
       facts.push({
@@ -1460,6 +1472,7 @@ export async function researchLead(customer, { useAi = true, peopleProbe = false
     clues,
     crosspost,
     peopleProbe: people,
+    inferredEmail: inferred,
     searchPages: (search.urls || []).slice(0, 8),
     kyb,
     grade: kyb.grade,

@@ -985,8 +985,13 @@ function EmailPick({ emails, pickedEmail, setPickedEmail, name }) {
           <input type="radio" name={name} checked={pickedEmail === e.email} onChange={() => setPickedEmail(e.email)} />
           <span className="text-[12px] text-[#334155]">{i + 1}. {e.email}</span>
           <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-600">
-            {e.source || (e.role === 'info' || e.role === 'enquiry' || e.role === 'contact' ? '官网' : (e.role || '官网'))}
+            {e.source === 'inferred_smtp' ? 'SMTP 推断' : (e.source || (e.role === 'info' || e.role === 'enquiry' || e.role === 'contact' ? '官网' : (e.role || '官网')))}
           </span>
+          {e.smtp?.status && (
+            <span className="text-[10px] text-[#64748b]">
+              {e.smtp.status === 'accepted' ? 'MX 接受' : e.smtp.status}
+            </span>
+          )}
           {e.evidence?.score != null && (
             <span className="text-[10px] text-[#64748b]">{e.evidence.score}分</span>
           )}
@@ -1015,7 +1020,7 @@ function IdentifyForm({ customer, onSubmit, busy = false }) {
       <p className="text-[11px] leading-relaxed text-[#64748b]">
         公开列表只有「{customer?.buyerAlias || customer?.company || customer?.name || '昵称'}」，没有公司名和邮箱。
         邦阅/米课那套「领英对人、Lusha 挖私人邮箱、猜 Gmail」这里不做。
-        能用的只有：正文里的法定名、型号交叉检索到的同款询盘、公开缩略图里的 logo、阿里后台导出/报价后的公司名。
+        能用的只有：正文里的法定名、型号交叉检索、粘连显示名拆公司、公开缩略图里的 logo、阿里后台导出。有公司域名后再推断角色箱并用 SMTP 核，不猜 Gmail。
       </p>
       {customer?.sourceUrl && (
         <a href={customer.sourceUrl} target="_blank" rel="noreferrer" className="inline-block text-[11px] text-primary hover:underline">
@@ -1149,7 +1154,14 @@ function DrawerBody({ tab, customer, research, dossier, peopleSearchLinks = [], 
           <EmailPick emails={emails} pickedEmail={pickedEmail} setPickedEmail={setPickedEmail} name="email" />
         ) : (
           <p className="text-[12px] text-[#94a3b8]">
-            还没有可核验的公开角色邮箱。不猜 gmail/yahoo，不用验证网站撞号，那是 Hunter 不是背调。
+            还没有可核验的公开角色邮箱。不猜 gmail/yahoo。有已核公司域名时，会推断 info@ / procurement@ 并用对方 MX 做 SMTP 核对。
+          </p>
+        )}
+        {research?.inferredEmail && (
+          <p className="text-[11px] leading-relaxed text-[#64748b]">
+            {research.inferredEmail.catchAll
+              ? `${research.inferredEmail.domain} 是 catch-all，SMTP 不能证明推断邮箱存在。`
+              : (research.inferredEmail.notes || []).join(' ')}
           </p>
         )}
         {research?.phones?.length > 0 && (
