@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   stripLegalSuffix,
+  cleanOfficialBuyerName,
   significantTokens,
   tokenOverlap,
   isPersonLikeDisplayName,
@@ -28,6 +29,12 @@ describe('company name helpers', () => {
     assert.equal(stripLegalSuffix('KIER TRANSPORTATION LIMITED'), 'KIER TRANSPORTATION');
     assert.equal(stripLegalSuffix('HOWOGE Wohnungsbaugesellschaft mbH'), 'HOWOGE Wohnungsbaugesellschaft');
     assert.equal(stripLegalSuffix('L3HARRIS TECHNOLOGIES, INC.'), 'L3HARRIS TECHNOLOGIES');
+  });
+
+  it('strips TED buyer suffixes', () => {
+    assert.equal(cleanOfficialBuyerName('Mayo County Council_1127'), 'Mayo County Council');
+    assert.equal(cleanOfficialBuyerName('Munster Technological University.'), 'Munster Technological University');
+    assert.equal(cleanOfficialBuyerName('BIP SOLUTIONS LIMITED'), 'BIP SOLUTIONS LIMITED');
   });
 
   it('scores parent-company overlap', () => {

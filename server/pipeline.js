@@ -1,7 +1,7 @@
 import { config, googleSearchReady } from './config.js';
 import { db, save, getCustomer, isRfqLead, isDemoCustomer, logActivity } from './store.js';
 import { crawlAllAndImport, importRfqItems } from './rfq.js';
-import { researchLead, isPersonLikeLead, isPlausibleEmail, applyLeadIdentity, compactSkippedReport } from './research.js';
+import { researchLead, isPersonLikeLead, isPlausibleEmail, applyLeadIdentity, compactSkippedReport, cleanOfficialBuyerName } from './research.js';
 import { extractCompanyHintFromText } from './rfqHints.js';
 import { extractRfqClues, rfqCorpus, classifyResearchPath } from './researchPath.js';
 import { clusterDemandKeywords, searchDemandPeers } from './demandPeers.js';
@@ -112,6 +112,13 @@ export function applyTextCompanyHints() {
   let dirty = false;
   for (const c of db.customers) {
     if (!isRfqLead(c)) continue;
+    if (/TED|Contracts Finder|USASpending|SAM/i.test(c.source || '')) {
+      const cleaned = cleanOfficialBuyerName(c.company || c.name);
+      if (cleaned && cleaned !== c.company) {
+        c.company = cleaned;
+        dirty = true;
+      }
+    }
     const clues = extractRfqClues(rfqCorpus(c));
     if (!c.website && clues.websites[0]) {
       c.website = clues.websites[0];

@@ -62,6 +62,15 @@ const INSTITUTION_RE =
 /** Official procurement buyer/awardee names are legal entities, not Alibaba nicknames. */
 const OFFICIAL_ENTITY_SOURCE_RE = /TED Europa|UK Contracts Finder|USASpending|SAM\.gov/i;
 
+/** TED sometimes appends `_1127` / a trailing period to the buyer name. */
+export function cleanOfficialBuyerName(name) {
+  return String(name || '')
+    .replace(/\s+/g, ' ')
+    .replace(/_\d{2,}$/g, '')
+    .replace(/[.\s]+$/g, '')
+    .trim();
+}
+
 const CONTACT_PATHS = [
   '/contact', '/contact-us', '/contactus', '/contacts', '/contact.html',
   '/about', '/about-us', '/about/contact',
@@ -986,6 +995,14 @@ export async function researchLead(customer, { useAi = true } = {}) {
   let personLike = isPersonLikeLead(customer);
   const path = classifyResearchPath(customer, { personLike, clues });
   customer.researchPath = path.key;
+
+  if (OFFICIAL_ENTITY_SOURCE_RE.test(customer.source || '')) {
+    const cleaned = cleanOfficialBuyerName(customer.company || customer.name);
+    if (cleaned && cleaned !== customer.company) {
+      customer.company = cleaned;
+      if (!customer.name || customer.name === customer.buyerAlias) customer.name = cleaned;
+    }
+  }
 
   if (personLike && clues.companyHint) {
     try {

@@ -6,6 +6,7 @@ import { searchGoldSupplier, searchTradeIndia } from './b2bPublic.js';
 import { parseAlibabaExportRow } from './researchPath.js';
 import { normalizePaidExportRow } from './paidSources.js';
 import { compactPublicCard } from './dataPersistence.js';
+import { cleanOfficialBuyerName } from './research.js';
 
 // 聚合公开 RFQ / 采购数据源：一次请求并行打多个官方接口，结果归一化后合并。
 // 只走开放 API，不爬私人邮箱。某个源失败不影响其他源。
@@ -153,12 +154,14 @@ function guessTimezone(country, fallback = 'UTC') {
 }
 
 function lead({ id, source, sourceType, kind, title, company, name, titleRole, email, country, timezone, industry, city, state, amount, currency, url, painPoints, awardId }) {
+  const companyName = cleanOfficialBuyerName(company || name || '');
+  const personName = cleanOfficialBuyerName(name || company || '') || 'Unknown buyer';
   return {
     id, source, sourceType,
     kind: kind || 'government',
     title: title || '',
-    company: company || name || '',
-    name: name || company || 'Unknown buyer',
+    company: companyName || personName,
+    name: personName,
     titleRole: titleRole || 'Buyer',
     email: email || '',
     country: country || '',
