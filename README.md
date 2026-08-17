@@ -31,7 +31,7 @@
 
 ```bash
 cp .env.example .env   # 填 SMTP / AI / Google CSE，不要提交 .env
-npm run install:all    # 安装依赖，并从仓库快照或 S3 恢复询盘库
+npm run install:all    # 安装依赖，并从 OSS / 仓库快照恢复询盘库
 npm run dev            # 同时启动后端(3001)和前端(5173)
 ```
 
@@ -67,21 +67,22 @@ npm run build && npm start   # 后端 3001 端口同时托管前端构建产物
 
 ## 数据持久化
 
-16 万条阿里公开询盘不能放进 Git（体积过大，而且会随环境一起丢掉）。**主存储是 MongoDB 云数据库**：
+16 万条阿里公开询盘不能放进 Git。**推荐存阿里云 OSS**（一个 gzip 对象即可，换环境直接拉回来）：
 
-1. **MongoDB**（`MONGODB_URI`）：询盘主库。启动时若云端条数多于本地，就拉下来；入库/全量重爬会批量 upsert。免费 Atlas M0（512MB）够用，文档已压缩。
-2. **S3 / R2**（可选）：`db.json` gzip 备份。
-3. **仓库快照** `server/data/public-rfq.snapshot.json.gz`：只有政府招标 + 少量阿里样例，方便没配云库时也能看到界面。
+1. **阿里云 OSS**（`OSS_BUCKET` + AccessKey）：询盘主备份 `outreach-ai/db.json.gz`。启动时若 OSS 条数更多就覆盖本地；保存/全量重爬后自动上传。
+2. **S3 / R2**（可选）：同一套逻辑，用 `DATA_S3_*`。
+3. **MongoDB**（可选）：`MONGODB_URI`，适合要按条查询时。
+4. **仓库快照**：只有政府招标 + 少量阿里样例。
 
 ```bash
-# 免费建库：https://cloud.mongodb.com/  → Atlas M0 → 网络放行 0.0.0.0/0 → 把连接串写入 MONGODB_URI
-npm run data:restore          # Mongo → S3 → 仓库快照
-npm run data:push             # 把本地询盘推上 Mongo
-npm run data:pull             # 强制从 Mongo 覆盖本地
-npm run data:recrawl -- --full alibaba_public   # 重爬全部公开列表并写入 Mongo（勿提交进 Git）
+# 控制台建 Bucket：https://oss.console.aliyun.com/
+# 写入 OSS_BUCKET / OSS_REGION / OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET
+npm run data:restore          # OSS → Mongo → 仓库快照
+npm run data:backup           # 把本地询盘 gzip 推上 OSS
+npm run data:recrawl -- --full alibaba_public
 ```
 
-没有 `MONGODB_URI` 时，全量爬取只写在这台机器的 `server/data/db.json`，换环境仍会丢。
+没有 OSS Key 时，全量爬取只写在这台机器的 `server/data/db.json`，换环境仍会丢。
 
 ## 配置
 
@@ -105,15 +106,17 @@ SMTP、AI、搜索 Key **只从环境变量或本地 `secrets.json` 读取**，�
 | `OPENCORPORATES_API_KEY` | OpenCorporates 多国工商聚合（可选；没 Key 仍打各国免费登记口） | 空 |
 | `PIPELINE_DAILY_HOUR` | 北京时间每日拉新询盘的整点 | 7 |
 | `PIPELINE_REFRESH_HOURS` | 当天已同步后再扫一轮的间隔（小时） | 6 |
-| `DATA_S3_BUCKET` / `DATA_S3_ENDPOINT` / `DATA_S3_ACCESS_KEY_ID` / `DATA_S3_SECRET_ACCESS_KEY` | 可选的运行时库备份（AWS S3 / Cloudflare R2 / MinIO） | 空 |
-| `MONGODB_URI` / `MONGODB_DB` | 询盘主库（MongoDB Atlas / 任何 Mongo 兼容库） | 空 / outreachai |
+| `OSS_BUCKET` / `OSS_REGION` / `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` | 阿里云 OSS 询盘主备份（推荐） | 空 / oss-cn-hangzhou |
+| `OSS_ENDPOINT` / `OSS_KEY` | 可选自定义域名和对象名 | 空 / outreach-ai/db.json.gz |
+| `DATA_S3_BUCKET` / `DATA_S3_ENDPOINT` / `DATA_S3_ACCESS_KEY_ID` / `DATA_S3_SECRET_ACCESS_KEY` | 可选的 S3 / R2 / MinIO 备份 | 空 |
+| `MONGODB_URI` / `MONGODB_DB` | 可选文档库 | 空 / outreachai |
 
 ## 目录结构
 
 ```
 server/            Express 后端
-  bootstrap.js     启动前恢复 S3 / 仓库快照
-  dataPersistence.js  本地库、gzip 快照、可选远程备份
+  bootstrap.js     启动前恢复 OSS / 仓库快照
+  dataPersistence.js  本地库、gzip 快照、阿里云 OSS 备份
   agent.js         AI Agent（生成/评分/最佳发送时间）
   scheduler.js     批量任务调度（时区 + 频率控制）
   mailer.js        SMTP 发信

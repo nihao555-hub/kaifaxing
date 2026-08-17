@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
   GetObjectCommand,
@@ -8,6 +9,8 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { loadDotEnv } from './loadEnv.js';
+
+const require = createRequire(import.meta.url);
 
 loadDotEnv();
 
@@ -21,15 +24,69 @@ export const BOOTSTRAP_PATH = path.resolve(
 );
 export const SECRETS_PATH = path.resolve(process.env.DATA_SECRETS_FILE || path.join(DATA_DIR, 'secrets.json'));
 
-function remoteConfig() {
+export function normalizeOssRegion(raw) {
+  const v = String(raw || '').trim();
+  if (!v) return 'oss-cn-hangzhou';
+  const host = v.replace(/^https?:\/\//, '');
+  const fromHost = host.match(/oss-([a-z0-9-]+)\.aliyuncs\.com/i);
+  if (fromHost) return `oss-${fromHost[1]}`;
+  if (v.startsWith('oss-')) return v;
+  return `oss-${v}`;
+}
+
+function objectStoreConfig() {
+  const key = process.env.OSS_KEY || process.env.DATA_S3_KEY || 'outreach-ai/db.json.gz';
+  const secretsKey = process.env.OSS_SECRETS_KEY || process.env.DATA_S3_SECRETS_KEY || 'outreach-ai/secrets.json';
+  const metaKey = process.env.OSS_META_KEY || process.env.DATA_S3_META_KEY || 'outreach-ai/meta.json';
+
+  const ossBucket = process.env.OSS_BUCKET || process.env.OSS_BUCKET_NAME || '';
+  const ossId = process.env.OSS_ACCESS_KEY_ID || process.env.ALIBABA_CLOUD_ACCESS_KEY_ID || '';
+  const ossSecret = process.env.OSS_ACCESS_KEY_SECRET
+    || process.env.OSS_ACCESS_KEY
+    || process.env.ALIBABA_CLOUD_ACCESS_KEY_SECRET
+    || '';
+  if (ossBucket && ossId && ossSecret) {
+    return {
+      kind: 'oss',
+      bucket: ossBucket,
+      key,
+      secretsKey,
+      metaKey,
+      region: normalizeOssRegion(process.env.OSS_REGION || process.env.OSS_ENDPOINT || ''),
+      endpoint: String(process.env.OSS_ENDPOINT || '').replace(/^https?:\/\//, ''),
+      accessKeyId: ossId,
+      accessKeySecret: ossSecret,
+    };
+  }
+
+  const bucket = process.env.DATA_S3_BUCKET || '';
+  const accessKeyId = process.env.DATA_S3_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID || '';
+  const secretAccessKey = process.env.DATA_S3_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY || '';
+  if (bucket && accessKeyId && secretAccessKey) {
+    return {
+      kind: 's3',
+      bucket,
+      key,
+      secretsKey,
+      metaKey,
+      region: process.env.DATA_S3_REGION || 'auto',
+      endpoint: process.env.DATA_S3_ENDPOINT || '',
+      accessKeyId,
+      accessKeySecret: secretAccessKey,
+    };
+  }
+  return null;
+}
+
+export function objectStoreStatus() {
+  const cfg = objectStoreConfig();
+  if (!cfg) return { ready: false, kind: '' };
   return {
-    bucket: process.env.DATA_S3_BUCKET || '',
-    key: process.env.DATA_S3_KEY || 'outreach-ai/db.json.gz',
-    secretsKey: process.env.DATA_S3_SECRETS_KEY || 'outreach-ai/secrets.json',
-    region: process.env.DATA_S3_REGION || 'auto',
-    endpoint: process.env.DATA_S3_ENDPOINT || '',
-    accessKeyId: process.env.DATA_S3_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID || '',
-    secretAccessKey: process.env.DATA_S3_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY || '',
+    ready: true,
+    kind: cfg.kind,
+    bucket: cfg.bucket,
+    key: cfg.key,
+    region: cfg.region || '',
   };
 }
 
@@ -66,24 +123,45 @@ export function loadLocalDatabase(fallback) {
 }
 
 export function remoteBackupReady() {
-  const remote = remoteConfig();
-  return Boolean(remote.bucket && remote.accessKeyId && remote.secretAccessKey);
+  return Boolean(objectStoreConfig());
 }
 
-function s3Client() {
-  const remote = remoteConfig();
+function localCustomerCount() {
+  try {
+    if (!fs.existsSync(DB_PATH)) return 0;
+    const parsed = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
+    return Array.isArray(parsed.customers) ? parsed.customers.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function s3Client(cfg) {
   const options = {
-    region: remote.region,
+    region: cfg.region || 'auto',
     credentials: {
-      accessKeyId: remote.accessKeyId,
-      secretAccessKey: remote.secretAccessKey,
+      accessKeyId: cfg.accessKeyId,
+      secretAccessKey: cfg.accessKeySecret,
     },
   };
-  if (remote.endpoint) {
-    options.endpoint = remote.endpoint;
+  if (cfg.endpoint) {
+    options.endpoint = cfg.endpoint.startsWith('http') ? cfg.endpoint : `https://${cfg.endpoint}`;
     options.forcePathStyle = true;
   }
   return new S3Client(options);
+}
+
+function ossClient(cfg) {
+  const OSS = require('ali-oss');
+  const options = {
+    accessKeyId: cfg.accessKeyId,
+    accessKeySecret: cfg.accessKeySecret,
+    bucket: cfg.bucket,
+    timeout: 180_000,
+  };
+  if (cfg.endpoint) options.endpoint = cfg.endpoint;
+  else options.region = cfg.region || 'oss-cn-hangzhou';
+  return new OSS(options);
 }
 
 async function streamToBuffer(body) {
@@ -95,61 +173,121 @@ async function streamToBuffer(body) {
   return Buffer.concat(chunks);
 }
 
-export async function restoreRemoteBackup({ force = false } = {}) {
-  if (!remoteBackupReady()) return { ok: false, skipped: true, reason: 'S3 backup is not configured' };
-  const remote = remoteConfig();
-  const client = s3Client();
-  if (!fs.existsSync(SECRETS_PATH)) {
+async function storeGet(cfg, key) {
+  if (cfg.kind === 'oss') {
     try {
-      const secretsObj = await client.send(new GetObjectCommand({
-        Bucket: remote.bucket,
-        Key: remote.secretsKey,
-      }));
-      const raw = await streamToBuffer(secretsObj.Body);
-      ensureParent(SECRETS_PATH);
-      fs.writeFileSync(SECRETS_PATH, raw);
-    } catch {
-      // Secrets backup is optional.
+      const result = await ossClient(cfg).get(key);
+      return Buffer.from(result.content);
+    } catch (error) {
+      const code = String(error.code || error.name || error.status || '');
+      if (error.status === 404 || /NoSuchKey|NotFound/i.test(code)) return null;
+      throw error;
     }
   }
-  if (!force && fs.existsSync(DB_PATH)) {
-    return { ok: true, skipped: true, reason: 'local database already exists' };
+  try {
+    const result = await s3Client(cfg).send(new GetObjectCommand({
+      Bucket: cfg.bucket,
+      Key: key,
+    }));
+    return streamToBuffer(result.Body);
+  } catch (error) {
+    const code = String(error.Code || error.name || error.$metadata?.httpStatusCode || '');
+    if (/NoSuchKey|NotFound|404/.test(code)) return null;
+    throw error;
   }
-  const result = await client.send(new GetObjectCommand({
-    Bucket: remote.bucket,
-    Key: remote.key,
+}
+
+async function storePut(cfg, key, body, contentType) {
+  if (cfg.kind === 'oss') {
+    await ossClient(cfg).put(key, body, {
+      headers: { 'Content-Type': contentType || 'application/octet-stream' },
+    });
+    return;
+  }
+  await s3Client(cfg).send(new PutObjectCommand({
+    Bucket: cfg.bucket,
+    Key: key,
+    Body: body,
+    ContentType: contentType || 'application/octet-stream',
   }));
-  const compressed = await streamToBuffer(result.Body);
-  const database = parseDatabase(compressed, true);
+}
+
+function writeDatabaseFile(database) {
   ensureParent(DB_PATH);
   const tmp = `${DB_PATH}.remote.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(database));
   fs.renameSync(tmp, DB_PATH);
-  return { ok: true, restored: database.customers.length };
+}
+
+export async function restoreRemoteBackup({ force = false } = {}) {
+  const cfg = objectStoreConfig();
+  if (!cfg) return { ok: false, skipped: true, reason: 'OSS/S3 backup is not configured' };
+
+  if (!fs.existsSync(SECRETS_PATH)) {
+    try {
+      const raw = await storeGet(cfg, cfg.secretsKey);
+      if (raw) {
+        ensureParent(SECRETS_PATH);
+        fs.writeFileSync(SECRETS_PATH, raw);
+      }
+    } catch {
+      // Secrets backup is optional.
+    }
+  }
+
+  const localCount = localCustomerCount();
+  let remoteCount = 0;
+  try {
+    const metaBuf = await storeGet(cfg, cfg.metaKey);
+    if (metaBuf) remoteCount = Number(JSON.parse(metaBuf.toString('utf8')).customers) || 0;
+  } catch {
+    remoteCount = 0;
+  }
+
+  if (!force && localCount && remoteCount && localCount >= remoteCount) {
+    return { ok: true, skipped: true, reason: 'local database is newer or equal', localCount, remoteCount, kind: cfg.kind };
+  }
+
+  const compressed = await storeGet(cfg, cfg.key);
+  if (!compressed) return { ok: true, empty: true, localCount, remoteCount, kind: cfg.kind };
+
+  const database = parseDatabase(compressed, true);
+  remoteCount = database.customers.length;
+  if (!force && localCount >= remoteCount) {
+    return { ok: true, skipped: true, reason: 'local database is newer or equal', localCount, remoteCount, kind: cfg.kind };
+  }
+
+  writeDatabaseFile(database);
+  console.log(`[data] restored ${remoteCount} leads from ${cfg.kind === 'oss' ? 'Aliyun OSS' : 'S3'}`);
+  return { ok: true, restored: remoteCount, localCount, remoteCount, kind: cfg.kind };
 }
 
 export async function uploadRemoteBackup(file = DB_PATH) {
-  if (!remoteBackupReady()) return { ok: false, skipped: true, reason: 'S3 backup is not configured' };
-  const remote = remoteConfig();
-  const client = s3Client();
-  const body = zlib.gzipSync(fs.readFileSync(file), { level: zlib.constants.Z_BEST_SPEED });
-  await client.send(new PutObjectCommand({
-    Bucket: remote.bucket,
-    Key: remote.key,
-    Body: body,
-    ContentType: 'application/json',
-    ContentEncoding: 'gzip',
-    Metadata: { updatedAt: new Date().toISOString() },
-  }));
+  const cfg = objectStoreConfig();
+  if (!cfg) return { ok: false, skipped: true, reason: 'OSS/S3 backup is not configured' };
+  if (!fs.existsSync(file)) throw new Error(`database not found: ${file}`);
+
+  const database = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const compact = stripSecrets(database);
+  const body = zlib.gzipSync(Buffer.from(JSON.stringify(compact)), { level: zlib.constants.Z_BEST_SPEED });
+  await storePut(cfg, cfg.key, body, 'application/gzip');
+  await storePut(cfg, cfg.metaKey, Buffer.from(JSON.stringify({
+    customers: compact.customers.length,
+    bytes: body.length,
+    kind: cfg.kind,
+    updatedAt: new Date().toISOString(),
+  })), 'application/json');
   if (fs.existsSync(SECRETS_PATH)) {
-    await client.send(new PutObjectCommand({
-      Bucket: remote.bucket,
-      Key: remote.secretsKey,
-      Body: fs.readFileSync(SECRETS_PATH),
-      ContentType: 'application/json',
-    }));
+    await storePut(cfg, cfg.secretsKey, fs.readFileSync(SECRETS_PATH), 'application/json');
   }
-  return { ok: true, bytes: body.length };
+  return {
+    ok: true,
+    kind: cfg.kind,
+    bucket: cfg.bucket,
+    key: cfg.key,
+    customers: compact.customers.length,
+    bytes: body.length,
+  };
 }
 
 let backupTimer = null;

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import {
   BOOTSTRAP_PATH,
   DB_PATH,
+  objectStoreStatus,
   remoteBackupReady,
   uploadRemoteBackup,
   writeRepositorySnapshot,
@@ -72,6 +73,10 @@ async function main() {
     saveNow();
     let snapshot = null;
     if (!full) snapshot = writeRepositorySnapshot(db);
+    let object = null;
+    if (remoteBackupReady()) {
+      object = await uploadRemoteBackup();
+    }
     let cloud = null;
     if (cloudDbReady()) {
       cloud = await pushCloudDatabase(db);
@@ -82,20 +87,25 @@ async function main() {
       local: db.customers.length,
       reports: result.reports,
       snapshot,
+      object,
       cloud,
     })}`);
     return;
   }
 
   const cloud = await cloudDbStatus();
+  const object = objectStoreStatus();
+  let localCount = 0;
+  if (fs.existsSync(DB_PATH)) {
+    localCount = (JSON.parse(fs.readFileSync(DB_PATH, 'utf8')).customers || []).length;
+  }
   console.log(JSON.stringify({
     database: DB_PATH,
     databaseExists: fs.existsSync(DB_PATH),
-    localCount: fs.existsSync(DB_PATH)
-      ? (JSON.parse(fs.readFileSync(DB_PATH, 'utf8')).customers || []).length
-      : 0,
+    localCount,
     repositorySnapshot: BOOTSTRAP_PATH,
     repositorySnapshotExists: fs.existsSync(BOOTSTRAP_PATH),
+    object,
     remoteReady: remoteBackupReady(),
     cloud,
   }, null, 2));

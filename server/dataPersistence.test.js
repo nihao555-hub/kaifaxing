@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { remoteBackupReady, writeRepositorySnapshot } from './dataPersistence.js';
+import { normalizeOssRegion, objectStoreStatus, remoteBackupReady, writeRepositorySnapshot } from './dataPersistence.js';
 
 describe('repository snapshot', () => {
   it('writes gzip JSON without drafts or search secrets', () => {
@@ -51,11 +51,25 @@ describe('repository snapshot', () => {
     }
   });
 
-  it('does not treat S3 as ready without credentials', () => {
-    assert.equal(remoteBackupReady(), Boolean(
+  it('does not treat object storage as ready without credentials', () => {
+    const oss = Boolean(
+      (process.env.OSS_BUCKET || process.env.OSS_BUCKET_NAME)
+      && (process.env.OSS_ACCESS_KEY_ID || process.env.ALIBABA_CLOUD_ACCESS_KEY_ID)
+      && (process.env.OSS_ACCESS_KEY_SECRET || process.env.OSS_ACCESS_KEY || process.env.ALIBABA_CLOUD_ACCESS_KEY_SECRET),
+    );
+    const s3 = Boolean(
       process.env.DATA_S3_BUCKET
       && (process.env.DATA_S3_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID)
       && (process.env.DATA_S3_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY),
-    ));
+    );
+    assert.equal(remoteBackupReady(), oss || s3);
+    assert.equal(objectStoreStatus().ready, oss || s3);
+  });
+
+  it('normalizes Aliyun OSS regions', () => {
+    assert.equal(normalizeOssRegion(''), 'oss-cn-hangzhou');
+    assert.equal(normalizeOssRegion('cn-hangzhou'), 'oss-cn-hangzhou');
+    assert.equal(normalizeOssRegion('oss-cn-beijing'), 'oss-cn-beijing');
+    assert.equal(normalizeOssRegion('https://oss-cn-shanghai.aliyuncs.com'), 'oss-cn-shanghai');
   });
 });

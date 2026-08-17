@@ -8,16 +8,18 @@ import {
 } from './dataPersistence.js';
 
 export async function hydrateDurableDatabase() {
+  try {
+    const objectStore = await restoreRemoteBackup();
+    if (objectStore.restored) {
+      return { source: objectStore.kind || 'oss', ...objectStore };
+    }
+  } catch (error) {
+    console.warn(`[data] OSS/S3 restore failed: ${error.message}`);
+  }
+
   const cloud = await restoreCloudDatabaseToFile();
   if (cloud.restored) return { source: 'mongodb', ...cloud };
   if (cloud.error) console.warn(`[data] MongoDB restore failed: ${cloud.error}`);
-
-  try {
-    const s3 = await restoreRemoteBackup();
-    if (s3.restored) return { source: 's3', ...s3 };
-  } catch (error) {
-    console.warn(`[data] S3 restore failed: ${error.message}`);
-  }
 
   if (!fs.existsSync(DB_PATH) && fs.existsSync(BOOTSTRAP_PATH)) {
     const restored = loadLocalDatabase({

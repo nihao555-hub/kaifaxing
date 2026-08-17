@@ -33,7 +33,7 @@ import {
   applyPublicContact,
   promoteLeads,
 } from './pipeline.js';
-import { flushRemoteBackup } from './dataPersistence.js';
+import { flushRemoteBackup, objectStoreStatus } from './dataPersistence.js';
 import { cloudDbStatus, flushCloudSync, pushCloudDatabase } from './cloudDb.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -217,8 +217,8 @@ app.get('/api/data/status', async (_req, res) => {
     const cloud = await cloudDbStatus();
     res.json({
       local: db.customers.length,
+      object: objectStoreStatus(),
       cloud,
-      s3Configured: Boolean(process.env.DATA_S3_BUCKET),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
