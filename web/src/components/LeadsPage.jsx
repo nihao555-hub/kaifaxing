@@ -849,9 +849,6 @@ export default function LeadsPage({ onGoOutreach }) {
                   tab={drawerTab}
                   customer={customer}
                   research={research}
-                  searchLinks={detail?.searchLinks || research?.searchLinks || []}
-                  imageSearchLinks={detail?.imageSearchLinks || []}
-                  googleReady={Boolean(detail?.searchStatus?.ready)}
                   pickedEmail={pickedEmail}
                   setPickedEmail={setPickedEmail}
                   onIdentify={identifyCompany}
@@ -1017,57 +1014,12 @@ function IdentifyForm({ customer, onSubmit, busy = false }) {
   );
 }
 
-function GoogleSearchLinks({ links, googleReady = false }) {
-  if (!links?.length) return null;
-  return (
-    <div className="space-y-2">
-      <div className="text-[12px] font-medium text-[#334155]">{googleReady ? '谷歌公式（已接官方 API）' : '用谷歌搜（浏览器打开）'}</div>
-      <p className="text-[11px] leading-relaxed text-[#94a3b8]">
-        {googleReady
-          ? '背调已走谷歌官方 JSON 接口。下面公式仍可在浏览器里核对；核到官网角色邮箱后再点「挖邮箱」或手工填入。'
-          : '服务器抓谷歌会被验证码挡住。到「设置」填 Custom Search 的 Key + CX 即可自动跑。同一套公式也可先在浏览器里打开。'}
-      </p>
-      <ul className="space-y-1.5">
-        {links.map((item) => (
-          <li key={item.query} className="rounded border border-[#e2e8f0] px-2.5 py-2">
-            <div className="truncate text-[11px] text-[#475569]">{item.query}</div>
-            <div className="mt-1 flex gap-3 text-[11px]">
-              <a href={item.google} target="_blank" rel="noreferrer" className="text-primary hover:underline">谷歌</a>
-              <a href={item.bing} target="_blank" rel="noreferrer" className="text-primary hover:underline">必应</a>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
+function AnnexNote({ haveAnnexes = false }) {
+  if (!haveAnnexes) return null;
+  return <p className="text-[11px] text-amber-700">这条列表标记有附件，但附件不在公开列表里。</p>;
 }
 
-function ImageSearchLinks({ links, haveAnnexes = false }) {
-  if (!links?.length && !haveAnnexes) return null;
-  return (
-    <div className="space-y-2">
-      <div className="text-[12px] font-medium text-[#334155]">公开缩略图</div>
-      <p className="text-[11px] leading-relaxed text-[#94a3b8]">
-        列表页大约四分之一有缩略图，多半是产品图，反查到的是同类商品不是买家公司。
-        只有图上有 logo / 铭牌时才有用。附件标记在登录墙后，不下载。
-      </p>
-      {haveAnnexes && (
-        <p className="text-[11px] text-amber-700">这条列表标记有附件，但附件不在公开列表里。</p>
-      )}
-      {links?.length > 0 && (
-        <div className="flex flex-wrap gap-3 text-[11px]">
-          {links.map((item) => (
-            <a key={item.key || item.url} href={item.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">
-              {item.label}
-            </a>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DrawerBody({ tab, customer, research, searchLinks = [], imageSearchLinks = [], googleReady = false, pickedEmail, setPickedEmail, onIdentify, identifying = false }) {
+function DrawerBody({ tab, customer, research, pickedEmail, setPickedEmail, onIdentify, identifying = false }) {
   const address = research?.address || factValue(research, /注册地址|总部|地址/);
   const industry = research?.industry || factValue(research, /行业/) || customer.industry;
   const size = research?.employees || factValue(research, /员工规模/);
@@ -1107,7 +1059,7 @@ function DrawerBody({ tab, customer, research, searchLinks = [], imageSearchLink
         {customer.imageUrl && (
           <img src={customer.imageUrl} alt="" className="mt-2 max-h-36 rounded border border-[#e8edf4] object-contain" />
         )}
-        <ImageSearchLinks links={imageSearchLinks} haveAnnexes={Boolean(customer.haveAnnexes)} />
+        <AnnexNote haveAnnexes={Boolean(customer.haveAnnexes)} />
       </div>
     );
   }
@@ -1118,13 +1070,12 @@ function DrawerBody({ tab, customer, research, searchLinks = [], imageSearchLink
         {emails.length ? (
           <EmailPick emails={emails} pickedEmail={pickedEmail} setPickedEmail={setPickedEmail} name="email" />
         ) : (
-          <p className="text-[12px] text-[#94a3b8]">还没有可核验的公开角色邮箱。背调会用必应/谷歌的 site:域名、info@、联系页公式去挖官网角色邮箱，不会猜私人邮箱。</p>
+          <p className="text-[12px] text-[#94a3b8]">还没有可核验的公开角色邮箱。背调只收官网角色箱，不猜私人邮箱。</p>
         )}
         {research?.phones?.length > 0 && (
           <div className="text-[12px] text-[#475569]">公开电话：{research.phones.join(' · ')}</div>
         )}
-        <ImageSearchLinks links={imageSearchLinks} haveAnnexes={Boolean(customer.haveAnnexes)} />
-        <GoogleSearchLinks links={searchLinks} googleReady={googleReady} />
+        <AnnexNote haveAnnexes={Boolean(customer.haveAnnexes)} />
       </div>
     );
   }
@@ -1183,7 +1134,7 @@ function DrawerBody({ tab, customer, research, searchLinks = [], imageSearchLink
       {research?.kyb?.grade === 'C' && research?.kyb?.needRegNo && (
         <IdentifyForm customer={customer} onSubmit={onIdentify} busy={identifying} />
       )}
-      <ImageSearchLinks links={imageSearchLinks} haveAnnexes={Boolean(customer.haveAnnexes)} />
+      <AnnexNote haveAnnexes={Boolean(customer.haveAnnexes)} />
 
       {(research?.kyb?.sanctions || []).length > 0 && (
         <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700">
@@ -1212,7 +1163,7 @@ function DrawerBody({ tab, customer, research, searchLinks = [], imageSearchLink
         ) : (
           <p className="text-[12px] leading-relaxed text-[#64748b]">
             {research?.status === 'done'
-              ? '官网和搜索公式都没有明文角色邮箱。大公司常用联系表单；只有昵称的询盘核不到公司主体。不会猜私人邮箱。'
+              ? '公开页没有明文角色邮箱。大公司常用联系表单；只有昵称的询盘核不到公司主体。不会猜私人邮箱。'
               : '自动背调完成后，核到的官网角色邮箱会显示在这里。'}
           </p>
         )}
@@ -1271,9 +1222,6 @@ function DrawerBody({ tab, customer, research, searchLinks = [], imageSearchLink
             </ul>
           </div>
         )}
-        <div className="mt-3">
-          <GoogleSearchLinks links={searchLinks} googleReady={googleReady} />
-        </div>
         {(research?.searchPages || []).length > 0 && (
           <div className="mt-2">
             <div className="mb-1 text-[12px] text-[#94a3b8]">搜索解析到的公开页</div>
@@ -1291,19 +1239,6 @@ function DrawerBody({ tab, customer, research, searchLinks = [], imageSearchLink
         )}
       </div>
 
-      {(research?.tools || []).some((t) => t.used) && (
-        <div>
-          <div className="mb-2 text-[12px] font-medium text-[#334155]">本轮用到的 GitHub 项目</div>
-          <ul className="space-y-1.5">
-            {research.tools.filter((t) => t.used).map((t) => (
-              <li key={t.id} className="text-[12px] leading-relaxed text-[#475569]">
-                <a href={t.repo} target="_blank" rel="noreferrer" className="text-primary hover:underline">{t.name}</a>
-                <span className="text-[#94a3b8]"> · {t.use}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }
