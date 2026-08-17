@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { config, googleCseReady, googleSearchReady, googleSearchStatus, preferredSearchEngine } from './config.js';
+import { config, googleSearchReady, googleSearchStatus } from './config.js';
 import { alibabaReady } from './alibaba.js';
 import { db, save, getCustomer, listCustomers, leadFacets, saveSearchSettings, markCustomersDirty } from './store.js';
 import { generateEmail, evaluateEmail, suggestSendTime } from './agent.js';
@@ -252,19 +252,6 @@ app.post('/api/search/google/test', async (req, res) => {
   const query = String(req.body?.query || '"NMG TECHNICAL SERVICE" Dubai (website OR contact)').slice(0, 240);
   const company = String(req.body?.company || 'NMG TECHNICAL SERVICE L.L.C');
   const country = String(req.body?.country || 'United Arab Emirates');
-  const pref = preferredSearchEngine();
-  if (pref === 'google' && !googleCseReady()) {
-    return res.status(400).json({
-      error: '要用谷歌官方引擎，请先填 Google API Key + Search Engine ID（CX）。这次不会改走 Serper，也不会抓 google.com 结果页。',
-      ...googleSearchStatus(),
-    });
-  }
-  if (!googleSearchReady()) {
-    return res.status(400).json({
-      error: '还没接上搜索。默认走谷歌官方 Custom Search：填 API Key + CX。只有选「自动」或「只用 Serper」时才用 Serper。',
-      ...googleSearchStatus(),
-    });
-  }
   try {
     const raw = await searchOfficialJson(query);
     if (!raw.engine) {

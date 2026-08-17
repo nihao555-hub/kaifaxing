@@ -9,6 +9,7 @@
     "start": "node --max-old-space-size=8192 bootstrap.js",
     "data:restore": "node --max-old-space-size=8192 dataTool.js restore",
     "data:promote": "node --max-old-space-size=8192 dataTool.js promote",
+    "data:kyb": "node --max-old-space-size=8192 dataTool.js kyb",
     "data:backup": "node --max-old-space-size=8192 dataTool.js backup",
     "data:snapshot": "node --max-old-space-size=8192 dataTool.js snapshot",
     "data:recrawl": "node --max-old-space-size=8192 dataTool.js recrawl",

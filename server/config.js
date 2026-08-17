@@ -136,7 +136,7 @@ export function googleSearchStatus() {
     ready: officialSearchReady(),
     needCse: engine === 'google' && !googleCseReady(),
     setup: engine === 'google' && !googleCseReady()
-      ? '请到 https://programmablesearchengine.google.com/ 建「搜索整个网络」引擎拿 CX，再在 Google Cloud 打开 Custom Search API 建 Key。免费约 100 次/天。不会改走 Serper，也不会抓 google.com 结果页。'
+      ? '无密钥时谷歌结果页会被验证码挡住。背调改走必应/DuckDuckGo 公开结果 + GLEIF/Wikidata。要稳定的谷歌结果请配 GOOGLE_API_KEY 和 GOOGLE_CSE_ID。不会改走 Serper，也不会破解谷歌验证码。'
       : '',
     apiKeySet: Boolean(config.google.apiKey),
     cseIdSet: Boolean(config.google.cseId),

@@ -32,7 +32,7 @@ describe('search engine preference', () => {
     assert.equal(officialSearchReady(), false);
     const status = googleSearchStatus();
     assert.equal(status.needCse, true);
-    assert.match(status.setup, /programmablesearchengine/);
+    assert.match(status.setup, /验证码|必应|DuckDuckGo|GOOGLE_CSE_ID/);
   });
 
   it('google-only is ready when CSE key and CX are set', () => {

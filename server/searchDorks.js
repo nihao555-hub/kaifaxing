@@ -447,9 +447,13 @@ export function emailsFromSnippets(texts, { query = '' } = {}) {
   return found;
 }
 
-function acceptItem(url, company, item, { siteHost, country } = {}) {
+function acceptItem(url, company, item, { siteHost, country, loose } = {}) {
   const n = normalizeUrl(url);
-  if (!n || !isUsefulResearchUrl(n, company)) return '';
+  if (!n) return '';
+  if (loose) {
+    return isUsefulResearchUrl(n, company || 'Company Ltd') ? n : '';
+  }
+  if (!isUsefulResearchUrl(n, company)) return '';
   if (siteHost && sameSiteHost(n, siteHost)) return n;
   if (country && hostFitsCountry(n, country)) {
     const host = hostFromWebsite(n);
@@ -468,7 +472,7 @@ function acceptItem(url, company, item, { siteHost, country } = {}) {
   return n;
 }
 
-export function parseBingRss(xml, company, { siteHost, query, country } = {}) {
+export function parseBingRss(xml, company, { siteHost, query, country, loose } = {}) {
   const items = [];
   const urls = [];
   const seen = new Set();
@@ -479,7 +483,7 @@ export function parseBingRss(xml, company, { siteHost, query, country } = {}) {
     const link = decodeEntities((block.match(/<link>([\s\S]*?)<\/link>/i) || [])[1] || '').trim();
     const desc = decodeEntities((block.match(/<description>([\s\S]*?)<\/description>/i) || [])[1] || '').trim();
     snippetTexts.push(title, desc);
-    const n = acceptItem(link, company, { title, desc }, { siteHost, country });
+    const n = acceptItem(link, company, { title, desc }, { siteHost, country, loose });
     if (!n || seen.has(n)) continue;
     seen.add(n);
     urls.push(n);
@@ -488,7 +492,7 @@ export function parseBingRss(xml, company, { siteHost, query, country } = {}) {
   return { urls, items, snippetEmails: emailsFromSnippets(snippetTexts, { query }) };
 }
 
-export function parseSearchHtml(html, company, { siteHost, query, country } = {}) {
+export function parseSearchHtml(html, company, { siteHost, query, country, loose } = {}) {
   const $ = cheerio.load(html || '');
   const urls = [];
   const items = [];
@@ -497,7 +501,7 @@ export function parseSearchHtml(html, company, { siteHost, query, country } = {}
 
   const push = (raw, meta = {}) => {
     const decoded = decodeBingUrl(raw) || String(raw || '').trim();
-    const n = acceptItem(decoded, company, meta, { siteHost, country });
+    const n = acceptItem(decoded, company, meta, { siteHost, country, loose });
     if (!n || seen.has(n)) return;
     seen.add(n);
     urls.push(n);
@@ -578,7 +582,53 @@ export function searchEngineLabel(engine) {
   if (engine === 'serper') return 'Serper（谷歌结果）';
   if (engine === 'ddg') return 'DuckDuckGo';
   if (engine === 'bing') return '必应';
+  if (engine === 'keyless') return '无密钥公开搜索';
   return '公开搜索';
+}
+
+function organicFromParsed(parsed) {
+  return {
+    organic: (parsed.items || []).map((it) => ({
+      title: it.title || '',
+      link: it.url || '',
+      snippet: it.desc || '',
+    })),
+    items: (parsed.items || []).map((it) => ({
+      title: it.title || '',
+      link: it.url || '',
+      snippet: it.desc || '',
+    })),
+  };
+}
+
+/** 无 CSE/Serper 时用必应 RSS/HTML 和 DuckDuckGo。谷歌结果页会被验证码挡住，不破解。 */
+export async function searchKeylessJson(query) {
+  const rss = await searchBingRss(query);
+  if (rss.status === 200 && rss.html && /<item>/i.test(rss.html)) {
+    const parsed = parseBingRss(rss.html, '', { query, loose: true });
+    if (parsed.urls.length) return { engine: 'bing', json: organicFromParsed(parsed), error: '', status: 200 };
+  }
+  const bing = await searchBing(query);
+  if (bing.status === 200 && bing.html && !isBlockedSearchPage(bing.html)) {
+    const parsed = parseSearchHtml(bing.html, '', { query, loose: true });
+    if (parsed.urls.length) return { engine: 'bing', json: organicFromParsed(parsed), error: '', status: 200 };
+  }
+  const ddg = await searchDuckDuckGo(query);
+  if (ddg.status === 200 && ddg.html && !isBlockedSearchPage(ddg.html)) {
+    const parsed = parseSearchHtml(ddg.html, '', { query, loose: true });
+    if (parsed.urls.length) return { engine: 'ddg', json: organicFromParsed(parsed), error: '', status: 200 };
+  }
+  const google = await searchGoogle(query);
+  if (google.status === 200 && google.html && !isBlockedSearchPage(google.html)) {
+    const parsed = parseSearchHtml(google.html, '', { query, loose: true });
+    if (parsed.urls.length) return { engine: 'google', json: organicFromParsed(parsed), error: '', status: 200 };
+  }
+  return {
+    engine: '',
+    json: null,
+    error: '无密钥公开搜索无结果。谷歌结果页被验证码/JS 挡住；必应和 DuckDuckGo 也没有可用条目。',
+    status: google.status || bing.status || 0,
+  };
 }
 
 export function parseGoogleCse(json, company, { siteHost, query, country } = {}) {
@@ -745,10 +795,17 @@ export async function searchOfficialJson(query) {
       status: serper.status,
     };
   }
-  if (pref === 'google') {
-    return { engine: '', json: null, error: '未配置 GOOGLE_API_KEY / GOOGLE_CSE_ID', status: 0 };
+  const keyless = await searchKeylessJson(query);
+  if (keyless.engine) return keyless;
+  if (pref === 'google' && !googleCseReady()) {
+    return {
+      engine: '',
+      json: null,
+      error: keyless.error || '未配置 GOOGLE_API_KEY / GOOGLE_CSE_ID，谷歌结果页无密钥不可用',
+      status: keyless.status || 0,
+    };
   }
-  return { engine: '', json: null, error: '', status: 0 };
+  return { engine: '', json: null, error: keyless.error || '', status: keyless.status || 0 };
 }
 
 export async function searchOfficialGoogle(query, company, { siteHost, country } = {}) {

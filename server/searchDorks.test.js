@@ -173,6 +173,8 @@ describe('bing / google html parse', () => {
 
   it('parses bing cites and keeps role emails from snippets', () => {
     const { urls, snippetEmails } = parseSearchHtml(BING_FIXTURE, 'Tyne Coast College');
+    const loose = parseSearchHtml(BING_FIXTURE, '', { loose: true });
+    assert.ok(loose.urls.some((u) => /stc\.ac\.uk/i.test(u)));
     assert.ok(urls.includes('https://www.stc.ac.uk/'));
     assert.ok(urls.includes('https://www.stc.ac.uk/contact-us'));
     assert.ok(!urls.some((u) => /wikipedia\.org\/wiki\/River_Tyne/i.test(u)));
@@ -331,15 +333,15 @@ describe('google official json', () => {
     config.google.cseId = prev.cseId;
   });
 
-  it('google-only search refuses to call Serper when CSE is missing', async () => {
+  it('google-only search does not call Serper when CSE is missing', async () => {
     const prev = { ...config.google };
     config.google.engine = 'google';
     config.google.apiKey = '';
     config.google.cseId = '';
     config.google.serperKey = 'dummy-serper';
     const raw = await searchOfficialJson('"NMG TECHNICAL SERVICE" Dubai');
-    assert.equal(raw.engine, '');
-    assert.match(raw.error, /GOOGLE_API_KEY|GOOGLE_CSE_ID/);
+    assert.notEqual(raw.engine, 'serper');
+    if (!raw.engine) assert.match(String(raw.error || ''), /无密钥|验证码|GOOGLE_API_KEY|GOOGLE_CSE_ID/);
     Object.assign(config.google, prev);
   });
 });

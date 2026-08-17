@@ -38,6 +38,56 @@ async function main() {
     return;
   }
 
+  if (command === 'kyb') {
+    const { db, saveNow, isRfqLead } = await import('./store.js');
+    const { applyTextCompanyHints, kybPlanStats, researchPriority } = await import('./pipeline.js');
+    const { researchLead, isPersonLikeLead } = await import('./research.js');
+    applyTextCompanyHints();
+    const limitFlag = args.find((a) => /^\d+$/.test(a));
+    const limit = Math.min(Math.max(Number(limitFlag || process.env.KYB_LIMIT || 80), 1), 2000);
+    const wantCrosspost = flags.has('--crosspost');
+    const pending = db.customers.filter((c) => {
+      if (!isRfqLead(c)) return false;
+      if (c.research?.status === 'done' || c.research?.status === 'running') return false;
+      if (/World Bank/i.test(c.source || '')) return false;
+      if (c.researchPath === 'auto') return true;
+      if (c.researchPath === 'clues') return true;
+      if (wantCrosspost && c.researchPath === 'crosspost') return true;
+      if (!c.researchPath && !isPersonLikeLead(c)) return true;
+      return false;
+    });
+    pending.sort((a, b) => researchPriority(a) - researchPriority(b));
+    const batch = pending.slice(0, limit);
+    const summary = { tried: 0, ok: 0, failed: 0, gradeA: 0, gradeB: 0, gradeC: 0, emails: 0, websites: 0 };
+    const started = Date.now();
+    for (const c of batch) {
+      summary.tried += 1;
+      try {
+        const report = await researchLead(c, { useAi: false });
+        c.research = report;
+        if (report.website && !c.website) c.website = report.website;
+        summary.ok += 1;
+        if (report.kyb?.grade === 'A') summary.gradeA += 1;
+        else if (report.kyb?.grade === 'B') summary.gradeB += 1;
+        else summary.gradeC += 1;
+        if (report.emails?.length) summary.emails += 1;
+        if (report.website) summary.websites += 1;
+        console.log(`[kyb] ${summary.tried}/${batch.length} ${report.kyb?.grade || '?'} ${c.company} emails=${report.emails?.length || 0} site=${report.website || '-'}`);
+      } catch (err) {
+        summary.failed += 1;
+        c.research = { status: 'failed', error: String(err.message || err), updatedAt: new Date().toISOString() };
+        console.log(`[kyb] ${summary.tried}/${batch.length} FAIL ${c.company}: ${err.message || err}`);
+      }
+      if (summary.tried % 5 === 0) saveNow();
+    }
+    saveNow();
+    summary.ms = Date.now() - started;
+    summary.pendingLeft = pending.length - batch.length;
+    summary.plan = kybPlanStats({ force: true });
+    console.log(`[data] kyb: ${JSON.stringify(summary)}`);
+    return;
+  }
+
   if (command === 'backup') {
     if (!fs.existsSync(DB_PATH)) throw new Error(`database not found: ${DB_PATH}`);
     const result = await uploadRemoteBackup();
