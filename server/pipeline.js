@@ -29,6 +29,7 @@ export function researchPriority(customer = {}) {
 let tickTimer = null;
 const researchingIds = new Set();
 let researchLoop = false;
+let refillLock = false;
 let saveLock = Promise.resolve();
 
 function saveExclusive() {
@@ -710,26 +711,32 @@ function refillContactWave() {
   const p = ensurePipeline();
   if (p.playbook?.line !== 'contact' || p.playbook?.status !== 'running' || !p.playbook.armed) return null;
   if (p.queue.length) return p.queue.shift();
-  if (p.playbook.wave === 'site') {
-    const added = enqueueContactLine({ wave: 'email' });
-    p.playbook.wave = 'email';
-    p.playbook.queuedEmail = added;
-    p.playbook.queued = (p.playbook.queued || 0) + added;
-    p.playbook.lastRunAt = new Date().toISOString();
-    saveNow({ remote: false });
-    if (added) return p.queue.shift();
+  if (refillLock) return null;
+  refillLock = true;
+  try {
+    if (p.playbook.wave === 'site') {
+      const added = enqueueContactLine({ wave: 'email' });
+      p.playbook.wave = 'email';
+      p.playbook.queuedEmail = added;
+      p.playbook.queued = (p.playbook.queued || 0) + added;
+      p.playbook.lastRunAt = new Date().toISOString();
+      saveNow({ remote: false });
+      if (added) return p.queue.shift();
+    }
+    if (p.playbook.wave === 'email' && p.playbook.includeCrosspost !== false) {
+      const added = enqueueContactLine({ wave: 'crosspost' });
+      p.playbook.wave = 'crosspost';
+      p.playbook.queuedCrosspost = added;
+      p.playbook.queued = (p.playbook.queued || 0) + added;
+      p.playbook.lastRunAt = new Date().toISOString();
+      saveNow({ remote: false });
+      if (added) return p.queue.shift();
+    }
+    finishContactLine(p);
+    return null;
+  } finally {
+    refillLock = false;
   }
-  if (p.playbook.wave === 'email' && p.playbook.includeCrosspost !== false) {
-    const added = enqueueContactLine({ wave: 'crosspost' });
-    p.playbook.wave = 'crosspost';
-    p.playbook.queuedCrosspost = added;
-    p.playbook.queued = (p.playbook.queued || 0) + added;
-    p.playbook.lastRunAt = new Date().toISOString();
-    saveNow({ remote: false });
-    if (added) return p.queue.shift();
-  }
-  finishContactLine(p);
-  return null;
 }
 
 async function pumpOne() {
@@ -759,6 +766,24 @@ async function pumpResearch() {
   } finally {
     researchLoop = false;
   }
+}
+
+/** Keep pumping until the contact line finishes all waves. */
+export async function drainContactLine({ logEvery = 20 } = {}) {
+  const p = ensurePipeline();
+  let lastLog = 0;
+  while (p.playbook?.line === 'contact' && p.playbook?.status === 'running') {
+    if (!researchLoop) await pumpResearch();
+    else await new Promise((r) => setTimeout(r, 250));
+    if (!p.queue.length && !researchLoop && p.playbook.armed) refillContactWave();
+    const researched = p.researchDate === beijingDate() ? (p.researchedToday || 0) : 0;
+    if (researched - lastLog >= logEvery || p.playbook.status === 'done') {
+      console.log(`[line] wave=${p.playbook.wave} queue=${p.queue.length} researched=${researched} totalQueued=${p.playbook.queued || 0}`);
+      lastLog = researched;
+    }
+    if (p.playbook.status === 'done' && !p.queue.length && !researchLoop) break;
+  }
+  return getPipelineState();
 }
 
 export async function runDailySync({ reason = 'scheduled' } = {}) {

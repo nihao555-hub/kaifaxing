@@ -54,7 +54,12 @@ export function ingestInbound(customer, { subject, body, from }) {
   return true;
 }
 
+export function imapConfigured() {
+  return Boolean(config.imap.user && config.imap.pass);
+}
+
 export async function pollInbox() {
+  if (!imapConfigured()) return;
   const client = new ImapFlow({
     host: config.imap.host,
     port: config.imap.port,
@@ -62,6 +67,7 @@ export async function pollInbox() {
     auth: { user: config.imap.user, pass: config.imap.pass },
     logger: false,
   });
+  client.on('error', () => {});
 
   await client.connect();
   try {
@@ -78,7 +84,11 @@ export async function pollInbox() {
     lastPollAt = new Date().toISOString();
     lastError = null;
   } finally {
-    await client.logout().catch(() => {});
+    try {
+      if (client.usable) await client.logout();
+    } catch {
+      /* connection may already be closed */
+    }
   }
 }
 
@@ -87,6 +97,7 @@ export function inboxStatus() {
 }
 
 export async function safePollInbox() {
+  if (!imapConfigured()) return;
   try {
     await pollInbox();
   } catch (err) {

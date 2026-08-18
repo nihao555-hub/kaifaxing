@@ -39,9 +39,15 @@ async function main() {
   }
 
   if (command === 'playbook' || command === 'line') {
-    const { startContactLine, getPipelineState } = await import('./pipeline.js');
+    const { startContactLine, drainContactLine, getPipelineState, contactLineStats } = await import('./pipeline.js');
     const result = startContactLine({ wait: true, includeCrosspost: !flags.has('--no-crosspost') });
-    console.log(`[data] line: ${JSON.stringify({ ...result, pipeline: getPipelineState() })}`);
+    console.log(`[data] line: ${JSON.stringify({ ...result, contactLine: contactLineStats({ force: true }) })}`);
+    if (flags.has('--pump') || command === 'line') {
+      const pipeline = await drainContactLine();
+      console.log(`[data] line done: ${JSON.stringify({ pipeline, contactLine: contactLineStats({ force: true }) })}`);
+    } else {
+      console.log(`[data] line queued: ${JSON.stringify({ pipeline: getPipelineState() })}`);
+    }
     return;
   }
 
