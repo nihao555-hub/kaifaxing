@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import { config, googleCseReady, serperReady, preferredSearchEngine, officialSearchReady } from './config.js';
+import { fetchWithRetry } from './httpFetch.js';
 import { isDirectoryHost, yellowPagesDorks } from './yellowPages.js';
 
 const UA =
@@ -549,16 +550,20 @@ export function parseSearchHtml(html, company, { siteHost, query, country, loose
 }
 
 async function fetchSearch(url, accept = 'text/html,application/xhtml+xml,application/rss+xml') {
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': UA,
-      Accept: accept,
-      'Accept-Language': 'en-US,en;q=0.9',
-    },
-    signal: AbortSignal.timeout(15000),
-  });
-  const html = res.ok ? await res.text() : '';
-  return { html, status: res.status };
+  try {
+    const res = await fetchWithRetry(url, {
+      headers: {
+        'User-Agent': UA,
+        Accept: accept,
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+      signal: AbortSignal.timeout(15000),
+    }, { retries: 3, backoffMs: 800 });
+    const html = res.ok ? await res.text() : '';
+    return { html, status: res.status };
+  } catch (err) {
+    return { html: '', status: 0, error: String(err.message || err) };
+  }
 }
 
 export async function searchBing(query) {

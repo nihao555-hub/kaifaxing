@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { seedCustomers, seedThreads, seedAiPanel } from './data/seed.js';
 import { isPersonLikeLead } from './research.js';
 import { config, googleSearchStatus, normalizeSearchEngine } from './config.js';
@@ -129,9 +130,47 @@ export function purgeDemoCustomers() {
 }
 
 let saveTimer = null;
-let saving = false;
-let saveAgain = false;
+let saveChain = Promise.resolve();
+let saveRemote = true;
 const dirtyCustomerIds = new Set();
+
+export function setSaveRemote(enabled) {
+  saveRemote = Boolean(enabled);
+}
+
+function performSave({ remote = true } = {}) {
+  const dir = path.dirname(DB_PATH);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = path.join(dir, `.db-${process.pid}-${Date.now()}.tmp`);
+  fs.writeFileSync(tmp, JSON.stringify(db));
+  fs.renameSync(tmp, DB_PATH);
+  if (remote && saveRemote) scheduleRemoteBackup(DB_PATH);
+  flushCloudFromDirty();
+}
+
+function enqueueSave({ remote = true } = {}) {
+  const wantRemote = Boolean(remote && saveRemote);
+  saveChain = saveChain
+    .then(() => performSave({ remote: wantRemote }))
+    .catch((err) => {
+      console.error('[store] save failed:', err);
+    });
+  return saveChain;
+}
+
+export function save() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    enqueueSave({ remote: saveRemote });
+  }, 200);
+}
+
+export function saveNow({ remote = true } = {}) {
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  return enqueueSave({ remote });
+}
 
 export function markCustomersDirty(rows = []) {
   for (const row of rows) {
@@ -156,47 +195,6 @@ function flushCloudFromDirty() {
     agent: db.agent,
     customers: { length: db.customers.length },
   });
-}
-
-function flushSave({ remote = true } = {}) {
-  if (saving) {
-    saveAgain = true;
-    return;
-  }
-  saving = true;
-  try {
-    const tmp = `${DB_PATH}.tmp`;
-    // Compact JSON: pretty-printing 160k+ leads overflows V8 string length.
-    fs.writeFileSync(tmp, JSON.stringify(db));
-    fs.renameSync(tmp, DB_PATH);
-    if (remote) scheduleRemoteBackup(DB_PATH);
-    flushCloudFromDirty();
-  } catch (err) {
-    console.error('[store] save failed:', err);
-  } finally {
-    saving = false;
-    if (saveAgain) {
-      saveAgain = false;
-      saveTimer = setTimeout(flushSave, 50);
-    }
-  }
-}
-
-let saveRemote = true;
-
-export function setSaveRemote(enabled) {
-  saveRemote = Boolean(enabled);
-}
-
-export function save() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => flushSave({ remote: saveRemote }), 200);
-}
-
-export function saveNow({ remote = true } = {}) {
-  clearTimeout(saveTimer);
-  saveTimer = null;
-  flushSave({ remote });
 }
 
 purgeDemoCustomers();

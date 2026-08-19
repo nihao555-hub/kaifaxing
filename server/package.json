@@ -19,7 +19,7 @@
     "data:recrawl": "node --max-old-space-size=8192 dataTool.js recrawl",
     "data:push": "node --max-old-space-size=8192 dataTool.js push",
     "data:pull": "node --max-old-space-size=8192 dataTool.js pull",
-    "test": "node --test research.test.js pipeline.test.js rfq-ingest.test.js publicRfq.test.js b2bPublic.test.js store.test.js openSources.test.js githubTools.test.js searchDorks.test.js kyb.test.js rfqHints.test.js researchPath.test.js paidSources.test.js context.test.js config.test.js dataPersistence.test.js cloudDb.test.js alibabaIntel.test.js peopleProbe.test.js smtpVerify.test.js inferEmail.test.js guessSample.test.js playbook.test.js yellowPages.test.js contactLine.test.js"
+    "test": "node --test research.test.js pipeline.test.js rfq-ingest.test.js publicRfq.test.js b2bPublic.test.js store.test.js openSources.test.js githubTools.test.js searchDorks.test.js kyb.test.js rfqHints.test.js researchPath.test.js paidSources.test.js context.test.js config.test.js dataPersistence.test.js cloudDb.test.js alibabaIntel.test.js peopleProbe.test.js smtpVerify.test.js inferEmail.test.js guessSample.test.js playbook.test.js yellowPages.test.js contactLine.test.js httpFetch.test.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1111.0",

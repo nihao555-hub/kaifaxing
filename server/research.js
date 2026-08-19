@@ -53,6 +53,7 @@ import { findTradeTraces } from './tradeTraces.js';
 import { companyFromBuyerName } from './rfqHints.js';
 import { probePeopleCompany } from './peopleProbe.js';
 import { inferAndVerifyEmails } from './inferEmail.js';
+import { fetchTextRetry } from './httpFetch.js';
 import { isDirectoryHost, parseDirectoryListing, lookupYellowPages } from './yellowPages.js';
 
 const UA = 'OutreachAI/1.0 (public due-diligence; +https://github.com/nihao555-hub/kaifaxing)';
@@ -481,21 +482,17 @@ function pageMentionsCompany(html, company, { country = '', pageUrl = '' } = {})
 }
 
 async function fetchText(url, { timeout = 12000, accept = '*/*' } = {}) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeout);
-  try {
-    const res = await fetch(url, {
-      headers: { 'User-Agent': UA, Accept: accept },
-      signal: ctrl.signal,
-      redirect: 'follow',
-    });
-    const text = await res.text();
-    return { ok: res.ok, status: res.status, url: res.url, text };
-  } catch (err) {
-    return { ok: false, status: 0, url, text: '', error: String(err.message || err) };
-  } finally {
-    clearTimeout(timer);
+  const r = await fetchTextRetry(url, { timeout, accept, retries: 3, headers: { 'User-Agent': UA } });
+  if (r.error && !r.text) {
+    return { ok: false, status: r.status || 0, url, text: '', error: r.error };
   }
+  return {
+    ok: r.ok,
+    status: r.status,
+    url: r.url || url,
+    text: r.text,
+    error: r.error || '',
+  };
 }
 
 async function fetchJson(url, accept = 'application/json') {
@@ -1160,6 +1157,67 @@ async function enrichLeadEmails(customer, { inferEmail = true } = {}) {
   };
 }
 
+async function runCrosspostOnly(customer, { clues, path } = {}) {
+  const company = String(customer.company || customer.name || '').trim();
+  const notes = [`背调路径：${path.label}。型号交叉检索，不搜买家昵称。`];
+  let crosspost = null;
+  if (clues.fingerprints.length) {
+    crosspost = await suggestCrosspostCompany(clues, customer.country, customer);
+    if (crosspost.company) {
+      try {
+        applyLeadIdentity(customer, { company: crosspost.company });
+        customer.identitySource = customer.identitySource || 'rfq_crosspost';
+        customer.researchPath = 'auto';
+        notes.push(`同款询盘交叉检索命中 ${crosspost.company}，已写入法定名，下一轮走官网/电话。`);
+        return {
+          status: 'done',
+          contactStage: 'site',
+          updatedAt: new Date().toISOString(),
+          confidence: 'none',
+          legalName: crosspost.company,
+          website: customer.website || '',
+          emails: [],
+          phones: [],
+          facts: [{ label: '交叉检索主体', value: crosspost.company, source: crosspost.engine || '搜索' }],
+          sources: (crosspost.items || []).slice(0, 4).map((it) => ({ title: it.title || '交叉检索', url: it.url })),
+          steps: [
+            { key: 'search', label: '型号交叉', ok: true, detail: `命中 ${crosspost.company}` },
+            { key: 'entity', label: '主体核验', ok: true, detail: crosspost.company },
+          ],
+          brief: `型号交叉检索抽到 ${crosspost.company}，待核官网和电话。`,
+          notes,
+          path,
+          clues,
+          crosspost,
+          kyb: { grade: 'C', nextAction: '交叉检索已抽到主体，待核官网和角色箱。', sanctions: [], screened: false },
+          grade: 'C',
+          nextAction: '交叉检索已抽到主体，待核官网和角色箱。',
+        };
+      } catch {
+        notes.push('交叉检索抽到的名字仍不像法定名，未自动写入。');
+      }
+    } else {
+      notes.push(crosspost.error || '型号交叉检索没有找到写出公司名的公开询盘。');
+    }
+  } else {
+    notes.push('正文里没有可交叉检索的型号指纹。');
+  }
+  const report = compactSkippedReport(customer, 'crosspost');
+  return {
+    ...report,
+    status: 'done',
+    contactStage: 'crosspost',
+    updatedAt: new Date().toISOString(),
+    notes,
+    path,
+    clues,
+    crosspost,
+    steps: [
+      { key: 'search', label: '型号交叉', ok: Boolean(crosspost?.company), detail: crosspost?.company || '未命中' },
+    ],
+  };
+}
+
 export async function researchLead(customer, {
   useAi = true,
   peopleProbe = false,
@@ -1173,6 +1231,10 @@ export async function researchLead(customer, {
   let personLike = isPersonLikeLead(customer);
   const path = classifyResearchPath(customer, { personLike, clues });
   customer.researchPath = path.key;
+
+  if (stage === 'crosspost') {
+    return runCrosspostOnly(customer, { clues, path });
+  }
 
   if (OFFICIAL_ENTITY_SOURCE_RE.test(customer.source || '')) {
     const cleaned = cleanOfficialBuyerName(customer.company || customer.name);

@@ -11,6 +11,7 @@ import { isForwarderName, isOutreachEmail } from './kyb.js';
 import { summarizeAlibabaPlan, propagateAlibabaIdentity } from './alibabaIntel.js';
 import { PLAYBOOK_STEPS, bestNext } from './playbook.js';
 import { contactGap, summarizeContactLine } from './contactLine.js';
+import { isRetryableFetchError } from './httpFetch.js';
 
 export function researchPriority(customer = {}) {
   const src = String(customer.source || '');
@@ -35,6 +36,13 @@ let saveLock = Promise.resolve();
 function saveExclusive() {
   saveLock = saveLock.then(() => saveNow({ remote: false }), () => saveNow({ remote: false }));
   return saveLock;
+}
+
+function notePipelineError(p, err) {
+  const msg = String(err?.message || err || '');
+  if (!msg || err?.status === 409) return;
+  if (isRetryableFetchError(msg)) return;
+  p.lastError = msg;
 }
 
 export function beijingDate(now = new Date()) {
@@ -651,7 +659,7 @@ export async function runLeadResearch(customer, { useAi = true, autoApply = fals
   try {
     const personLike = isPersonLikeLead(customer);
     const gap = contactGap({ ...customer, research: { ...(customer.research || {}), status: customer.research?.status } });
-    const resolvedStage = peopleProbe ? 'full' : (stage || (gap === 'email' ? 'email' : 'site'));
+    const resolvedStage = peopleProbe ? 'full' : (stage || (gap === 'email' ? 'email' : gap === 'crosspost' ? 'crosspost' : 'site'));
     const wantSmtp = inferEmail ?? (resolvedStage === 'email' || resolvedStage === 'full' || peopleProbe);
     const report = await researchLead(customer, {
       useAi: useAi && !personLike,
@@ -662,6 +670,10 @@ export async function runLeadResearch(customer, { useAi = true, autoApply = fals
     customer.research = report;
     if (report.website && !customer.website) customer.website = report.website;
     if (report.legalName && report.legalName !== customer.company) customer.legalName = report.legalName;
+
+    if (resolvedStage === 'crosspost' && contactGap(customer) === 'site') {
+      enqueueResearch([customer], { reopen: true });
+    }
 
     let applied = null;
     if (autoApply && !customer.email && !isForwarderName(customer.company || customer.name)) {
@@ -748,10 +760,9 @@ async function pumpOne() {
     if (!customer || /World Bank/i.test(customer.source || '')) continue;
     try {
       await runLeadResearch(customer, { useAi: false, autoApply: true });
+      if (p.lastError && isRetryableFetchError(p.lastError)) p.lastError = '';
     } catch (err) {
-      if (err.status !== 409) {
-        p.lastError = String(err.message || err);
-      }
+      notePipelineError(p, err);
     }
     await new Promise((r) => setTimeout(r, config.pipeline.researchDelayMs));
   }
