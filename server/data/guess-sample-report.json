@@ -1,0 +1,125 @@
+{
+  "tool": {
+    "name": "check-if-email-exists",
+    "repo": "https://github.com/reacherhq/check-if-email-exists",
+    "stars": "9k+",
+    "also": "https://github.com/AfterShip/email-verifier"
+  },
+  "note": "高星项目是核验器，不是 Hunter。1 万条里多数没有公司域名，猜 Gmail 没有可核主体。",
+  "counts": {
+    "sample": 10000,
+    "gluedCompany": 64,
+    "textHint": 53,
+    "hasDomain": 3,
+    "hasWebsite": 3,
+    "existingRoleEmail": 0,
+    "personalExisting": 0,
+    "distinctivePerson": 6151,
+    "personOnly": 9882,
+    "alibaba": 9978,
+    "government": 22,
+    "alibabaPersonOnly": 9871,
+    "alibabaHasDomain": 0,
+    "fingerprints": 888,
+    "haveAnnexes": 2768,
+    "hasImage": 2649,
+    "candidates": 18,
+    "mxYes": 3,
+    "mxNo": 0,
+    "smtpTried": 3,
+    "smtpAccepted": 0,
+    "smtpCatchAll": 0,
+    "smtpBlocked": 3,
+    "reachableSafe": 0,
+    "reachableRisky": 0,
+    "reachableInvalid": 0,
+    "reachableUnknown": 3,
+    "uniqueDomains": 3
+  },
+  "examples": {
+    "glued": [
+      {
+        "name": "daniel johnson",
+        "company": "Eco Solutions Ltd",
+        "country": "Netherlands Antilles"
+      },
+      {
+        "name": "Titanor Group. We",
+        "company": "Titanor Group",
+        "country": "Finland"
+      },
+      {
+        "name": "Marcin Gojski",
+        "company": "Green Innovations LLC",
+        "country": "Austria"
+      },
+      {
+        "name": "ElectroSistemasAvanzados SRL",
+        "company": "Electro Sistemas Avanzados SRL",
+        "country": "Dominican Republic"
+      },
+      {
+        "name": "Joyas CabJim",
+        "company": "Tech Innovators Inc",
+        "country": "Ecuador"
+      },
+      {
+        "name": "PT ALLWARES SOLUTIONS",
+        "company": "PT ALLWARES SOLUTIONS",
+        "country": "Indonesia"
+      },
+      {
+        "name": "Bellachy LTD.",
+        "company": "Bellachy LTD",
+        "country": "Israel"
+      },
+      {
+        "name": "Carine Fourie",
+        "company": "Auxel SA",
+        "country": "South Africa"
+      }
+    ],
+    "domain": [
+      {
+        "company": "Moravskoslezský kraj",
+        "domain": "msk.cz",
+        "hasMx": true,
+        "mx": "msk-cz.mail.protection.outlook.com"
+      },
+      {
+        "company": "Hamzova odborná léčebna pro děti a dospělé",
+        "domain": "hamzova-lecebna.cz",
+        "hasMx": true,
+        "mx": "app.hamzova-lecebna.cz"
+      },
+      {
+        "company": "Český hydrometeorologický ústav",
+        "domain": "chmi.cz",
+        "hasMx": true,
+        "mx": "frailea.chmi.cz"
+      }
+    ],
+    "mx": [
+      {
+        "company": "Moravskoslezský kraj",
+        "domain": "msk.cz",
+        "hasMx": true,
+        "mx": "msk-cz.mail.protection.outlook.com"
+      },
+      {
+        "company": "Hamzova odborná léčebna pro děti a dospělé",
+        "domain": "hamzova-lecebna.cz",
+        "hasMx": true,
+        "mx": "app.hamzova-lecebna.cz"
+      },
+      {
+        "company": "Český hydrometeorologický ústav",
+        "domain": "chmi.cz",
+        "hasMx": true,
+        "mx": "frailea.chmi.cz"
+      }
+    ]
+  },
+  "ms": 24453,
+  "pool": 137909
+}

@@ -1,0 +1,76 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-primary: #2f6cff;
+  --color-primary-light: #eaf1ff;
+  --color-sidebar: #1b2a4e;
+  --color-page: #f6f8fb;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 细滚动条 */
+.thin-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: #d3dbe8;
+  border-radius: 999px;
+}
+.thin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.fade-in-up {
+  animation: fadeInUp 0.25s ease both;
+}
+
+@keyframes pulseRing {
+  0% { box-shadow: 0 0 0 0 rgb(47 108 255 / 0.35); }
+  70% { box-shadow: 0 0 0 8px rgb(47 108 255 / 0); }
+  100% { box-shadow: 0 0 0 0 rgb(47 108 255 / 0); }
+}
+.pulse-ring {
+  animation: pulseRing 1.6s ease-out infinite;
+}
+
+.country-flag {
+  display: inline-flex;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgb(15 23 42 / 0.08);
+  background: #eef2f7;
+}
+.country-flag .fi {
+  width: 100%;
+  height: 100%;
+}
+
+.leads-search:focus-within {
+  border-color: #2f6cff;
+  box-shadow: 0 0 0 3px rgb(47 108 255 / 0.12);
+}
