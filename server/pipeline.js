@@ -989,6 +989,7 @@ export async function promoteLeads(ids = [], { researchLimit = 6 } = {}) {
 
 export function startLeadPipeline() {
   const p = ensurePipeline();
+  if (p.lastError && isRetryableFetchError(p.lastError)) p.lastError = '';
   startContactLine({ wait: false, includeCrosspost: true });
   pruneResearchQueue();
   if (tickTimer) clearInterval(tickTimer);
